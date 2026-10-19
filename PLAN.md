@@ -164,6 +164,9 @@ Added at Ryan's "load up this ide with tools": 🧰 Tools panel (AI quick action
 ## Phase 6 - Roadmap round - SHIPPED Oct 19, 2026 (phone v1.5.0 + desktop)
 Split view (2.5 completed), Quick Open (Ctrl+K), Outline, Go to line, chat Stop + Clear, settings for wrap / text size / short-answers (battery) / autocomplete pause, status bar doc stats, 200 KB big-file warning, file menu Copy path / Download / Open in split. Frontend-only round: no new endpoints.
 
+## Phase 7 - Editor + app round - SHIPPED Oct 19, 2026 (phone v1.6.0 + desktop)
+Editor: find-in-file, fold/unfold all, text transforms (sort/dedupe/trim/case), quick-open recents, git log panel, workspace zip download, chat Regenerate + Export-as-file. App: native Share file via a containment-checked read-only ContentProvider. Desktop endpoints (git log, export-zip) live-tested.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

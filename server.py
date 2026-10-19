@@ -272,6 +272,53 @@ class Handler(SimpleHTTPRequestHandler):
                 if rc != 0:
                     raise ValueError(err.strip()[:300] or "git diff failed")
                 return self.send_json({"path": rel, "diff": out})
+            if parsed.path == "/api/git/log":
+                rc, out, err, _ = git_out(["log", "--oneline", "-20"])
+                if rc != 0:
+                    return self.send_json({"commits": []})
+                commits = []
+                for line in out.splitlines():
+                    if not line.strip():
+                        continue
+                    parts = line.split(" ", 1)
+                    commits.append({
+                        "hash": parts[0],
+                        "subject": parts[1] if len(parts) > 1 else ""})
+                return self.send_json({"commits": commits})
+            if parsed.path == "/api/export-zip":
+                # Download the whole workspace as one zip (backup /
+                # move a project). Dot paths skipped, 50 MB cap.
+                import io
+                import zipfile
+                buf = io.BytesIO()
+                total = 0
+                with zipfile.ZipFile(buf, "w",
+                                     zipfile.ZIP_DEFLATED) as z:
+                    for p in sorted(WORKSPACE.rglob("*")):
+                        rel = p.relative_to(WORKSPACE)
+                        if any(part.startswith(".")
+                               for part in rel.parts):
+                            continue
+                        if not p.is_file():
+                            continue
+                        try:
+                            sz = p.stat().st_size
+                        except Exception:
+                            continue
+                        if total + sz > 50 * 1024 * 1024:
+                            continue
+                        z.write(p, str(rel))
+                        total += sz
+                body = buf.getvalue()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header(
+                    "Content-Disposition",
+                    'attachment; filename="ghostide-workspace.zip"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if parsed.path == "/api/todos":
                 # TODO/FIXME scanner (Tools pack): markers across the
                 # workspace, clickable in the UI to jump to the line.
