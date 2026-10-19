@@ -200,6 +200,9 @@ Debugger: gutter breakpoints, pdb bridge sessions, variables pane. Next: G8 self
 ## Phase 18 - Roadmap G8 - SHIPPED Oct 19, 2026 (phone v1.18.0 + desktop)
 Self-fixing test loop: agent repairs against the suite, 3 rounds, revert-on-worse. Arc B complete. Next: G9 on-device run.
 
+## Phase 19 - Roadmap G9 - BUILT Oct 19, 2026 (phone v1.19.0), device proof pending
+On-device Python run + real Python check. Next: G10 terminal.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
