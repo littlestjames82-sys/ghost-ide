@@ -162,6 +162,61 @@ def iter_text_files():
         yield rel, p
 
 
+def snapshot_history(p, new_content):
+    """Local History (Phase 11): before a save overwrites a file,
+    stash the previous on-disk content under
+    .ghostide-history/<rel>/<name>.<timestamp>.snap - a dot folder
+    every lister/searcher in this project already skips. Keeps the
+    newest 20 snapshots per file. Best-effort: history must never
+    break a save."""
+    try:
+        if not p.is_file():
+            return
+        old = p.read_text(errors="strict")
+        if old == new_content:
+            return
+        rel = p.relative_to(WORKSPACE)
+        hdir = WORKSPACE / ".ghostide-history" / rel.parent
+        hdir.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        snap = hdir / (rel.name + "." + ts + ".snap")
+        n = 1
+        while snap.exists():
+            snap = hdir / (rel.name + "." + ts + "-" + str(n)
+                           + ".snap")
+            n += 1
+        snap.write_text(old)
+        snaps = sorted(hdir.glob(rel.name + ".*.snap"))
+        for extra in snaps[:-20]:
+            extra.unlink()
+    except Exception:
+        pass
+
+
+def check_output_info(output):
+    """Parse a checker transcript into (line, message): the line
+    is the LAST 'line N' in the text (tracebacks list interpreter
+    internals first); the message is the last Error line."""
+    import re as _re
+    line_no = None
+    hits = _re.findall(r"line (\d+)", output)
+    if hits:
+        line_no = int(hits[-1])
+    else:
+        m = _re.search(r":(\d+)\s*\n", output)
+        if m:
+            line_no = int(m.group(1))
+    message = ""
+    lines = [ln for ln in output.splitlines() if ln.strip()]
+    for ln in reversed(lines):
+        if "Error" in ln:
+            message = ln.strip()
+            break
+    if not message and lines:
+        message = lines[-1].strip()
+    return line_no, message
+
+
 def git_out(args, timeout=30):
     if not shutil.which("git"):
         raise ValueError("git is not installed")
@@ -235,6 +290,95 @@ class Handler(SimpleHTTPRequestHandler):
                         "path": str(p.relative_to(WORKSPACE)),
                         "type": "dir" if p.is_dir() else "file"})
                 return self.send_json({"files": out})
+            if parsed.path == "/api/history":
+                # Local History (Phase 11): snapshots of one file.
+                import re as _re
+                qs = urllib.parse.parse_qs(parsed.query)
+                rel = qs["path"][0]
+                safe_path(rel)
+                rp = Path(rel)
+                hdir = (WORKSPACE / ".ghostide-history" / rp.parent)
+                entries = []
+                if hdir.is_dir():
+                    for s in sorted(hdir.glob(rp.name + ".*.snap"),
+                                    reverse=True):
+                        entries.append({
+                            "ts": s.name[len(rp.name) + 1:-5],
+                            "size": s.stat().st_size})
+                return self.send_json({"entries": entries})
+            if parsed.path == "/api/history/file":
+                import re as _re
+                qs = urllib.parse.parse_qs(parsed.query)
+                rel = qs["path"][0]
+                ts = qs["ts"][0]
+                safe_path(rel)
+                if not _re.fullmatch(r"[\d-]+", ts):
+                    raise ValueError("bad snapshot id")
+                rp = Path(rel)
+                snap = (WORKSPACE / ".ghostide-history" / rp.parent
+                        / (rp.name + "." + ts + ".snap"))
+                if not snap.is_file():
+                    raise ValueError("snapshot not found")
+                return self.send_json({
+                    "content": snap.read_text(errors="replace")})
+            if parsed.path == "/api/git/blame":
+                # GitLens-style: who last touched this line.
+                qs = urllib.parse.parse_qs(parsed.query)
+                rel = qs["path"][0]
+                try:
+                    line_no = int(qs.get("line", ["1"])[0])
+                except Exception:
+                    line_no = 1
+                rc, out, err, _ = git_out(
+                    ["blame", "--porcelain", "-L",
+                     str(line_no) + "," + str(line_no), "--", rel])
+                if rc != 0:
+                    return self.send_json({"ok": False})
+                author = ""
+                when = 0
+                summary = ""
+                for ln in out.splitlines():
+                    if ln.startswith("author "):
+                        author = ln[7:]
+                    elif ln.startswith("author-time "):
+                        when = int(ln[12:] or 0)
+                    elif ln.startswith("summary "):
+                        summary = ln[8:]
+                return self.send_json({
+                    "ok": True, "author": author, "time": when,
+                    "summary": summary})
+            if parsed.path == "/api/check-all":
+                # Project-wide Problems (desktop checkers).
+                results = []
+                checked = 0
+                for rel, p in iter_text_files():
+                    ext = p.suffix.lower()
+                    if ext == ".py":
+                        argv = [sys.executable, "-c",
+                                "import ast,sys; "
+                                "ast.parse(open(sys.argv[1], "
+                                "encoding='utf-8').read())", str(p)]
+                    elif ext in (".js", ".mjs"):
+                        argv = ["node", "--check", str(p)]
+                    elif ext == ".json":
+                        argv = [sys.executable, "-c",
+                                "import json,sys; "
+                                "json.load(open(sys.argv[1]))", str(p)]
+                    else:
+                        continue
+                    checked += 1
+                    if checked > 100:
+                        break
+                    rc, out, err, ms = run_cmd(
+                        argv, cwd=str(WORKSPACE))
+                    if rc != 0:
+                        output = (out + err).strip()
+                        ln, msg = check_output_info(output)
+                        results.append({
+                            "path": str(rel), "line": ln,
+                            "message": msg})
+                return self.send_json({
+                    "problems": results, "checked": checked})
             if parsed.path == "/api/file":
                 rel = urllib.parse.parse_qs(parsed.query)["path"][0]
                 p = safe_path(rel)
@@ -429,6 +573,7 @@ class Handler(SimpleHTTPRequestHandler):
                 data = self.read_json()
                 p = safe_path(data["path"])
                 p.parent.mkdir(parents=True, exist_ok=True)
+                snapshot_history(p, data.get("content", ""))
                 p.write_text(data.get("content", ""))
                 return self.send_json({"ok": True, "path": data["path"]})
             if parsed.path == "/api/dir":
@@ -498,6 +643,17 @@ class Handler(SimpleHTTPRequestHandler):
                 rc, out, err, _ = git_out(["add", "--", data["path"]])
                 if rc != 0:
                     raise ValueError(err.strip()[:300] or "git add failed")
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/git/checkout":
+                # Discard a file's uncommitted changes (VS Code's
+                # per-file Revert). Staged or not, back to HEAD.
+                data = self.read_json()
+                safe_path(data["path"])
+                rc, out, err, _ = git_out(
+                    ["checkout", "HEAD", "--", data["path"]])
+                if rc != 0:
+                    raise ValueError(err.strip()[:300]
+                                     or "git checkout failed")
                 return self.send_json({"ok": True})
             if parsed.path == "/api/git/commit":
                 data = self.read_json()
@@ -656,30 +812,12 @@ class Handler(SimpleHTTPRequestHandler):
                 rc, out, err, ms = run_cmd(argv, cwd=str(WORKSPACE))
                 output = (out + err).strip() or (
                     "Syntax OK: " + data["path"])
-                # Phase 8: surface a line number + short message so
-                # the IDE can show a VS Code-style Problems entry.
+                # Phase 8/11: line + message for the Problems UI,
+                # parsed by the shared helper.
                 line_no = None
                 message = ""
                 if rc != 0:
-                    import re as _re
-                    # Tracebacks mention several lines (interpreter
-                    # internals first); the LAST "line N" is where
-                    # the user's error actually is.
-                    hits = _re.findall(r"line (\d+)", output)
-                    if hits:
-                        line_no = int(hits[-1])
-                    else:
-                        m = _re.search(r":(\d+)\s*\n", output)
-                        if m:
-                            line_no = int(m.group(1))
-                    lines = [ln for ln in output.splitlines()
-                             if ln.strip()]
-                    for ln in reversed(lines):
-                        if "Error" in ln:
-                            message = ln.strip()
-                            break
-                    if not message and lines:
-                        message = lines[-1].strip()
+                    line_no, message = check_output_info(output)
                 return self.send_json({
                     "ok": rc == 0, "output": output, "ms": ms,
                     "line": line_no, "message": message})

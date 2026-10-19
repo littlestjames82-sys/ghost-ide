@@ -12,6 +12,7 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { openSearchPanel, selectNextOccurrence } from "@codemirror/search";
+import { snippet } from "@codemirror/autocomplete";
 import { foldAll, unfoldAll, indentUnit } from "@codemirror/language";
 import { BEHAVIOR } from "./behavior.js";
 
@@ -979,11 +980,16 @@ async function refreshGit() {
       $("gitBranch").textContent = "";
       $("gitLog").textContent = "";
       $("gitAiMsg").disabled = true;
+      $("branchChip").classList.add("hidden");
       box.textContent = d.error || "Not a git repo.";
       return;
     }
     $("gitBranch").textContent = d.branch || "";
     $("gitAiMsg").disabled = false;
+    if (d.branch) {
+      $("branchChip").textContent = "⎇ " + d.branch;
+      $("branchChip").classList.remove("hidden");
+    }
     box.innerHTML = "";
     if (!d.changes.length) {
       box.textContent = "Clean - nothing changed.";
@@ -1014,6 +1020,22 @@ async function refreshGit() {
       db.textContent = "Diff";
       db.onclick = () => showDiff(c.path);
       row.appendChild(db);
+      if (!untracked) {
+        const rb = document.createElement("button");
+        rb.textContent = "Revert";
+        rb.title = "Discard this file's uncommitted changes";
+        rb.onclick = async () => {
+          if (!confirm("Discard all uncommitted changes to " +
+              c.path + "? This cannot be undone.")) return;
+          const d = await postJson("/api/git/checkout",
+            { path: c.path });
+          if (d.error) { alert(d.error); return; }
+          if (c.path === currentFile) reloadCurrentFromDisk();
+          refreshGit();
+          loadFiles();
+        };
+        row.appendChild(rb);
+      }
       box.appendChild(row);
     }
     try {
@@ -1750,6 +1772,18 @@ function renderSnips() {
     label.title = "Insert at cursor";
     label.onclick = () => {
       const sel = view.state.selection.main;
+      /* Tabstop snippets (Phase 11): a body containing ${1:...}
+         placeholders inserts as a real VS Code-style snippet -
+         Tab walks the stops. Anything else inserts as plain
+         text, exactly as before. */
+      if (sn.body.includes("${")) {
+        try {
+          snippet(sn.body)(view, null, sel.from, sel.to);
+          view.focus();
+          $("snipPanel").classList.add("hidden");
+          return;
+        } catch (e) { /* fall through to plain insert */ }
+      }
       view.dispatch({ changes: {
         from: sel.from, to: sel.to, insert: sn.body },
         selection: { anchor: sel.from + sn.body.length } });
@@ -2248,6 +2282,8 @@ const COMMANDS = [
   { title: "Go to symbol…", run: () => openSymbols() },
   { title: "Go to definition", run: () => $("toolDef").click() },
   { title: "Rename symbol…", run: () => $("toolRename").click() },
+  { title: "Local history (previous versions)", run: () => $("toolHistory").click() },
+  { title: "Check whole project (Problems)", run: () => $("toolCheckAll").click() },
   { title: "Reopen closed tab", run: () => {
       const p = closedStack.pop();
       if (p) openFile(p);
@@ -2408,12 +2444,17 @@ function wordAtCursor() {
 }
 
 function updateCrumbs() {
-  const el = $("crumbs");
+  const el = $("crumbPath");
   if (!el) return;
-  if (!currentFile) { el.textContent = ""; return; }
+  if (!currentFile) {
+    el.textContent = "";
+    $("crumbBlame").textContent = "";
+    return;
+  }
   let out = currentFile.split("/").join(" › ");
+  let lineNo = 1;
   try {
-    const lineNo = view.state.doc.lineAt(
+    lineNo = view.state.doc.lineAt(
       view.state.selection.main.head).number;
     const syms = extractSymbols(view.state.doc.toString());
     let cur = null;
@@ -2424,6 +2465,7 @@ function updateCrumbs() {
     if (cur) out += " › ƒ " + cur.name;
   } catch (e) { /* crumbs are decorative */ }
   el.textContent = out;
+  queueBlame(currentFile, lineNo);
 }
 
 /* Session restore: the open tabs + current file persist locally
@@ -2599,6 +2641,149 @@ $("aiWrite").onclick = async () => {
     $("inlineAiApply").disabled = !out;
   } catch (e) {
     $("inlineAiOut").textContent = "Failed: " + e;
+  }
+};
+
+/* ---------------- Phase 11: local history, project problems,
+   blame, reload helper ---------------- */
+let blameTimer = null;
+let blameKey = "";
+function queueBlame(path, line) {
+  const key = path + ":" + line;
+  if (key === blameKey) return;
+  blameKey = key;
+  clearTimeout(blameTimer);
+  blameTimer = setTimeout(async () => {
+    const el = $("crumbBlame");
+    try {
+      const r = await fetch("/api/git/blame?path=" +
+        encodeURIComponent(path) + "&line=" + line);
+      const d = await r.json();
+      if (blameKey !== key) return;
+      if (d.ok && d.author) {
+        const when = d.time
+          ? new Date(d.time * 1000).toLocaleDateString() : "";
+        el.textContent = "  ·  👤 " + d.author +
+          (d.summary ? " · " + d.summary : "") +
+          (when ? " · " + when : "");
+      } else {
+        el.textContent = "";
+      }
+    } catch (e) {
+      el.textContent = "";
+    }
+  }, 500);
+}
+
+async function reloadCurrentFromDisk() {
+  if (!currentFile) return;
+  const path = currentFile;
+  const ti = tabOrder.indexOf(path);
+  if (ti >= 0) tabOrder.splice(ti, 1);
+  tabStates.delete(path);
+  tabDirty.set(path, false);
+  currentFile = null;
+  await openFile(path, true);
+}
+
+function fmtSnapTs(ts) {
+  /* 20261019-031500[-n] -> 2026-10-19 03:15:00 */
+  const m = ts.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
+  if (!m) return ts;
+  return m[1] + "-" + m[2] + "-" + m[3] + " " +
+    m[4] + ":" + m[5] + ":" + m[6];
+}
+
+$("toolHistory").onclick = async () => {
+  hideTools();
+  if (!currentFile) { alert("Open a file first."); return; }
+  $("todoTitle").textContent = "Local history: " + currentFile;
+  const box = $("todoResults");
+  box.innerHTML = '<div class="dim">Loading…</div>';
+  $("todoPanel").classList.remove("hidden");
+  const r = await fetch("/api/history?path=" +
+    encodeURIComponent(currentFile));
+  const d = await r.json();
+  box.innerHTML = "";
+  const hint = document.createElement("div");
+  hint.className = "dim";
+  hint.textContent = "Every save keeps the previous version "
+    + "here. Tap a snapshot to load it into the editor - "
+    + "nothing is written until you Save.";
+  box.appendChild(hint);
+  if (d.error) {
+    hint.textContent = d.error;
+    return;
+  }
+  if (!d.entries || !d.entries.length) {
+    const el = document.createElement("div");
+    el.className = "dim";
+    el.textContent = "No snapshots yet - save this file after "
+      + "an edit and its previous version will appear here.";
+    box.appendChild(el);
+    return;
+  }
+  for (const e of d.entries) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = "🕘 " + fmtSnapTs(e.ts) + "  ·  " +
+      Math.max(1, Math.round(e.size / 1024)) + " KB";
+    row.onclick = async () => {
+      const rr = await fetch("/api/history/file?path=" +
+        encodeURIComponent(currentFile) + "&ts=" +
+        encodeURIComponent(e.ts));
+      const dd = await rr.json();
+      if (dd.error) { alert(dd.error); return; }
+      accepting = true;
+      view.dispatch({ changes: {
+        from: 0, to: view.state.doc.length, insert: dd.content },
+        selection: { anchor: 0 } });
+      accepting = false;
+      $("todoPanel").classList.add("hidden");
+      setSaveState("snapshot " + fmtSnapTs(e.ts) +
+        " loaded - Save to keep it");
+      view.focus();
+    };
+    box.appendChild(row);
+  }
+};
+
+$("toolCheckAll").onclick = async () => {
+  hideTools();
+  $("todoTitle").textContent = "Project problems";
+  const box = $("todoResults");
+  box.innerHTML = '<div class="dim">Checking the project…</div>';
+  $("todoPanel").classList.remove("hidden");
+  const r = await fetch("/api/check-all");
+  const d = await r.json();
+  box.innerHTML = "";
+  if (d.error) {
+    const el = document.createElement("div");
+    el.className = "dim";
+    el.textContent = d.error;
+    box.appendChild(el);
+    return;
+  }
+  if (!d.problems || !d.problems.length) {
+    const el = document.createElement("div");
+    el.className = "findRow";
+    el.textContent = "✓ No problems in " + d.checked +
+      " checked file(s)";
+    box.appendChild(el);
+    return;
+  }
+  for (const p of d.problems) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = "✖ " + p.path +
+      (p.line ? " · line " + p.line : "") + " — " +
+      (p.message || "syntax error");
+    row.onclick = async () => {
+      $("todoPanel").classList.add("hidden");
+      if (p.path !== currentFile) await openFile(p.path);
+      if (p.line) jumpToLine(p.line);
+    };
+    box.appendChild(row);
   }
 };
 

@@ -176,6 +176,9 @@ Fixed the latent quick-open mapping bug (files objects vs strings - Quick Open/s
 ## Phase 10 - Round ten - SHIPPED Oct 19, 2026 (phone v1.9.0 + desktop)
 Breadcrumbs, explorer filter, session restore (tabs reopen on launch), reopen closed tab, Rename symbol (new /api/rename-symbol on both servers, live-verified), Go to definition (heuristic), Copy contents, check-on-open, Write-code-from-comment.
 
+## Phase 11 - Round eleven - SHIPPED Oct 19, 2026 (phone v1.10.0 + desktop)
+Local History on both servers (snapshot-on-save, self-undoing restore), project-wide Problems check, git blame in breadcrumbs, per-file Revert, status-bar branch chip, tabstop snippets. All desktop endpoints live-verified.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
