@@ -95,6 +95,16 @@ let currentFile = null;
 let dirty = false;
 let modelUp = false;
 
+/* wrapComp MUST be initialized before the EditorView below:
+   baseExtensions() runs during view creation and calls
+   wrapComp.of(...). Declaring it after the view put it in the
+   temporal dead zone - a ReferenceError that killed the whole
+   bundle at startup (v1.5.0/v1.6.0 dead-on-arrival bug). */
+const wrapComp = new Compartment();
+function wrapExt() {
+  return settings.wrap ? EditorView.lineWrapping : [];
+}
+
 const view = new EditorView({
   parent: $("editor"),
   state: EditorState.create({
@@ -102,11 +112,6 @@ const view = new EditorView({
     extensions: baseExtensions(null),
   }),
 });
-
-const wrapComp = new Compartment();
-function wrapExt() {
-  return settings.wrap ? EditorView.lineWrapping : [];
-}
 
 function baseExtensions(path) {
   const lang = langFor(path || "");
@@ -1754,3 +1759,9 @@ $("toolZip").onclick = async () => {
 /* ---------------- boot ---------------- */
 loadFiles();
 refreshWsLabel();
+/* Reaching this line proves the whole bundle evaluated without a
+   startup crash - tell the watchdog in index.html, and surface
+   anything the error trap caught on the way up. */
+window.__ghostBooted = true;
+if (window.__ghostErrs && window.__ghostErrs.length &&
+    typeof __ghostShowErrs === "function") __ghostShowErrs();
