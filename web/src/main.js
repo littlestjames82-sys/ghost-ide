@@ -2568,6 +2568,7 @@ const COMMANDS = [
   { title: "New project from template", run: () => $("toolTemplates").click() },
   { title: "Pair mode", run: () => $("toolPair").click() },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
+  { title: "API client", run: () => $("toolApi").click() },
   { title: "Local history (previous versions)", run: () => $("toolHistory").click() },
   { title: "Check whole project (Problems)", run: () => $("toolCheckAll").click() },
   { title: "Reopen closed tab", run: () => {
@@ -3998,6 +3999,161 @@ function openFixReport(log, verdict, backups, touched) {
 $("toolFix").onclick = () => {
   hideTools();
   runFixLoop();
+};
+
+/* ---------------- Roadmap G23: API client ----------------
+   Postman-lite. Requests are sent by the IDE's own server
+   (/api/http), so local dev servers without CORS headers
+   work fine. Saved requests live per project in
+   .ghostide/api-requests.json; history is localStorage. */
+const API_SAVE_PATH = ".ghostide/api-requests.json";
+let apiSavedList = [];
+function apiParseHeaders(text) {
+  const out = {};
+  for (const line of (text || "").split("\n")) {
+    const i = line.indexOf(":");
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+function apiForm() {
+  return {
+    method: $("apiMethod").value,
+    url: $("apiUrl").value.trim(),
+    headers: apiParseHeaders($("apiHeaders").value),
+    headersText: $("apiHeaders").value,
+    body: $("apiBody").value,
+  };
+}
+function apiFill(r) {
+  $("apiMethod").value = r.method || "GET";
+  $("apiUrl").value = r.url || "";
+  $("apiHeaders").value = r.headersText ||
+    Object.entries(r.headers || {})
+      .map(([k, v]) => k + ": " + v).join("\n");
+  $("apiBody").value = r.body || "";
+}
+function apiHistory() {
+  try {
+    return JSON.parse(
+      localStorage.getItem("ghostide-api-history") || "[]");
+  } catch (e) { return []; }
+}
+function apiRenderHistory() {
+  const wrap = $("apiHistory");
+  wrap.innerHTML = "";
+  const hist = apiHistory();
+  if (!hist.length) return;
+  const label = document.createElement("span");
+  label.className = "dim";
+  label.textContent = "History: ";
+  wrap.appendChild(label);
+  for (const h of hist) {
+    const b = document.createElement("button");
+    b.textContent = h.method + " " + h.status + " " +
+      (h.url.length > 42 ? h.url.slice(0, 42) + "…" : h.url);
+    b.title = h.url;
+    b.onclick = () => apiFill(h);
+    wrap.appendChild(b);
+  }
+}
+function apiRenderSaved() {
+  const wrap = $("apiSaved");
+  wrap.innerHTML = "";
+  if (!apiSavedList.length) return;
+  const label = document.createElement("span");
+  label.className = "dim";
+  label.textContent = "Saved in this project: ";
+  wrap.appendChild(label);
+  apiSavedList.forEach((r, i) => {
+    const b = document.createElement("button");
+    b.textContent = r.name;
+    b.onclick = () => apiFill(r);
+    wrap.appendChild(b);
+    const x = document.createElement("button");
+    x.textContent = "✕";
+    x.title = "Delete " + r.name;
+    x.onclick = async () => {
+      apiSavedList.splice(i, 1);
+      await apiPersistSaved();
+      apiRenderSaved();
+    };
+    wrap.appendChild(x);
+  });
+}
+async function apiLoadSaved() {
+  try {
+    const r = await fetch("/api/file?path=" +
+      encodeURIComponent(API_SAVE_PATH));
+    const d = await r.json();
+    if (d.content) {
+      apiSavedList = JSON.parse(d.content).requests || [];
+    }
+  } catch (e) { apiSavedList = []; }
+  apiRenderSaved();
+}
+async function apiPersistSaved() {
+  await fetch("/api/file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: API_SAVE_PATH,
+      content: JSON.stringify({ requests: apiSavedList }, null, 2),
+    }),
+  });
+}
+async function apiSendNow() {
+  const form = apiForm();
+  if (!form.url) { $("apiStatus").textContent = "Enter a URL first."; return; }
+  $("apiStatus").textContent = "Sending…";
+  $("apiResp").textContent = "";
+  $("apiRespHeaders").textContent = "";
+  const r = await fetch("/api/http", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(form),
+  });
+  const d = await r.json();
+  if (d.error) {
+    $("apiStatus").textContent = "⚠ " + d.error;
+    return;
+  }
+  $("apiStatus").textContent = "Status " + d.status + " · " +
+    d.ms + " ms · " + d.size + " bytes" +
+    (d.truncated ? " (body capped at 512 KB)" : "");
+  $("apiRespHeaders").textContent =
+    (d.headers || []).map(([k, v]) => k + ": " + v).join("\n");
+  let body = d.body || "";
+  try { body = JSON.stringify(JSON.parse(body), null, 2); }
+  catch (e) { /* not JSON: show as-is */ }
+  $("apiResp").textContent = body;
+  const hist = apiHistory();
+  hist.unshift({ ...form, status: d.status,
+    t: new Date().toISOString() });
+  localStorage.setItem("ghostide-api-history",
+    JSON.stringify(hist.slice(0, 20)));
+  apiRenderHistory();
+}
+function openApi() {
+  $("apiPanel").classList.remove("hidden");
+  $("toolsPanel").classList.add("hidden");
+  apiLoadSaved();
+  apiRenderHistory();
+}
+$("toolApi").onclick = openApi;
+$("apiClose").onclick = () => $("apiPanel").classList.add("hidden");
+$("apiSend").onclick = apiSendNow;
+$("apiSaveBtn").onclick = async () => {
+  const form = apiForm();
+  if (!form.url) { $("apiStatus").textContent = "Enter a URL first."; return; }
+  const name = prompt("Name this request:",
+    form.method + " " + form.url.split("/").slice(-1)[0]);
+  if (!name) return;
+  apiSavedList.push({ name, ...form });
+  await apiPersistSaved();
+  apiRenderSaved();
+  $("apiStatus").textContent = "Saved \"" + name +
+    "\" to " + API_SAVE_PATH;
 };
 
 /* ---------------- Roadmap G22: SQLite studio ----------------

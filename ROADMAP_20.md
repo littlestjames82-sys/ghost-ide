@@ -195,7 +195,7 @@ read-only by default, edits behind an explicit toggle.
 Done when: Ryan can inspect a real app database on the
 phone and run a SELECT that returns the right rows.
 
-**G23. API client.** A Postman-lite pane: save requests
+**G23. API client.** ✅ CLOSED Oct 19, 2026 (v1.31.0) — a local dev server exercised end to end from the pane (GET/POST/headers/404/errors), saved requests per project, history kept. A Postman-lite pane: save requests
 per project (method, URL, headers, body), send, inspect
 status/headers/JSON, keep a history. Localhost-first —
 it pairs with the projects GhostIDE builds.

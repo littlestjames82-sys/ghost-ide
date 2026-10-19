@@ -18,6 +18,7 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
+import urllib.error
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -27,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.30.0"
+APP_VERSION = "1.31.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2533,6 +2534,50 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({
                     "ok": rc == 0, "output": output, "ms": ms,
                     "line": line_no, "message": message})
+            if parsed.path == "/api/http":
+                # Roadmap G23: API client. The server sends the
+                # request so local dev servers without CORS
+                # headers work from the pane.
+                data = self.read_json()
+                method = (data.get("method") or "GET").upper()
+                url = data.get("url") or ""
+                if not (url.startswith("http://")
+                        or url.startswith("https://")):
+                    raise ValueError(
+                        "URL must start with http:// or https://")
+                headers = {str(k): str(v) for k, v in
+                           (data.get("headers") or {}).items()}
+                body = data.get("body") or None
+                req = urllib.request.Request(
+                    url, method=method,
+                    data=body.encode("utf-8") if body else None,
+                    headers=headers)
+                import time as _time2
+                t0 = _time2.time()
+                try:
+                    with urllib.request.urlopen(
+                            req, timeout=15) as resp:
+                        raw = resp.read(512 * 1024 + 1)
+                        status = resp.status
+                        resp_headers = [[k, v] for k, v in
+                                        resp.headers.items()]
+                except urllib.error.HTTPError as e:
+                    raw = e.read(512 * 1024 + 1)
+                    status = e.code
+                    resp_headers = [[k, v] for k, v in
+                                    e.headers.items()] \
+                        if e.headers else []
+                except Exception as e:
+                    raise ValueError(
+                        "request failed: " + str(e)[:300])
+                truncated = len(raw) > 512 * 1024
+                return self.send_json({
+                    "ok": True, "status": status,
+                    "headers": resp_headers,
+                    "body": raw[:512 * 1024].decode(
+                        "utf-8", "replace"),
+                    "size": len(raw), "truncated": truncated,
+                    "ms": int((_time2.time() - t0) * 1000)})
             if parsed.path == "/api/db/info":
                 # Roadmap G22: SQLite studio. Read-only open;
                 # tables with columns and row counts.
