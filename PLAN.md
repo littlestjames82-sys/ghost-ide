@@ -98,7 +98,8 @@ GhostIDE calls it as a library/subprocess; the IDE does not grow a
 second context engine. This is the ecosystem compounding: Slice
 feeds IDE chat the way Bench feeds Console.
 
-## Phase 3 - One product, two sizes
+## Phase 3 - One product, two sizes - SHIPPED Oct 19, 2026 (phone v1.3.0 + desktop v0.3)
+3.1 DONE both apps (3B file hash-verified bit-exact + inference-proven on desktop llama.cpp; phone load of the 3B is Ryan's first-run test). 3.2 DONE (web/src/behavior.js + BEHAVIOR.md). 3.3 DONE (LAN sync both directions, escape-tested). 3.4 DONE (per-workspace chat history).
 *Entry: Phases 1+2 stable. Exit: same project, same feel, both
 devices, model sized to the hardware.*
 
@@ -121,7 +122,8 @@ Work items:
 - 3.4 Session continuity: chat history saved per project folder
   on both apps (S)
 
-## Phase 4 - Ship it as a studio product
+## Phase 4 - Ship it as a studio product - BUILD SIDE DONE Oct 19, 2026
+Repos pushed (ghost-ide b6d3d5d9, ghostide-android 8a175fc9, read-back diffs EMPTY, code push only). KNOWN_ISSUES.md seeded; READMEs updated; site page DRAFT built (~/workspace/your_files/ghostide-site-page-draft.html) and NOT deployed (draft-first). Still Ryan-gated: screenshots from real use (no mockups rule), the 60-90 s demo film (needs his screen capture), distribution decision (Play Store $25 is his call), pricing (default free stands), and deploying the site page.
 *Entry: Ryan's explicit go, per product, per channel - nothing
 here is pre-approved. Exit: a stranger can discover, install, and
 use GhostIDE without Ryan in the loop.*
@@ -155,6 +157,9 @@ Total to a shippable public product: roughly 8-11 build sessions
 plus Ryan's gate taps. Cost so far and projected: $0 (all local,
 all open models; only optional spend in the whole plan is the
 Play Store dev fee, Phase 4, Ryan's call).
+
+## Phase 5 - Tools pack - SHIPPED Oct 19, 2026 (phone v1.4.0 + desktop)
+Added at Ryan's "load up this ide with tools": 🧰 Tools panel (AI quick actions: Explain / Fix / Tests / Docstrings over selection or file), Preview (markdown + images), syntax Check, Duplicate file, Snippets, TODO/FIXME scanner, Project stats, Save-slice-as-file, and a desktop Terminal pane. Native on Android where possible (todos/stats/raw); terminal + syntax check are desktop features and say so on the phone. All desktop endpoints live-tested.
 
 ## Risk register
 | Risk | Likelihood | Mitigation |

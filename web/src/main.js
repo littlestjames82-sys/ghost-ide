@@ -975,6 +975,338 @@ $("findReplace").onclick = async () => {
   loadFiles();
 };
 
+/* ---------------- Tools pack ---------------- */
+$("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
+$("toolsClose").onclick = () => $("toolsPanel").classList.add("hidden");
+function hideTools() { $("toolsPanel").classList.add("hidden"); }
+
+/* AI quick actions: prompt templates over the selection or file. */
+function codeForAi() {
+  const sel = view.state.selection.main;
+  const doc = view.state.doc.toString();
+  const picked = sel.empty ? doc : doc.slice(sel.from, sel.to);
+  return picked.slice(0, BEHAVIOR.context.fileChars);
+}
+function aiAction(kind) {
+  if (!currentFile) { alert("Open a file first."); return; }
+  const fence = "```\n" + codeForAi() + "\n```";
+  const prompts = {
+    explain: "Explain what this code from " + currentFile +
+      " does, briefly, and flag anything risky or buggy:\n" + fence,
+    fix: "Find and fix the bugs in this code from " + currentFile +
+      ". Return the full corrected code, then one line per fix:\n" + fence,
+    tests: "Write tests for this code from " + currentFile +
+      " (pytest for Python, node:test for JS). Return the complete " +
+      "test file only:\n" + fence,
+    doc: "Add clear docstrings and comments to this code from " +
+      currentFile + " without changing its behavior. Return the " +
+      "full updated file:\n" + fence,
+  };
+  hideTools();
+  $("chatText").value = prompts[kind];
+  sendChat();
+}
+$("aiExplain").onclick = () => aiAction("explain");
+$("aiFix").onclick = () => aiAction("fix");
+$("aiTests").onclick = () => aiAction("tests");
+$("aiDoc").onclick = () => aiAction("doc");
+
+/* Preview: markdown rendered, images shown, code as text. */
+function escHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+}
+function renderMarkdown(src) {
+  const lines = escHtml(src).split("\n");
+  let html = "", inCode = false, inList = false;
+  const inline = (t) => t
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+             '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  for (const line of lines) {
+    if (line.trim().startsWith("```")) {
+      html += inCode ? "</code></pre>" : "<pre><code>";
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) { html += line + "\n"; continue; }
+    const h = line.match(/^(#{1,3})\s+(.*)/);
+    if (h) {
+      if (inList) { html += "</ul>"; inList = false; }
+      html += "<h" + h[1].length + ">" + inline(h[2]) +
+              "</h" + h[1].length + ">";
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += "<li>" + inline(line.replace(/^\s*[-*]\s+/, "")) + "</li>";
+      continue;
+    }
+    if (inList) { html += "</ul>"; inList = false; }
+    if (line.trim()) html += "<p>" + inline(line) + "</p>";
+  }
+  if (inCode) html += "</code></pre>";
+  if (inList) html += "</ul>";
+  return html;
+}
+$("toolPreview").onclick = async () => {
+  if (!currentFile) { alert("Open a file first."); return; }
+  hideTools();
+  $("previewTitle").textContent = "Preview: " + currentFile;
+  const body = $("previewBody");
+  const ext = (currentFile.split(".").pop() || "").toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"]
+      .includes(ext)) {
+    body.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = "/api/raw?path=" + encodeURIComponent(currentFile);
+    img.alt = currentFile;
+    body.appendChild(img);
+  } else {
+    const r = await fetch("/api/file?path=" +
+      encodeURIComponent(currentFile));
+    const d = await r.json();
+    if (d.error) { alert(d.error); return; }
+    if (ext === "md" || ext === "markdown") {
+      body.innerHTML = renderMarkdown(d.content);
+    } else {
+      body.innerHTML = "";
+      const pre = document.createElement("pre");
+      pre.textContent = d.content;
+      body.appendChild(pre);
+    }
+  }
+  $("previewPanel").classList.remove("hidden");
+};
+$("previewClose").onclick = () =>
+  $("previewPanel").classList.add("hidden");
+
+$("toolCheck").onclick = async () => {
+  if (!currentFile) { alert("Open a file first."); return; }
+  hideTools();
+  $("runPane").classList.remove("hidden");
+  $("runTitle").textContent = "Checking " + currentFile + " …";
+  $("runOut").textContent = "";
+  const d = await postJson("/api/check", { path: currentFile });
+  if (d.error) {
+    $("runTitle").textContent = "Check unavailable";
+    $("runOut").textContent = d.error;
+    return;
+  }
+  if (d.ok === null) {
+    $("runTitle").textContent = "Check: no checker for this file type";
+    $("runOut").textContent = d.output;
+    return;
+  }
+  $("runTitle").textContent =
+    (d.ok ? "✓ Syntax OK · " : "✗ Syntax problem · ") + currentFile;
+  $("runOut").textContent = d.output;
+};
+
+$("toolDup").onclick = async () => {
+  if (!currentFile) { alert("Open a file first."); return; }
+  hideTools();
+  const dot = currentFile.lastIndexOf(".");
+  const slash = currentFile.lastIndexOf("/");
+  const suggestion = dot > slash
+    ? currentFile.slice(0, dot) + "-copy" + currentFile.slice(dot)
+    : currentFile + "-copy";
+  const name = prompt("Duplicate as:", suggestion);
+  if (!name) return;
+  const r = await fetch("/api/file?path=" +
+    encodeURIComponent(currentFile));
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  const s = await postJson("/api/file", {
+    path: name, content: d.content });
+  if (s.error) { alert(s.error); return; }
+  await loadFiles();
+  openFile(name);
+};
+
+/* Snippets (local to this browser/app). */
+let snippets = [];
+try {
+  snippets = JSON.parse(localStorage.getItem("ghostide-snippets")
+    || "[]");
+} catch (e) { snippets = []; }
+function persistSnippets() {
+  try {
+    localStorage.setItem("ghostide-snippets", JSON.stringify(snippets));
+  } catch (e) { /* best-effort */ }
+}
+function renderSnips() {
+  const list = $("snipList");
+  list.innerHTML = "";
+  if (!snippets.length) {
+    list.innerHTML = '<div class="dim">No snippets yet.</div>';
+    return;
+  }
+  snippets.forEach((sn, i) => {
+    const row = document.createElement("div");
+    row.className = "snipRow";
+    const label = document.createElement("span");
+    label.textContent = sn.name;
+    label.title = "Insert at cursor";
+    label.onclick = () => {
+      const sel = view.state.selection.main;
+      view.dispatch({ changes: {
+        from: sel.from, to: sel.to, insert: sn.body },
+        selection: { anchor: sel.from + sn.body.length } });
+      view.focus();
+      $("snipPanel").classList.add("hidden");
+    };
+    const del = document.createElement("button");
+    del.textContent = "✕";
+    del.onclick = () => {
+      snippets.splice(i, 1);
+      persistSnippets();
+      renderSnips();
+    };
+    row.appendChild(label);
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+}
+$("toolSnippets").onclick = () => {
+  hideTools();
+  renderSnips();
+  $("snipPanel").classList.remove("hidden");
+};
+$("snipClose").onclick = () => $("snipPanel").classList.add("hidden");
+$("snipAdd").onclick = () => {
+  const sel = view.state.selection.main;
+  const body = sel.empty
+    ? view.state.doc.toString()
+    : view.state.doc.sliceString(sel.from, sel.to);
+  if (!body.trim()) { alert("Nothing to save - open a file first."); return; }
+  const name = $("snipName").value.trim()
+    || ("snippet " + (snippets.length + 1));
+  snippets.push({ name, body });
+  persistSnippets();
+  $("snipName").value = "";
+  renderSnips();
+};
+
+/* TODO scan */
+$("toolTodos").onclick = async () => {
+  hideTools();
+  const box = $("todoResults");
+  box.textContent = "scanning…";
+  $("todoPanel").classList.remove("hidden");
+  const r = await fetch("/api/todos");
+  const d = await r.json();
+  if (d.error) { box.textContent = d.error; return; }
+  box.innerHTML = "";
+  if (!d.todos.length) {
+    box.textContent = "No TODO / FIXME / XXX / HACK markers. Clean!";
+    return;
+  }
+  for (const t of d.todos) {
+    const row = document.createElement("div");
+    row.className = "todoRow";
+    const b = document.createElement("b");
+    b.textContent = t.kind;
+    row.appendChild(b);
+    row.appendChild(document.createTextNode(
+      " " + t.path + ":" + t.line + "  " + t.text));
+    row.title = t.text;
+    row.onclick = async () => {
+      await openFile(t.path);
+      jumpToLine(t.line);
+    };
+    box.appendChild(row);
+  }
+};
+$("todoClose").onclick = () => $("todoPanel").classList.add("hidden");
+
+/* Project stats */
+$("toolStats").onclick = async () => {
+  const out = $("statsOut");
+  out.textContent = "counting…";
+  const r = await fetch("/api/stats");
+  const d = await r.json();
+  if (d.error) { out.textContent = d.error; return; }
+  const exts = Object.entries(d.byExt)
+    .sort((a, b) => b[1].lines - a[1].lines).slice(0, 6)
+    .map(([e, s]) => e + ": " + s.files + " files, " +
+         s.lines.toLocaleString() + " lines")
+    .join("\n");
+  out.textContent =
+    d.files + " files · " + d.lines.toLocaleString() + " lines · " +
+    (d.bytes / 1048576).toFixed(2) + " MB\n" + exts;
+};
+
+/* Save the current context slice as a workspace file. */
+$("toolSlice").onclick = async () => {
+  hideTools();
+  const mode = $("ctxMode").value === "file"
+    ? "signatures" : $("ctxMode").value;
+  const d = await postJson("/api/context", {
+    mode, budget: BEHAVIOR.context.sliceBudget });
+  if (d.error) { alert(d.error); return; }
+  if (d.over) {
+    alert("Slice is ~" + d.tokens + " tokens - over budget, not saved.");
+    return;
+  }
+  const content = "# GhostIDE project slice (" + d.mode + ")\n" +
+    "<!-- " + d.tokens + " of ~" + d.originalTokens +
+    " tokens · " + d.files + " files · saved from the Tools panel -->\n\n" +
+    d.text;
+  const s = await postJson("/api/file", {
+    path: ".ghostide-context.md", content });
+  if (s.error) { alert(s.error); return; }
+  await loadFiles();
+  alert("Saved .ghostide-context.md (" + d.tokens.toLocaleString() +
+    " tokens, " + d.files + " files).");
+};
+
+/* Terminal (desktop shell in the workspace). */
+const termHistory = [];
+let termIdx = -1;
+$("toolTerminal").onclick = () => {
+  hideTools();
+  $("termPane").classList.remove("hidden");
+  $("termCmd").focus();
+};
+$("termClose").onclick = () => $("termPane").classList.add("hidden");
+async function runTerm() {
+  const input = $("termCmd");
+  const cmd = input.value.trim();
+  if (!cmd) return;
+  termHistory.unshift(cmd);
+  termIdx = -1;
+  input.value = "";
+  const out = $("termOut");
+  out.textContent += "$ " + cmd + "\n";
+  out.scrollTop = out.scrollHeight;
+  const d = await postJson("/api/terminal", { command: cmd });
+  if (d.error) {
+    out.textContent += d.error +
+      "\n(The terminal runs on the desktop build.)\n";
+  } else {
+    out.textContent += (d.stdout || "") + (d.stderr || "") +
+      "[exit " + d.code + " · " + d.ms + " ms]\n";
+  }
+  out.scrollTop = out.scrollHeight;
+}
+$("termCmd").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { runTerm(); }
+  else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (termIdx < termHistory.length - 1) {
+      termIdx++;
+      $("termCmd").value = termHistory[termIdx];
+    }
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    termIdx = Math.max(-1, termIdx - 1);
+    $("termCmd").value = termIdx >= 0 ? termHistory[termIdx] : "";
+  }
+});
+
 /* ---------------- boot ---------------- */
 loadFiles();
 refreshWsLabel();

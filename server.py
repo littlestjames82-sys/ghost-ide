@@ -272,6 +272,79 @@ class Handler(SimpleHTTPRequestHandler):
                 if rc != 0:
                     raise ValueError(err.strip()[:300] or "git diff failed")
                 return self.send_json({"path": rel, "diff": out})
+            if parsed.path == "/api/todos":
+                # TODO/FIXME scanner (Tools pack): markers across the
+                # workspace, clickable in the UI to jump to the line.
+                import re as _re
+                marker = _re.compile(r"\b(TODO|FIXME|XXX|HACK)\b[:\s]*(.*)")
+                out = []
+                for rel, p in iter_text_files():
+                    try:
+                        lines = p.read_text(
+                            encoding="utf-8", errors="strict").splitlines()
+                    except Exception:
+                        continue
+                    for i, line in enumerate(lines, 1):
+                        m = marker.search(line)
+                        if m:
+                            out.append({"path": str(rel), "line": i,
+                                        "kind": m.group(1),
+                                        "text": line.strip()[:200]})
+                        if len(out) >= 300:
+                            break
+                    if len(out) >= 300:
+                        break
+                return self.send_json({"todos": out})
+            if parsed.path == "/api/stats":
+                # Project stats (Tools pack): files, lines, by type.
+                files = 0
+                total_bytes = 0
+                lines_total = 0
+                by_ext = {}
+                for p in WORKSPACE.rglob("*"):
+                    rel = p.relative_to(WORKSPACE)
+                    if any(part.startswith(".") for part in rel.parts):
+                        continue
+                    if not p.is_file():
+                        continue
+                    files += 1
+                    try:
+                        total_bytes += p.stat().st_size
+                    except Exception:
+                        pass
+                    ext = p.suffix.lower() or "(none)"
+                    slot = by_ext.setdefault(
+                        ext, {"files": 0, "lines": 0})
+                    slot["files"] += 1
+                    if p.stat().st_size <= 2 * 1024 * 1024:
+                        try:
+                            n = p.read_bytes().count(b"\n")
+                            slot["lines"] += n
+                            lines_total += n
+                        except Exception:
+                            pass
+                return self.send_json({
+                    "files": files, "bytes": total_bytes,
+                    "lines": lines_total, "byExt": by_ext})
+            if parsed.path == "/api/raw":
+                # Serve a workspace file as-is (image previews).
+                rel = urllib.parse.parse_qs(parsed.query)["path"][0]
+                p = safe_path(rel)
+                if not p.is_file():
+                    raise FileNotFoundError(rel)
+                ctype = {
+                    ".png": "image/png", ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg", ".gif": "image/gif",
+                    ".svg": "image/svg+xml", ".webp": "image/webp",
+                    ".bmp": "image/bmp", ".ico": "image/x-icon",
+                }.get(p.suffix.lower(), "application/octet-stream")
+                body = p.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if parsed.path == "/api/sync/bundle":
                 # LAN sync (Phase 3.3): the whole workspace as JSON for
                 # the phone app to pull. Text files only, size-capped.
@@ -446,6 +519,59 @@ class Handler(SimpleHTTPRequestHandler):
                                      "formatter failed")
                 return self.send_json({"formatted": True,
                                        "tool": tool[0]})
+            if parsed.path == "/api/terminal":
+                # Tools pack: a real shell in the workspace. Local and
+                # UNSANDBOXED by design (same trust as the run panel):
+                # your machine, your commands.
+                data = self.read_json()
+                cmd = data.get("command", "").strip()
+                if not cmd:
+                    raise ValueError("empty command")
+                t0 = time.time()
+                try:
+                    p = subprocess.run(
+                        cmd, shell=True, cwd=str(WORKSPACE),
+                        capture_output=True, text=True, timeout=30)
+                    rc, out, err = (p.returncode, p.stdout, p.stderr)
+                except subprocess.TimeoutExpired as e:
+                    rc = -1
+                    out = (e.stdout or "") if isinstance(
+                        e.stdout, str) else ""
+                    err = "(timed out after 30 s)"
+                return self.send_json({
+                    "ok": True, "code": rc,
+                    "stdout": out[-64000:], "stderr": err[-64000:],
+                    "ms": int((time.time() - t0) * 1000), "cmd": cmd})
+            if parsed.path == "/api/check":
+                # Tools pack: syntax check with the system tools.
+                # Python via ast.parse (no __pycache__ artifacts),
+                # JS via node --check, JSON via the parser.
+                data = self.read_json()
+                p = safe_path(data["path"])
+                if not p.is_file():
+                    raise ValueError("file not found: " + data["path"])
+                ext = p.suffix.lower()
+                if ext == ".py":
+                    argv = [sys.executable, "-c",
+                            "import ast,sys; "
+                            "ast.parse(open(sys.argv[1], "
+                            "encoding='utf-8').read())", str(p)]
+                elif ext in (".js", ".mjs"):
+                    argv = ["node", "--check", str(p)]
+                elif ext == ".json":
+                    argv = [sys.executable, "-c",
+                            "import json,sys; "
+                            "json.load(open(sys.argv[1]))", str(p)]
+                else:
+                    return self.send_json({
+                        "ok": None, "output":
+                        "No syntax checker for " + (ext or "this file")
+                        + " files - py/js/json supported."})
+                rc, out, err, ms = run_cmd(argv, cwd=str(WORKSPACE))
+                return self.send_json({
+                    "ok": rc == 0,
+                    "output": (out + err).strip()
+                    or "Syntax OK: " + data["path"], "ms": ms})
             if parsed.path == "/api/model/switch":
                 # Desktop model manager (Phase 3.1): point the IDE at
                 # another local GGUF (e.g. the 1.5B/3B for a lighter

@@ -49,6 +49,10 @@ minute). Or start the model first with
 - **Git panel** - status, stage, diff view, and commit from the IDE.
 - **Find / replace** across the whole project; click a match to jump.
 - **Format on save** (Settings) via black/ruff/prettier if installed.
+- **Tools panel (🧰)** - AI quick actions (explain, fix, tests,
+  docstrings), markdown/image preview, syntax check, snippets,
+  TODO/FIXME scanner, project stats, and a terminal in the
+  workspace (desktop).
 - **LAN sync** - with the desktop in LAN mode (`GHOST_IDE_HOST=
   0.0.0.0`), the phone app pulls/pushes the workspace over
   `/api/sync/bundle` + `/api/sync/apply`. Same WiFi, no cloud.
