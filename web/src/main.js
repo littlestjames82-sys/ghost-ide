@@ -1,6 +1,7 @@
 import { EditorView, keymap, Decoration, WidgetType,
-  highlightWhitespace } from "@codemirror/view";
-import { EditorState, StateEffect, StateField, Prec, Compartment } from "@codemirror/state";
+  highlightWhitespace, gutter, GutterMarker } from "@codemirror/view";
+import { EditorState, StateEffect, StateField, Prec, Compartment,
+  RangeSet } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { indentWithTab, toggleComment, copyLineDown, moveLineUp,
   moveLineDown, deleteLine } from "@codemirror/commands";
@@ -85,6 +86,67 @@ function saveSettings() {
   localStorage.setItem("ghostide-settings", JSON.stringify(settings));
 }
 
+/* ---------------- Roadmap G7: breakpoints ---------------- */
+const breakpoints = new Map();
+try {
+  const saved = JSON.parse(
+    localStorage.getItem("ghostide-breakpoints") || "{}");
+  for (const k of Object.keys(saved))
+    breakpoints.set(k, new Set(saved[k]));
+} catch (e) {}
+function saveBreakpoints() {
+  try {
+    const o = {};
+    for (const [k, v] of breakpoints) o[k] = [...v];
+    localStorage.setItem("ghostide-breakpoints",
+      JSON.stringify(o));
+  } catch (e) {}
+}
+const bpBump = StateEffect.define();
+const bpVersion = StateField.define({
+  create: () => 0,
+  update: (v, tr) => tr.effects.some((e) => e.is(bpBump))
+    ? v + 1 : v,
+});
+class BpMarker extends GutterMarker {
+  toDOM() {
+    const s = document.createElement("span");
+    s.className = "bpDot";
+    s.textContent = "●";
+    return s;
+  }
+}
+const bpMarker = new BpMarker();
+function toggleBreakpoint(line) {
+  if (!currentFile) return;
+  let set = breakpoints.get(currentFile);
+  if (!set) { set = new Set(); breakpoints.set(currentFile, set); }
+  if (set.has(line)) set.delete(line); else set.add(line);
+  saveBreakpoints();
+  view.dispatch({ effects: bpBump.of(null) });
+}
+const bpGutter = gutter({
+  class: "cm-bp-gutter",
+  markers: (v) => {
+    void v.state.field(bpVersion, false);
+    const set = breakpoints.get(currentFile);
+    if (!set || !set.size) return RangeSet.empty;
+    const marks = [];
+    for (const ln of set) {
+      if (ln >= 1 && ln <= v.state.doc.lines)
+        marks.push(bpMarker.range(v.state.doc.line(ln).from));
+    }
+    marks.sort((a, b) => a.from - b.from);
+    return RangeSet.of(marks);
+  },
+  domEventHandlers: {
+    mousedown: (v, line, event) => {
+      toggleBreakpoint(v.state.doc.lineAt(line.from).number);
+      return true;
+    },
+  },
+});
+
 /* ---------------- editor ---------------- */
 function langFor(path) {
   if (/\.tsx?$/.test(path)) return javascript({ typescript: true });
@@ -134,6 +196,8 @@ function baseExtensions(path) {
   return [
     basicSetup,
     oneDark,
+    bpVersion,
+    bpGutter,
     ghostField,
     keymap.of([indentWithTab]),
     Prec.high(keymap.of([
@@ -2336,6 +2400,7 @@ const COMMANDS = [
   { title: "Rename symbol…", run: () => $("toolRename").click() },
   { title: "Repo map", run: () => $("toolRepoMap").click() },
   { title: "Run tests", run: () => $("toolTests").click() },
+  { title: "Debug this file", run: () => $("toolDebug").click() },
   { title: "Local history (previous versions)", run: () => $("toolHistory").click() },
   { title: "Check whole project (Problems)", run: () => $("toolCheckAll").click() },
   { title: "Reopen closed tab", run: () => {
@@ -3459,6 +3524,90 @@ async function maybeRunTestsOnSave(savedPath) {
     }
   } catch (e) { /* run-on-save is best-effort */ }
 }
+
+/* ---------------- Roadmap G7: debugger UI ---------------- */
+let debugSession = null;
+let debugRelFile = null;
+
+function debugShowPanel(show) {
+  $("debugPanel").classList.toggle("hidden", !show);
+}
+function renderDebugEvent(ev) {
+  const out = $("debugOut");
+  if (ev.stdout) out.textContent += ev.stdout;
+  if (ev.event === "stopped") {
+    $("debugStatus").textContent = "⏸ Stopped at " +
+      (debugRelFile || "") + ":" + ev.line +
+      " in " + (ev.func || "");
+    const lines = Object.keys(ev.vars || {}).sort().map(
+      (k) => k + " = " + ev.vars[k]);
+    $("debugVars").textContent = lines.length
+      ? lines.join("\n") : "(no local variables)";
+    const rel = debugRelFile;
+    (async () => {
+      if (rel && rel !== currentFile) await openFile(rel);
+      jumpToLine(ev.line);
+    })();
+  } else if (ev.event === "exited") {
+    $("debugStatus").textContent = ev.error
+      ? "💥 Exited with an error (see output)"
+      : "🏁 Finished";
+    if (ev.error) out.textContent += "\n" + ev.error;
+    $("debugVars").textContent = "";
+    debugSession = null;
+  } else {
+    $("debugStatus").textContent =
+      "Debugger did not respond in time.";
+  }
+  out.scrollTop = out.scrollHeight;
+}
+async function startDebug() {
+  if (!currentFile) { alert("Open a Python file first."); return; }
+  if (!currentFile.endsWith(".py")) {
+    alert("The debugger runs Python files (desktop build).");
+    return;
+  }
+  hideTools();
+  debugRelFile = currentFile;
+  $("debugTitle").textContent = "🐛 Debug: " + currentFile;
+  $("debugOut").textContent = "";
+  $("debugVars").textContent = "";
+  $("debugStatus").textContent = "Starting…";
+  debugShowPanel(true);
+  const bps = [...(breakpoints.get(currentFile) || [])];
+  const d = await postJson("/api/debug/start",
+    { path: currentFile, breakpoints: bps });
+  if (d.error) {
+    $("debugStatus").textContent = d.error;
+    return;
+  }
+  debugSession = d.session;
+  renderDebugEvent(d.event);
+}
+async function debugCmd(cmd) {
+  if (!debugSession) return;
+  $("debugStatus").textContent = "…";
+  const d = await postJson("/api/debug/cmd",
+    { session: debugSession, cmd });
+  if (d.error) {
+    $("debugStatus").textContent = d.error;
+    return;
+  }
+  renderDebugEvent(d.event);
+}
+$("toolDebug").onclick = startDebug;
+$("dbgContinue").onclick = () => debugCmd("continue");
+$("dbgNext").onclick = () => debugCmd("next");
+$("dbgStep").onclick = () => debugCmd("step");
+$("dbgReturn").onclick = () => debugCmd("return");
+$("dbgStop").onclick = async () => {
+  if (debugSession)
+    await postJson("/api/debug/stop", { session: debugSession });
+  debugSession = null;
+  $("debugStatus").textContent = "⏹ Stopped";
+  $("debugVars").textContent = "";
+};
+$("debugClose").onclick = () => debugShowPanel(false);
 
 /* ---------------- boot ---------------- */
 loadFiles();

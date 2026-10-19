@@ -992,6 +992,96 @@ def run_test_file(rel):
     return results
 
 
+# ---------------- Debugger sessions (Roadmap G7) ----------------
+# One debug_bridge.py subprocess per session; a reader thread
+# feeds a queue so HTTP handlers can wait with a timeout
+# without fighting the pipe's buffering.
+import queue as _queue
+import threading as _threading
+
+_DEBUG_SESSIONS = {}
+
+
+def _dbg_read(session, timeout=30):
+    try:
+        line = session["queue"].get(timeout=timeout)
+    except _queue.Empty:
+        return {"event": "timeout"}
+    if line is None:
+        return {"event": "exited", "code": -1, "stdout": "",
+                "error": "debugger process ended"}
+    try:
+        return json.loads(line)
+    except Exception:
+        return {"event": "timeout"}
+
+
+def _dbg_send(session, obj):
+    session["proc"].stdin.write(json.dumps(obj) + "\n")
+    session["proc"].stdin.flush()
+
+
+def _dbg_kill(sid):
+    session = _DEBUG_SESSIONS.pop(sid, None)
+    if session:
+        try:
+            session["proc"].kill()
+        except Exception:
+            pass
+
+
+def _dbg_start(path, breakpoints):
+    for sid in list(_DEBUG_SESSIONS):
+        _dbg_kill(sid)
+    p = safe_path(path)
+    if not p.is_file():
+        raise ValueError("no such file: " + path)
+    bridge = Path(__file__).resolve().parent / "debug_bridge.py"
+    proc = subprocess.Popen(
+        [sys.executable, "-u", str(bridge), str(p)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        text=True, cwd=str(WORKSPACE), bufsize=1)
+    q = _queue.Queue()
+
+    def reader():
+        try:
+            for line in proc.stdout:
+                q.put(line)
+        except Exception:
+            pass
+        q.put(None)
+
+    _threading.Thread(target=reader, daemon=True).start()
+    session = {"proc": proc, "queue": q}
+    sid = "dbg-%d" % int(time.time() * 1000)
+    _DEBUG_SESSIONS[sid] = session
+    _dbg_send(session, {"cmd": "start",
+                        "breakpoints": [int(b) for b in breakpoints]})
+    ev = _dbg_read(session, timeout=15)
+    if ev.get("event") == "exited":
+        _dbg_kill(sid)
+    return sid, ev
+
+
+def _dbg_cmd(sid, cmd):
+    session = _DEBUG_SESSIONS.get(sid)
+    if not session:
+        raise ValueError("debug session is gone - start again")
+    if cmd == "quit":
+        try:
+            _dbg_send(session, {"cmd": "quit"})
+            _dbg_read(session, timeout=3)
+        except Exception:
+            pass
+        _dbg_kill(sid)
+        return {"event": "exited", "code": 0, "stdout": ""}
+    _dbg_send(session, {"cmd": cmd})
+    ev = _dbg_read(session, timeout=60)
+    if ev.get("event") == "exited":
+        _dbg_kill(sid)
+    return ev
+
+
 def git_out(args, timeout=30):
     if not shutil.which("git"):
         raise ValueError("git is not installed")
@@ -1517,6 +1607,19 @@ class Handler(SimpleHTTPRequestHandler):
                         total += n
                 return self.send_json({"filesChanged": files_changed,
                                        "replacements": total})
+            if parsed.path == "/api/debug/start":
+                data = self.read_json()
+                sid, ev = _dbg_start(data["path"],
+                                     data.get("breakpoints", []))
+                return self.send_json({"session": sid, "event": ev})
+            if parsed.path == "/api/debug/cmd":
+                data = self.read_json()
+                ev = _dbg_cmd(data["session"], data["cmd"])
+                return self.send_json({"event": ev})
+            if parsed.path == "/api/debug/stop":
+                data = self.read_json()
+                _dbg_kill(data.get("session", ""))
+                return self.send_json({"ok": True})
             if parsed.path == "/api/tests/run":
                 data = self.read_json()
                 want = data.get("path")

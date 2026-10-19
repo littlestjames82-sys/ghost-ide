@@ -194,6 +194,9 @@ Agent mode: staged multi-file edits with per-file approval. Next: G6 test runner
 ## Phase 16 - Roadmap G6 - SHIPPED Oct 19, 2026 (phone v1.16.0 + desktop)
 Test runner panel with per-test results and jump-to-failure. Next: G7 debugger.
 
+## Phase 17 - Roadmap G7 - SHIPPED Oct 19, 2026 (phone v1.17.0 + desktop)
+Debugger: gutter breakpoints, pdb bridge sessions, variables pane. Next: G8 self-fixing loop.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
