@@ -248,6 +248,9 @@ API client closed on desktop proof. Next: G24 docs mode.
 ## Phase 34 - Roadmap G24 - SHIPPED v1.32.0 Oct 19, 2026
 Docs mode closed. Next: G25 asset tools (closes Arc F).
 
+## Phase 35 - Roadmap G25 - SHIPPED v1.33.0 Oct 19, 2026
+Asset tools built; Arc F complete. Next: Arc G, G26 pre-commit AI review.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

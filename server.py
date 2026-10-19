@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.32.0"
+APP_VERSION = "1.33.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -1601,9 +1601,17 @@ class Handler(SimpleHTTPRequestHandler):
                     if any(part.startswith(".") for part in
                            p.relative_to(WORKSPACE).parts):
                         continue
-                    out.append({
+                    entry = {
                         "path": str(p.relative_to(WORKSPACE)),
-                        "type": "dir" if p.is_dir() else "file"})
+                        "type": "dir" if p.is_dir() else "file"}
+                    if entry["type"] == "file":
+                        # Roadmap G25: sizes power the asset
+                        # browser's heaviest-first sort.
+                        try:
+                            entry["size"] = p.stat().st_size
+                        except OSError:
+                            entry["size"] = 0
+                    out.append(entry)
                 return self.send_json({"files": out})
             if parsed.path == "/api/history":
                 # Local History (Phase 11): snapshots of one file.
@@ -2578,6 +2586,21 @@ class Handler(SimpleHTTPRequestHandler):
                         "utf-8", "replace"),
                     "size": len(raw), "truncated": truncated,
                     "ms": int((_time2.time() - t0) * 1000)})
+            if parsed.path == "/api/file64":
+                # Roadmap G25: binary write (base64 body) for
+                # generated assets like icon PNGs, which the
+                # text file API would corrupt.
+                data = self.read_json()
+                p = safe_path(data["path"])
+                import base64 as _b64
+                raw = _b64.b64decode(data.get("base64") or "")
+                if len(raw) > 8 * 1024 * 1024:
+                    raise ValueError("file too large (8 MB cap)")
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(raw)
+                return self.send_json({"ok": True,
+                                       "path": data["path"],
+                                       "size": len(raw)})
             if parsed.path == "/api/db/info":
                 # Roadmap G22: SQLite studio. Read-only open;
                 # tables with columns and row counts.

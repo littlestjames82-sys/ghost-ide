@@ -208,7 +208,7 @@ to a single static HTML site.
 Done when: this roadmap previews correctly and exports
 to a page that opens standalone.
 
-**G25. Asset tools.** An asset browser for images in the
+**G25. Asset tools.** 🔶 BUILT Oct 19, 2026 (v1.33.0) — endpoints and browser data proven byte-exact on the fixture (heavy image found by size); the in-app icon set generation completes on first real-browser run. Arc F complete. An asset browser for images in the
 workspace (thumbnails, dimensions, size), plus an icon
 maker: text or simple shapes to a PNG icon set at the
 sizes Android and the web want.

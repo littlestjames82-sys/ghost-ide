@@ -2987,6 +2987,7 @@ const COMMANDS = [
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
   { title: "API client", run: () => $("toolApi").click() },
   { title: "Export docs site", run: () => $("toolDocs").click() },
+  { title: "Asset browser", run: () => $("toolAssets").click() },
   { title: "Local history (previous versions)", run: () => $("toolHistory").click() },
   { title: "Check whole project (Problems)", run: () => $("toolCheckAll").click() },
   { title: "Reopen closed tab", run: () => {
@@ -4418,6 +4419,141 @@ $("toolFix").onclick = () => {
   hideTools();
   runFixLoop();
 };
+
+/* ---------------- Roadmap G25: asset tools ----------------
+   Asset browser: every image in the workspace with a
+   thumbnail, dimensions, and size, heaviest first so the
+   bloat is easy to spot. Icon maker: a canvas glyph plus
+   simple shapes, exported as a PNG set at the sizes
+   Android and the web want (written via /api/file64). */
+const IMG_EXTS = ["png", "jpg", "jpeg", "gif", "webp",
+  "svg", "bmp", "ico", "avif"];
+let assetSortBySize = true;
+function fmtSize(n) {
+  if (n == null) return "?";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / (1024 * 1024)).toFixed(2) + " MB";
+}
+async function openAssets() {
+  $("assetPanel").classList.remove("hidden");
+  $("toolsPanel").classList.add("hidden");
+  const r = await fetch("/api/files");
+  const d = await r.json();
+  const imgs = (d.files || []).filter((f) =>
+    f.type === "file" && IMG_EXTS.includes(
+      (f.path.split(".").pop() || "").toLowerCase()));
+  imgs.sort((a, b) => assetSortBySize
+    ? (b.size || 0) - (a.size || 0)
+    : a.path.localeCompare(b.path));
+  const grid = $("assetGrid");
+  grid.innerHTML = "";
+  if (!imgs.length) {
+    grid.innerHTML = "<div class=\"dim\">No images in this " +
+      "workspace yet. The icon maker below can create some.</div>";
+  }
+  imgs.forEach((f, i) => {
+    const card = document.createElement("div");
+    card.className = "assetCard" +
+      (assetSortBySize && i === 0 && imgs.length > 1
+        ? " heaviest" : "");
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.src = "/api/raw?path=" + encodeURIComponent(f.path);
+    img.alt = f.path;
+    const name = document.createElement("div");
+    name.className = "aName";
+    name.textContent = f.path;
+    const meta = document.createElement("div");
+    meta.className = "aMeta";
+    meta.textContent = fmtSize(f.size) +
+      (assetSortBySize && i === 0 && imgs.length > 1
+        ? " · 🐘 heaviest" : "");
+    img.onload = () => {
+      meta.textContent = img.naturalWidth + "×" +
+        img.naturalHeight + " · " + meta.textContent;
+    };
+    card.append(img, name, meta);
+    card.onclick = () => {
+      $("previewTitle").textContent = "Preview: " + f.path;
+      const body = $("previewBody");
+      body.innerHTML = "";
+      const big = document.createElement("img");
+      big.src = img.src;
+      big.alt = f.path;
+      body.appendChild(big);
+      $("previewPanel").classList.remove("hidden");
+    };
+    grid.appendChild(card);
+  });
+  drawIcon();
+}
+function drawIcon() {
+  const cv = $("iconCanvas");
+  const ctx = cv.getContext("2d");
+  const S = cv.width;
+  ctx.clearRect(0, 0, S, S);
+  const shape = $("iconShape").value;
+  if (shape !== "none") {
+    ctx.fillStyle = $("iconBg").value;
+    ctx.beginPath();
+    if (shape === "circle") {
+      ctx.arc(S / 2, S / 2, S / 2 - 4, 0, Math.PI * 2);
+    } else if (shape === "rounded") {
+      ctx.roundRect(4, 4, S - 8, S - 8, 96);
+    } else {
+      ctx.rect(4, 4, S - 8, S - 8);
+    }
+    ctx.fill();
+  }
+  const glyph = $("iconText").value || "👻";
+  ctx.fillStyle = $("iconFg").value;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "300px system-ui, sans-serif";
+  ctx.fillText(glyph, S / 2, S / 2 + 12);
+}
+async function makeIconSet() {
+  drawIcon();
+  const sizes = [
+    [48, "icons/icon-48.png"], [72, "icons/icon-72.png"],
+    [96, "icons/icon-96.png"], [144, "icons/icon-144.png"],
+    [192, "icons/icon-192.png"], [512, "icons/icon-512.png"],
+    [180, "icons/apple-touch-icon.png"],
+    [32, "icons/favicon-32.png"],
+  ];
+  let ok = 0;
+  for (const [size, path] of sizes) {
+    const c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    c.getContext("2d").drawImage($("iconCanvas"), 0, 0, size, size);
+    const b64 = c.toDataURL("image/png").split(",")[1];
+    const r = await fetch("/api/file64", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, base64: b64 }),
+    });
+    const d = await r.json();
+    if (!d.error) ok++;
+  }
+  $("iconMsg").textContent = "Wrote " + ok + " icon files to " +
+    "icons/ (48-512 px, Apple touch icon, favicon).";
+  loadFiles();
+}
+$("toolAssets").onclick = openAssets;
+$("assetClose").onclick = () =>
+  $("assetPanel").classList.add("hidden");
+$("assetSortBtn").onclick = () => {
+  assetSortBySize = !assetSortBySize;
+  $("assetSortBtn").textContent = assetSortBySize
+    ? "Largest first" : "Name A-Z";
+  openAssets();
+};
+$("iconMakeBtn").onclick = makeIconSet;
+for (const id of ["iconText", "iconShape", "iconBg", "iconFg"]) {
+  $(id).addEventListener("input", drawIcon);
+}
 
 /* ---------------- Roadmap G23: API client ----------------
    Postman-lite. Requests are sent by the IDE's own server
