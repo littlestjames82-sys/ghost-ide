@@ -179,6 +179,9 @@ Breadcrumbs, explorer filter, session restore (tabs reopen on launch), reopen cl
 ## Phase 11 - Round eleven - SHIPPED Oct 19, 2026 (phone v1.10.0 + desktop)
 Local History on both servers (snapshot-on-save, self-undoing restore), project-wide Problems check, git blame in breadcrumbs, per-file Revert, status-bar branch chip, tabstop snippets. All desktop endpoints live-verified.
 
+## Phase 12 - Roadmap G1 - SHIPPED Oct 19, 2026 (phone v1.11.0 + desktop)
+Workspace symbol index on both servers: definitions + references from a cached two-pass index; Go to Symbol is workspace-wide. Ryan directed: after G1, build the rest.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

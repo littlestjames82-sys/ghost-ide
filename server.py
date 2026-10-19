@@ -217,6 +217,92 @@ def check_output_info(output):
     return line_no, message
 
 
+# ---------------- Symbol index (Roadmap G1) ----------------
+# A two-pass index over the workspace: pass 1 collects every
+# definition (functions, classes, methods, module values);
+# pass 2 records every word-boundary occurrence of a defined
+# name. Cached against a fingerprint of (path, size, mtime)
+# so any save invalidates it and the next query rebuilds.
+import re as _re_mod
+
+_SYM_DEFS = [
+    (_re_mod.compile(r"^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)"),
+     "py"),
+    (_re_mod.compile(r"^(\s*)class\s+([A-Za-z_]\w*)"), "py"),
+    (_re_mod.compile(r"^([A-Za-z_]\w*)\s*=(?!=)"), "py"),
+    (_re_mod.compile(r"^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)"),
+     "js"),
+    (_re_mod.compile(r"^\s*class\s+([A-Za-z_$][\w$]*)"), "js"),
+    (_re_mod.compile(
+        r"^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=(?!=)"), "js"),
+]
+_SYM_CACHE = {"fp": None, "index": None}
+
+
+def _symbol_index():
+    files = []
+    fp_parts = []
+    for rel, p in iter_text_files():
+        try:
+            st = p.stat()
+        except Exception:
+            continue
+        fp_parts.append((str(rel), st.st_size, int(st.st_mtime)))
+        files.append((str(rel), p))
+    fp = hash(tuple(fp_parts))
+    if _SYM_CACHE["fp"] == fp and _SYM_CACHE["index"] is not None:
+        return _SYM_CACHE["index"]
+    symbols = []
+    texts = {}
+    for rel, p in files:
+        try:
+            text = p.read_text(errors="strict")
+        except Exception:
+            continue
+        texts[rel] = text
+        ext = p.suffix.lower()
+        lang = "py" if ext == ".py" else "js"
+        for i, line in enumerate(text.splitlines(), 1):
+            for pat, plang in _SYM_DEFS:
+                if plang != lang:
+                    continue
+                m = pat.match(line)
+                if m:
+                    name = m.group(m.lastindex)
+                    if plang == "py" and pat is _SYM_DEFS[0][0]:
+                        kind = "method" if m.group(1) else "function"
+                    elif plang == "py" and pat is _SYM_DEFS[1][0]:
+                        kind = "class"
+                    elif plang == "py":
+                        kind = "value"
+                    elif pat is _SYM_DEFS[4][0]:
+                        kind = "class"
+                    elif pat is _SYM_DEFS[5][0]:
+                        kind = "value"
+                    else:
+                        kind = "function"
+                    symbols.append({"name": name, "kind": kind,
+                                    "path": rel, "line": i})
+                    break
+    names = {s["name"] for s in symbols}
+    refs = {}
+    if names:
+        big = _re_mod.compile(r"\b(" + "|".join(
+            sorted((_re_mod.escape(n) for n in names),
+                   key=len, reverse=True)) + r")\b")
+        for rel, text in texts.items():
+            for i, line in enumerate(text.splitlines(), 1):
+                for m in big.finditer(line):
+                    refs.setdefault(m.group(1), []).append(
+                        {"path": rel, "line": i,
+                         "text": line.strip()[:160]})
+    index = {"symbols": symbols, "refs": refs,
+             "files": len(texts)}
+    _SYM_CACHE["fp"] = fp
+    _SYM_CACHE["index"] = index
+    return index
+
+
 def git_out(args, timeout=30):
     if not shutil.which("git"):
         raise ValueError("git is not installed")
@@ -379,6 +465,27 @@ class Handler(SimpleHTTPRequestHandler):
                             "message": msg})
                 return self.send_json({
                     "problems": results, "checked": checked})
+            if parsed.path == "/api/symbols":
+                idx = _symbol_index()
+                return self.send_json({
+                    "symbols": idx["symbols"],
+                    "files": idx["files"]})
+            if parsed.path == "/api/symbols/search":
+                qs = urllib.parse.parse_qs(parsed.query)
+                name = qs.get("name", [""])[0]
+                idx = _symbol_index()
+                hits = [s for s in idx["symbols"]
+                        if s["name"] == name]
+                return self.send_json({"symbols": hits})
+            if parsed.path == "/api/references":
+                qs = urllib.parse.parse_qs(parsed.query)
+                name = qs.get("name", [""])[0]
+                idx = _symbol_index()
+                all_refs = idx["refs"].get(name, [])
+                return self.send_json({
+                    "references": all_refs[:300],
+                    "total": len(all_refs),
+                    "truncated": len(all_refs) > 300})
             if parsed.path == "/api/file":
                 rel = urllib.parse.parse_qs(parsed.query)["path"][0]
                 p = safe_path(rel)
