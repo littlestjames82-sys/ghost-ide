@@ -143,7 +143,7 @@ byte-identical on another.
 
 ## Arc E — Ship (from Ryan's tool to a product)
 
-**G18. Desktop apps.** GhostIDE packaged for Windows,
+**G18. Desktop apps.** 🔶 BUILT Oct 19, 2026 (v1.28.0) — Linux package proven end to end from a clean HOME (install, seeded workspace, bundled llama + 7B answered); Windows/Mac scripted + Actions workflow, first builds pending on those OSes. GhostIDE packaged for Windows,
 Mac, and Linux with the 7B model as an optional
 in-app download, one-command install, and an update
 check that never auto-installs.

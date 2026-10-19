@@ -713,8 +713,10 @@ $("draftDiscard").onclick = () => {
 $("acceptChip").onclick = () => acceptGhost(view);
 
 /* Settings panel (Phase 1.6) */
-$("settingsBtn").onclick = () =>
+$("settingsBtn").onclick = () => {
   $("settingsPanel").classList.toggle("hidden");
+  refreshModelDl();
+};
 $("settingsClose").onclick = () =>
   $("settingsPanel").classList.add("hidden");
 {
@@ -761,12 +763,96 @@ $("modelSwitch").onclick = async () => {
   pollHealth();
 };
 
+/* ---------------- Roadmap G18: update check + model download ----
+   The update check only ever REPORTS; it never downloads
+   or installs anything by itself. */
+$("setUpdateBtn").onclick = async () => {
+  const out = $("setUpdateOut");
+  out.textContent = "checking…";
+  try {
+    const r = await fetch("/api/update/check");
+    const d = await r.json();
+    if (d.current)
+      $("setVersion").textContent = "v" + d.current;
+    if (!d.ok) {
+      out.textContent = d.note || d.error || "check failed";
+      return;
+    }
+    out.innerHTML = "";
+    out.appendChild(document.createTextNode(
+      d.updateAvailable
+        ? "Update available: v" + d.latest + ". "
+        : "You are up to date. "));
+    if (d.updateAvailable && d.url) {
+      const a = document.createElement("a");
+      a.href = d.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = "Get it";
+      out.appendChild(a);
+      out.appendChild(document.createTextNode(
+        " (updates are never installed automatically)"));
+    }
+  } catch (e) {
+    out.textContent = "check failed (offline?)";
+  }
+};
+
+let modelDlTimer = null;
+async function refreshModelDl() {
+  try {
+    const r = await fetch("/api/model/download");
+    const d = await r.json();
+    const out = $("setModelDlOut");
+    const btn = $("setModelDlBtn");
+    if (d.note) {
+      out.textContent = d.note;
+      btn.classList.add("hidden");
+      return;
+    }
+    btn.classList.remove("hidden");
+    if (d.downloaded) {
+      out.textContent = "downloaded ✓ (" + d.path + ")";
+      btn.textContent = "Download again";
+    } else if (d.state === "downloading") {
+      out.textContent = "downloading… "
+        + Math.round(100 * (d.done || 0) / (d.total || 1))
+        + "% of 4.7 GB";
+      btn.textContent = "Downloading…";
+    } else if (d.state === "verifying") {
+      out.textContent = "verifying checksum…";
+      btn.textContent = "Verifying…";
+    } else if (d.state === "error") {
+      out.textContent = "error: " + d.error;
+      btn.textContent = "Retry download";
+    } else {
+      out.textContent = "not downloaded (goes to "
+        + d.modelsDir + ")";
+      btn.textContent = "Download 7B model";
+    }
+    if (d.state === "downloading" || d.state === "verifying") {
+      if (!modelDlTimer)
+        modelDlTimer = setInterval(refreshModelDl, 2000);
+    } else if (modelDlTimer) {
+      clearInterval(modelDlTimer);
+      modelDlTimer = null;
+    }
+  } catch (e) { /* backend hiccup; reopening Settings retries */ }
+}
+$("setModelDlBtn").onclick = async () => {
+  const d = await postJson("/api/model/download", { id: "7b" });
+  if (d.error) { alert(d.error); return; }
+  refreshModelDl();
+};
+
 /* ---------------- model status ---------------- */
 async function pollHealth() {
   try {
     const r = await fetch("/api/health");
     const d = await r.json();
     modelUp = d.model === "up";
+    if (d.version)
+      $("setVersion").textContent = "v" + d.version;
     $("modelInfo").textContent =
       "Model: " + d.modelName + " · status: " + d.model;
     const pill = $("modelPill");

@@ -227,6 +227,9 @@ Pair mode: shared-server presence + conflict-safe sync. Next: G17 encrypted back
 ## Phase 27 - Roadmap G17 - BUILT Oct 19, 2026 (v1.27.0), device proof pending
 Encrypted backup, one format both builds, cross-proven. Arc D complete pending proofs. Next: Arc E ship, G18 desktop apps.
 
+## Phase 28 - Roadmap G18 - BUILT Oct 19, 2026 (v1.28.0)
+Desktop apps: PyInstaller packaging, in-app 7B download, report-only update check. Linux clean-room proven. Next: G19 store launch (Ryan gates: signing key, policy, screenshots).
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

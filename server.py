@@ -27,6 +27,12 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
+APP_VERSION = "1.28.0"
+FROZEN = getattr(sys, "frozen", False)
+UPDATE_URL = os.environ.get(
+    "GHOST_IDE_UPDATE_URL",
+    "https://raw.githubusercontent.com/littlestjames82-sys"
+    "/ghost-ide/main/VERSION.json")
 LLAMA_BASE = os.environ.get("LLAMA_BASE", "http://127.0.0.1:8080")
 PAIR_PEERS = {}  # Roadmap G16: pair-mode presence, id -> peer dict
 
@@ -119,14 +125,65 @@ def backup_decrypt(passphrase, text):
             "wrong passphrase or damaged backup "
             "(integrity check failed)")
     return _bk_crypt(enc_key, nonce, ct)
-LLAMA_BIN = os.environ.get(
-    "LLAMA_SERVER_BIN",
-    str(Path.home() / "workspace/tools/llama.cpp/llama-b11429/llama-server"))
-MODEL = os.environ.get(
-    "GHOST_IDE_MODEL",
-    str(Path.home() / "workspace/downloads/"
-        "qwen2.5-coder-7b-instruct-q4_k_m.gguf"))
+MODEL_CATALOG = {
+    "7b": {
+        "file": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+        "url": "https://huggingface.co/Qwen/"
+               "Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/"
+               "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+        "bytes": 4683073536,
+        "sha256": "509287f78cb4d4cf6b3843734733b914b2c158e43"
+                  "e22a7f4bf5e963800894d3c",
+    },
+}
+MODELS_DIR = Path(os.environ.get(
+    "GHOST_IDE_MODELS", Path.home() / ".ghostide" / "models"))
+
+
+def _find_llama():
+    env = os.environ.get("LLAMA_SERVER_BIN")
+    if env:
+        return env
+    name = "llama-server.exe" if os.name == "nt" else "llama-server"
+    for cand in (ROOT / "llama" / name,
+                 ROOT.parent / "llama" / name):
+        if cand.is_file():
+            return str(cand)
+    return str(Path.home() / "workspace/tools/llama.cpp"
+               "/llama-b11429" / name)
+
+
+LLAMA_BIN = _find_llama()
+
+
+def _default_model():
+    env = os.environ.get("GHOST_IDE_MODEL")
+    if env:
+        return env
+    dl = MODELS_DIR / MODEL_CATALOG["7b"]["file"]
+    if dl.is_file():
+        return str(dl)
+    return str(Path.home() / "workspace/downloads"
+               "/qwen2.5-coder-7b-instruct-q4_k_m.gguf")
+
+
+MODEL = _default_model()
 MODEL_NAME = "qwen2.5-coder-7b"
+
+DL_STATE = {"state": "idle", "done": 0, "total": 0,
+            "error": "", "id": ""}
+
+
+def py_cmd():
+    """Interpreter for spawned Python work (run / tests /
+    debug / REPL / slices). Dev mode: this Python. Packaged
+    (frozen): the app binary is not an interpreter, so use
+    a python3 on PATH when one exists."""
+    if not FROZEN:
+        return [sys.executable]
+    import shutil as _sh
+    found = _sh.which("python3") or _sh.which("python")
+    return [found] if found else [sys.executable]
 
 _model_proc = None
 
@@ -207,7 +264,7 @@ def make_context(mode, budget):
     outdir = Path(tempfile.mkdtemp(prefix="ghostide-slice-"))
     env = dict(os.environ, PYTHONPATH=src)
     r = subprocess.run(
-        [sys.executable, "-m", "ghostslice", "export", str(WORKSPACE),
+        [py_cmd()[0], "-m", "ghostslice", "export", str(WORKSPACE),
          "-o", str(outdir), "--mode", mode, "--fit", str(budget)],
         capture_output=True, text=True, timeout=180, env=env)
     manifest_p = outdir / "manifest.json"
@@ -1018,7 +1075,7 @@ def run_test_file(rel):
     results = []
     if rel.endswith(".py"):
         rc, out, err, ms = run_cmd(
-            [sys.executable, "-c", _TEST_RUNNER, str(p)],
+            [py_cmd()[0], "-c", _TEST_RUNNER, str(p)],
             cwd=str(WORKSPACE), timeout=60)
         for line in out.splitlines():
             line = line.strip()
@@ -1129,7 +1186,7 @@ def _dbg_start(path, breakpoints):
         raise ValueError("no such file: " + path)
     bridge = Path(__file__).resolve().parent / "debug_bridge.py"
     proc = subprocess.Popen(
-        [sys.executable, "-u", str(bridge), str(p)],
+        [py_cmd()[0], "-u", str(bridge), str(p)],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         text=True, cwd=str(WORKSPACE), bufsize=1)
     q = _queue.Queue()
@@ -1279,7 +1336,7 @@ _REPL_LOCK = _threading.Lock()
 
 def _repl_spawn():
     proc = subprocess.Popen(
-        [sys.executable, "-u", "-i"], stdin=subprocess.PIPE,
+        [py_cmd()[0], "-u", "-i"], stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         cwd=str(WORKSPACE))
     q = _queue.Queue()
@@ -1367,6 +1424,67 @@ def git_out(args, timeout=30):
                    WORKSPACE, timeout)
 
 
+
+def _dl_worker(mid):
+    """Background model download (Roadmap G18): streams to
+    a .part file with resume, then an exact-size gate and
+    SHA-256 verification before the file becomes the
+    model - the same discipline as the phone downloader."""
+    global MODEL, MODEL_NAME
+    import hashlib
+    entry = MODEL_CATALOG[mid]
+    try:
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        dest = MODELS_DIR / entry["file"]
+        part = MODELS_DIR / (entry["file"] + ".part")
+        have = part.stat().st_size if part.exists() else 0
+        if have > entry["bytes"]:
+            part.unlink()
+            have = 0
+        DL_STATE.update({"state": "downloading", "id": mid,
+                         "done": have, "total": entry["bytes"],
+                         "error": ""})
+        req = urllib.request.Request(entry["url"])
+        if have:
+            req.add_header("Range", "bytes=%d-" % have)
+        with urllib.request.urlopen(req, timeout=60) as r:
+            if have and r.status != 206:
+                have = 0
+            with open(part, "ab" if have else "wb") as f:
+                done = have
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    DL_STATE["done"] = done
+        if part.stat().st_size != entry["bytes"]:
+            DL_STATE.update({
+                "state": "error",
+                "error": "download incomplete - tap Download "
+                         "again to resume"})
+            return
+        DL_STATE["state"] = "verifying"
+        h = hashlib.sha256()
+        with open(part, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 22), b""):
+                h.update(chunk)
+        if h.hexdigest() != entry["sha256"]:
+            part.unlink(missing_ok=True)
+            DL_STATE.update({
+                "state": "error",
+                "error": "checksum mismatch - the file was "
+                         "deleted; download again"})
+            return
+        part.rename(dest)
+        DL_STATE.update({"state": "done", "done": entry["bytes"]})
+        MODEL = str(dest)
+        MODEL_NAME = dest.name.replace(".gguf", "")
+    except Exception as e:
+        DL_STATE.update({"state": "error", "error": str(e)})
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -1421,7 +1539,7 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/health":
                 return self.send_json(
                     {"model": "up" if llama_health() else "down",
-                     "modelName": MODEL_NAME,
+                     "modelName": MODEL_NAME, "version": APP_VERSION,
                      "workspace": str(WORKSPACE)})
             if parsed.path == "/api/files":
                 out = []
@@ -1497,14 +1615,14 @@ class Handler(SimpleHTTPRequestHandler):
                 for rel, p in iter_text_files():
                     ext = p.suffix.lower()
                     if ext == ".py":
-                        argv = [sys.executable, "-c",
+                        argv = [py_cmd()[0], "-c",
                                 "import ast,sys; "
                                 "ast.parse(open(sys.argv[1], "
                                 "encoding='utf-8').read())", str(p)]
                     elif ext in (".js", ".mjs"):
                         argv = ["node", "--check", str(p)]
                     elif ext == ".json":
-                        argv = [sys.executable, "-c",
+                        argv = [py_cmd()[0], "-c",
                                 "import json,sys; "
                                 "json.load(open(sys.argv[1]))", str(p)]
                     else:
@@ -1561,6 +1679,47 @@ class Handler(SimpleHTTPRequestHandler):
                     {"path": rel, "content": p.read_text(errors="replace")})
             if parsed.path == "/api/workspace":
                 return self.send_json({"workspace": str(WORKSPACE)})
+            if parsed.path == "/api/update/check":
+                try:
+                    req = urllib.request.Request(
+                        UPDATE_URL,
+                        headers={"User-Agent":
+                                 "GhostIDE/" + APP_VERSION})
+                    with urllib.request.urlopen(req,
+                                                timeout=6) as r:
+                        info = json.loads(
+                            r.read().decode("utf-8"))
+                    latest = str(info.get("version", ""))
+
+                    def _tup(v):
+                        out = []
+                        for x in v.split("."):
+                            try:
+                                out.append(int(x))
+                            except Exception:
+                                out.append(0)
+                        return tuple(out)
+                    return self.send_json({
+                        "ok": True, "current": APP_VERSION,
+                        "latest": latest,
+                        "updateAvailable": bool(latest)
+                        and _tup(latest) > _tup(APP_VERSION),
+                        "notes": info.get("notes", ""),
+                        "url": info.get("url", "")})
+                except Exception:
+                    return self.send_json({
+                        "ok": False, "current": APP_VERSION,
+                        "error": "could not reach the update "
+                                 "server"})
+            if parsed.path == "/api/model/download":
+                entry = MODEL_CATALOG["7b"]
+                dest = MODELS_DIR / entry["file"]
+                return self.send_json({
+                    **DL_STATE,
+                    "downloaded": dest.is_file(),
+                    "path": str(dest),
+                    "bytes": entry["bytes"],
+                    "modelsDir": str(MODELS_DIR)})
             if parsed.path == "/api/model/info":
                 mp = Path(MODEL)
                 return self.send_json({
@@ -1744,6 +1903,20 @@ class Handler(SimpleHTTPRequestHandler):
         global WORKSPACE, MODEL, MODEL_NAME
         parsed = urllib.parse.urlparse(self.path)
         try:
+            if parsed.path == "/api/model/download":
+                data = self.read_json()
+                mid = str(data.get("id", "7b"))
+                if mid not in MODEL_CATALOG:
+                    raise ValueError("unknown model: " + mid)
+                if DL_STATE["state"] in ("downloading",
+                                         "verifying"):
+                    return self.send_json({**DL_STATE})
+                import threading
+                threading.Thread(
+                    target=_dl_worker, args=(mid,),
+                    daemon=True).start()
+                return self.send_json({**DL_STATE,
+                                       "state": "downloading"})
             if parsed.path == "/api/model/start":
                 return self.send_json(start_model())
             if parsed.path == "/api/file":
@@ -1894,7 +2067,7 @@ class Handler(SimpleHTTPRequestHandler):
                 p = safe_path(data["path"])
                 if not p.is_file():
                     raise ValueError("no such file: " + data["path"])
-                runners = {".py": [sys.executable], ".js": ["node"],
+                runners = {".py": py_cmd(), ".js": ["node"],
                            ".sh": ["bash"], ".mjs": ["node"]}
                 cmd = runners.get(p.suffix.lower())
                 if cmd is None:
@@ -2203,14 +2376,14 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("file not found: " + data["path"])
                 ext = p.suffix.lower()
                 if ext == ".py":
-                    argv = [sys.executable, "-c",
+                    argv = [py_cmd()[0], "-c",
                             "import ast,sys; "
                             "ast.parse(open(sys.argv[1], "
                             "encoding='utf-8').read())", str(p)]
                 elif ext in (".js", ".mjs"):
                     argv = ["node", "--check", str(p)]
                 elif ext == ".json":
-                    argv = [sys.executable, "-c",
+                    argv = [py_cmd()[0], "-c",
                             "import json,sys; "
                             "json.load(open(sys.argv[1]))", str(p)]
                 else:
@@ -2283,6 +2456,21 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
+    global WORKSPACE
+    if FROZEN and "GHOST_IDE_WORKSPACE" not in os.environ:
+        home_ws = Path.home() / "GhostIDE"
+        if not home_ws.exists():
+            home_ws.mkdir(parents=True, exist_ok=True)
+            seed = ROOT / "playground"
+            if seed.is_dir():
+                import shutil as _seed_sh
+                for item in sorted(seed.rglob("*")):
+                    if item.is_file():
+                        dst = home_ws / item.relative_to(seed)
+                        dst.parent.mkdir(parents=True,
+                                         exist_ok=True)
+                        _seed_sh.copy2(item, dst)
+        WORKSPACE = home_ws
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"GhostIDE at http://{HOST}:{PORT}  workspace={WORKSPACE}")

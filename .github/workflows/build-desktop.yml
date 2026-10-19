@@ -1,0 +1,35 @@
+# Build the GhostIDE desktop packages (Roadmap G18).
+# Manual trigger only: Actions tab, "Build desktop
+# packages", Run workflow. Produces one artifact per OS.
+name: Build desktop packages
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            script: bash packaging/build-linux.sh
+            artifact: packaging/GhostIDE-linux.tar.gz
+          - os: macos-latest
+            script: bash packaging/build-macos.sh
+            artifact: packaging/GhostIDE-macos.tar.gz
+          - os: windows-latest
+            script: ./packaging/build-windows.ps1
+            artifact: packaging/GhostIDE-windows.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build package
+        shell: bash
+        run: ${{ matrix.script }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghostide-${{ matrix.os }}
+          path: ${{ matrix.artifact }}
