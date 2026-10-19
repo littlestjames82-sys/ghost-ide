@@ -824,7 +824,8 @@ async function sendChat() {
         Math.round(body.length / 4) + " tok (rough estimate)";
     } else if (mode !== "file") {
       const d = await postJson("/api/context", {
-        mode, budget: BEHAVIOR.context.sliceBudget });
+        mode, budget: BEHAVIOR.context.sliceBudget,
+        seed: currentFile || undefined });
       if (d.error) {
         addMsg("SYSTEM", "Project slice unavailable: " + d.error +
           " - sending with no project context.");
@@ -841,6 +842,10 @@ async function sendChat() {
           d.tokens.toLocaleString() + " / " + BEHAVIOR.context.sliceBudget.toLocaleString() + " tok · " + d.files +
           " files (full project ~" +
           d.originalTokens.toLocaleString() + " tok)";
+        if (d.mode === "smart" && d.included) {
+          $("ctxMeter").textContent += " · " +
+            d.included.map((i) => i.path).join(", ");
+        }
       }
     }
   }

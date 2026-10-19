@@ -297,7 +297,7 @@ def _symbol_index():
                         {"path": rel, "line": i,
                          "text": line.strip()[:160]})
     index = {"symbols": symbols, "refs": refs,
-             "files": len(texts)}
+             "files": len(texts), "texts": texts}
     _SYM_CACHE["fp"] = fp
     _SYM_CACHE["index"] = index
     return index
@@ -679,6 +679,155 @@ def refactor_move(data):
     return {"files": changes, "move": {"from": frm, "to": to},
             "info": {"filesFixed": len(changes),
                      "replacements": total}}
+
+
+# ---------------- Smart context (Roadmap G4) ----------------
+# GhostSlice v2: instead of slicing the whole workspace flat,
+# start from a seed file and pull in its dependency graph -
+# what it imports, what imports it, the files defining the
+# symbols it uses, and its tests - packed into the budget in
+# that order, with the manifest saying why each file rode
+# along and what got cut.
+import posixpath as _posix
+
+
+def _imports_of(rel, text, all_files):
+    deps = set()
+    if rel.endswith(".py"):
+        for m in _re_mod.finditer(
+                r"^\s*(?:from|import)\s+([\w.]+)", text,
+                _re_mod.M):
+            parts = m.group(1).split(".")
+            for k in range(len(parts), 0, -1):
+                cand = "/".join(parts[:k]) + ".py"
+                if cand in all_files:
+                    deps.add(cand)
+                    break
+                cand2 = "/".join(parts[:k]) + "/__init__.py"
+                if cand2 in all_files:
+                    deps.add(cand2)
+                    break
+        base_dir = _posix.dirname(rel)
+        for m in _re_mod.finditer(
+                r"^\s*from\s*\.([\w.]*)\s+import\s+([\w,\s]+)",
+                text, _re_mod.M):
+            sub = m.group(1)
+            for nm in m.group(2).split(","):
+                nm = nm.strip()
+                if not nm:
+                    continue
+                cand = _posix.normpath(_posix.join(
+                    base_dir, sub.replace(".", "/"),
+                    nm + ".py"))
+                if cand in all_files:
+                    deps.add(cand)
+            if sub:
+                cand = _posix.normpath(_posix.join(
+                    base_dir, sub.replace(".", "/") + ".py"))
+                if cand in all_files:
+                    deps.add(cand)
+    else:
+        base_dir = _posix.dirname(rel)
+        for m in _re_mod.finditer(
+                r"(?:from\s+|require\(\s*)['\"](\.[^'\"]+)['\"]",
+                text):
+            raw = m.group(1)
+            target = _posix.normpath(_posix.join(base_dir, raw))
+            for cand in (target, target + ".js", target + ".mjs",
+                         target + "/index.js"):
+                if cand in all_files:
+                    deps.add(cand)
+                    break
+    deps.discard(rel)
+    return deps
+
+
+def make_smart_context(seed, budget_tokens):
+    if not seed:
+        raise ValueError("Smart context needs a seed: open the "
+                         "file you are working on first.")
+    idx = _symbol_index()
+    texts = idx["texts"]
+    if seed not in texts:
+        raise ValueError("seed file not in the workspace: " + seed)
+    budget_chars = max(2000, int(budget_tokens or 6000) * 4)
+    all_files = set(texts)
+    imports_map = {rel: _imports_of(rel, texts[rel], all_files)
+                   for rel in all_files}
+    imported_by = {}
+    for rel, ds in imports_map.items():
+        for d in ds:
+            imported_by.setdefault(d, set()).add(rel)
+    defs_by_name = {}
+    for s in idx["symbols"]:
+        defs_by_name.setdefault(s["name"], set()).add(s["path"])
+    seed_text = texts[seed]
+    used_names = set(_re_mod.findall(r"[A-Za-z_]\w+", seed_text))
+    neighbor_score = {}
+    for nm in used_names:
+        for pf in defs_by_name.get(nm, ()):
+            if pf != seed:
+                neighbor_score[pf] = neighbor_score.get(pf, 0) + 1
+    neighbors = sorted(neighbor_score,
+                       key=lambda p: -neighbor_score[p])
+    stem = _posix.basename(seed)
+    stem = stem.rsplit(".", 1)[0]
+    tests = sorted(
+        p for p in all_files
+        if p != seed and stem in p and (
+            _posix.basename(p).startswith("test_")
+            or "_test." in _posix.basename(p)
+            or ".test." in _posix.basename(p)
+            or "/tests/" in "/" + p))
+    plan = [(seed, "the file you are editing", 0.45)]
+    for p in sorted(imports_map.get(seed, ())):
+        plan.append((p, "imported by the seed", 0.25))
+    for p in tests:
+        plan.append((p, "test for the seed", 0.20))
+    for p in sorted(imported_by.get(seed, ())):
+        plan.append((p, "imports the seed", 0.25))
+    for p in neighbors:
+        plan.append((p, "defines a symbol the seed uses", 0.20))
+    seen = set()
+    included = []
+    cut = []
+    parts = []
+    used = 0
+    for path, reason, share in plan:
+        if path in seen:
+            continue
+        seen.add(path)
+        content = texts[path]
+        cap = int(budget_chars * share)
+        piece = content[:cap]
+        truncated = len(content) > cap
+        cost = len(piece) + len(path) + 60
+        if included and used + cost > budget_chars:
+            cut.append({"path": path, "reason": reason})
+            continue
+        header = "===== %s (full%s, %s) =====\n" % (
+            path, ", truncated" if truncated else "", reason)
+        parts.append(header + piece)
+        used += len(header) + len(piece)
+        included.append({"path": path, "reason": reason})
+    if cut:
+        parts.append("===== Also related (not included, "
+                     "budget): " + ", ".join(
+                         c["path"] + " (" + c["reason"] + ")"
+                         for c in cut) + " =====")
+    text = "\n\n".join(parts)
+    original = sum(len(t) for t in texts.values())
+    return {
+        "text": text,
+        "tokens": max(1, len(text) // 4),
+        "originalTokens": max(1, original // 4),
+        "files": len(included),
+        "mode": "smart",
+        "budget": budget_tokens,
+        "over": False,
+        "included": included,
+        "cut": cut,
+    }
 
 
 def git_out(args, timeout=30):
@@ -1109,6 +1258,10 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"ok": True, "workspace": str(p)})
             if parsed.path == "/api/context":
                 data = self.read_json()
+                if data.get("mode") == "smart":
+                    return self.send_json(make_smart_context(
+                        data.get("seed"),
+                        data.get("budget", CTX_BUDGET_DEFAULT)))
                 return self.send_json(make_context(
                     data.get("mode", "signatures"),
                     data.get("budget", CTX_BUDGET_DEFAULT)))

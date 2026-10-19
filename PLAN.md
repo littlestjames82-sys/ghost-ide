@@ -185,6 +185,9 @@ Workspace symbol index on both servers: definitions + references from a cached t
 ## Phase 13 - Roadmap G2+G3 - SHIPPED Oct 19, 2026 (v1.12.0, v1.13.0)
 G2 repo map + G3 refactoring engine closed per ROADMAP_20. Marathon continues at G4.
 
+## Phase 14 - Roadmap G4 - SHIPPED Oct 19, 2026 (phone v1.14.0 + desktop)
+Smart (dependency-aware) context mode on both builds, benchmark-proven. Next: G5 agent mode.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
