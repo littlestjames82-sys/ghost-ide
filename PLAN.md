@@ -251,6 +251,9 @@ Docs mode closed. Next: G25 asset tools (closes Arc F).
 ## Phase 35 - Roadmap G25 - SHIPPED v1.33.0 Oct 19, 2026
 Asset tools built; Arc F complete. Next: Arc G, G26 pre-commit AI review.
 
+## Phase 36 - Roadmap G26 - SHIPPED v1.34.0 Oct 19, 2026
+Pre-commit AI review built. Next: G27 context lab.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

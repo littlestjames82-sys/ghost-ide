@@ -217,7 +217,7 @@ in-app and the asset browser finds a heavy image by size.
 
 ## Arc G — Smarter Ghost
 
-**G26. Pre-commit AI review.** Before you commit, Ghost
+**G26. Pre-commit AI review.** ✅ DONE Oct 19, 2026 (v1.34.0) — fixture proof 10/10: planted secrets caught at exact lines, planted bugs caught, clean diff silent. Before you commit, Ghost
 reviews the diff and leaves anchored comments (bug risk,
 dead code, secrets about to leak), each dismissible.
 Done when: the reviewer catches a planted secret and a

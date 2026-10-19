@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.33.0"
+APP_VERSION = "1.34.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -1833,7 +1833,9 @@ class Handler(SimpleHTTPRequestHandler):
                         ["diff", "--cached", "--no-color"])
                 if rc != 0:
                     return self.send_json({"repo": False})
-                return self.send_json({"diff": out[:8000]})
+                # Roadmap G26: the pre-commit review reads
+                # this too, so the cap is generous now.
+                return self.send_json({"diff": out[:60000]})
             if parsed.path == "/api/export-zip":
                 # Download the whole workspace as one zip (backup /
                 # move a project). Dot paths skipped, 50 MB cap.

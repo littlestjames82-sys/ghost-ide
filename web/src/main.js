@@ -1276,6 +1276,25 @@ $("diffClose").onclick = () => $("diffPanel").classList.add("hidden");
 $("commitBtn").onclick = async () => {
   const msg = $("commitMsg").value.trim();
   if (!msg) { alert("Write a commit message first."); return; }
+  // Roadmap G26: the pre-commit guard. Un-dismissed secret
+  // findings ask once, out loud, before the commit lands.
+  // A review failure never blocks the commit by itself.
+  try {
+    const rr = await fetch("/api/git/diff-all");
+    const rd = await rr.json();
+    if (rd.diff) {
+      const dismissed = reviewDismissed();
+      const secrets = reviewDiff(rd.diff).filter((f) =>
+        f.kind === "secret" && !dismissed.has(f.id));
+      if (secrets.length && !confirm("⚠ " + secrets.length +
+          " possible secret(s) in this commit:\n" +
+          secrets.map((s) => s.file + ":" + s.line).join("\n") +
+          "\n\nCommit anyway?")) {
+        openReview();
+        return;
+      }
+    }
+  } catch (e) { /* the review advises; it does not gate */ }
   const d = await postJson("/api/git/commit", { message: msg });
   if (d.error) { alert(d.error); return; }
   $("commitMsg").value = "";
@@ -2984,6 +3003,7 @@ const COMMANDS = [
   { title: "Fix my tests (AI)", run: () => $("toolFix").click() },
   { title: "New project from template", run: () => $("toolTemplates").click() },
   { title: "Pair mode", run: () => $("toolPair").click() },
+  { title: "Review changes (pre-commit)", run: () => $("gitReview").click() },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
   { title: "API client", run: () => $("toolApi").click() },
   { title: "Export docs site", run: () => $("toolDocs").click() },
@@ -4418,6 +4438,206 @@ function openFixReport(log, verdict, backups, touched) {
 $("toolFix").onclick = () => {
   hideTools();
   runFixLoop();
+};
+
+/*@@REVIEW@@*/
+/* ---------------- Roadmap G26: pre-commit AI review --------
+   A deterministic rules scan over the ADDED lines of the
+   diff (secrets, bug risks, dead code, debug leftovers),
+   anchored to file + new-file line, each finding
+   dismissible. The Ask Ghost button adds the model's own
+   read on top; the rules are the floor that always runs. */
+function parseDiff(diff) {
+  const files = [];
+  let cur = null;
+  let newLine = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) { cur = null; continue; }
+    if (line.startsWith("+++ ")) {
+      const p = line.slice(4).trim();
+      if (p === "/dev/null") { cur = null; continue; }
+      cur = { file: p.replace(/^b\//, ""), additions: [] };
+      files.push(cur);
+      continue;
+    }
+    const h = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (h) { newLine = parseInt(h[1], 10); continue; }
+    if (!cur) continue;
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      cur.additions.push({ line: newLine, text: line.slice(1) });
+      newLine++;
+    } else if (line.startsWith("-") || line.startsWith("\\")) {
+      // deletions and "\ No newline" markers do not
+      // advance the new-file line counter
+    } else {
+      newLine++;
+    }
+  }
+  return files;
+}
+const REVIEW_RULES = [
+  { kind: "secret", sev: 3, re: /\bAKIA[0-9A-Z]{16}\b/,
+    msg: "Possible AWS access key ID in plain text." },
+  { kind: "secret", sev: 3,
+    re: /\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}/,
+    msg: "Possible GitHub token in plain text." },
+  { kind: "secret", sev: 3, re: /\bsk-[A-Za-z0-9]{20,}\b/,
+    msg: "Possible API secret key (sk- style) in plain text." },
+  { kind: "secret", sev: 3,
+    re: /BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY/,
+    msg: "A private key is about to be committed." },
+  { kind: "secret", sev: 3,
+    re: /(api[_-]?key|access[_-]?key|private[_-]?key|secret|token|passwd|password|pwd)\b\s*[:=]\s*["'][^"'\s]{7,}["']/i,
+    skip: /["'](your[-_ ]|xxx|changeme|todo|placeholder)/i,
+    msg: "Hardcoded credential in a string literal. Prefer an environment variable or an uncommitted local config." },
+  { kind: "bug", sev: 2, re: /\beval\s*\(|\bexec\s*\(/,
+    msg: "eval/exec runs text as code: dangerous with anything but fully trusted input." },
+  { kind: "bug", sev: 2, re: /^\s*except\s*:/,
+    msg: "Bare except swallows every error, including real bugs. Catch a specific exception." },
+  { kind: "bug", sev: 2, re: /def\s+\w+\s*\([^)]*=\s*(\[\]|\{\})/,
+    msg: "Mutable default argument: one list/dict shared across every call. Default to None instead." },
+  { kind: "bug", sev: 2, re: /shell\s*=\s*True/,
+    msg: "shell=True plus any interpolated value is a command injection risk." },
+  { kind: "bug", sev: 2, re: /pickle\.loads?\s*\(/,
+    msg: "Unpickling data you did not create runs arbitrary code." },
+  { kind: "bug", sev: 1, re: /\.innerHTML\s*=/,
+    msg: "innerHTML assignment: if the value carries user data, that is an XSS hole. Prefer textContent." },
+  { kind: "dead", sev: 1,
+    re: /^\s*(#|\/\/)\s*(def |function |return\b|if\s|for\s|while\s|import |from |var |let |const |class |print\(|console\.)/,
+    msg: "Commented-out code. Delete it; git remembers." },
+  { kind: "debug", sev: 1, re: /\bdebugger\s*;/,
+    msg: "A debugger statement is still in here." },
+  { kind: "debug", sev: 1, re: /\bconsole\.log\s*\(/,
+    exts: ["js", "mjs", "ts", "tsx", "jsx"],
+    msg: "console.log left in (fine while debugging, noisy in a commit)." },
+  { kind: "debug", sev: 1, re: /(^|\s)print\s*\(/,
+    exts: ["py"], skipFile: /test/i,
+    msg: "print() left in (fine while debugging, noisy in a commit)." },
+  { kind: "todo", sev: 0, re: /\b(TODO|FIXME|XXX|HACK)\b/,
+    msg: "New TODO/FIXME marker added." },
+];
+function reviewDiff(diff) {
+  const findings = [];
+  const seen = new Set();
+  for (const f of parseDiff(diff)) {
+    const ext = (f.file.split(".").pop() || "").toLowerCase();
+    for (const add of f.additions) {
+      for (const rule of REVIEW_RULES) {
+        if (rule.exts && !rule.exts.includes(ext)) continue;
+        if (rule.skipFile && rule.skipFile.test(f.file)) continue;
+        if (rule.skip && rule.skip.test(add.text)) continue;
+        if (!rule.re.test(add.text)) continue;
+        const snippet = add.text.trim().slice(0, 120);
+        let hash = 0;
+        const key = f.file + "|" + add.line + "|" + rule.kind +
+          "|" + snippet;
+        for (let i = 0; i < key.length; i++) {
+          hash = ((hash * 31) + key.charCodeAt(i)) | 0;
+        }
+        const id = "r" + (hash >>> 0).toString(36);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        findings.push({ id, file: f.file, line: add.line,
+          kind: rule.kind, sev: rule.sev, msg: rule.msg,
+          snippet });
+      }
+    }
+  }
+  findings.sort((a, b) => b.sev - a.sev ||
+    a.file.localeCompare(b.file) || a.line - b.line);
+  return findings;
+}
+window.__ghostReview = reviewDiff;
+/*@@REVIEW-END@@*/
+function reviewDismissed() {
+  try {
+    return new Set(JSON.parse(
+      localStorage.getItem("ghostide-review-dismissed") || "[]"));
+  } catch (e) { return new Set(); }
+}
+function reviewDismiss(id) {
+  const s = reviewDismissed();
+  s.add(id);
+  localStorage.setItem("ghostide-review-dismissed",
+    JSON.stringify([...s].slice(-300)));
+}
+let reviewLastDiff = "";
+async function openReview() {
+  $("reviewPanel").classList.remove("hidden");
+  $("reviewTitle").textContent = "🔍 Pre-commit review";
+  $("reviewOut").innerHTML = "<div class=\"dim\">Scanning the diff…</div>";
+  $("reviewAiOut").textContent = "";
+  const r = await fetch("/api/git/diff-all");
+  const d = await r.json();
+  if (d.repo === false || d.error) {
+    $("reviewOut").innerHTML = "<div class=\"dim\">Not a git " +
+      "repo (or git unavailable here).</div>";
+    return;
+  }
+  if (!d.diff || !d.diff.trim()) {
+    $("reviewOut").innerHTML = "<div class=\"dim\">No changes " +
+      "to review.</div>";
+    return;
+  }
+  reviewLastDiff = d.diff;
+  const dismissed = reviewDismissed();
+  const findings = reviewDiff(d.diff)
+    .filter((f) => !dismissed.has(f.id));
+  const out = $("reviewOut");
+  out.innerHTML = "";
+  if (!findings.length) {
+    out.innerHTML = "<div class=\"reviewClean\">✅ Nothing " +
+      "flagged by the rules scan (secrets, bug risks, dead " +
+      "code). Ask Ghost for a second opinion any time.</div>";
+    return;
+  }
+  const sevName = ["note", "low", "risk", "SECRET"];
+  const sevClass = ["sev0", "sev1", "sev2", "sev3"];
+  for (const f of findings) {
+    const row = document.createElement("div");
+    row.className = "reviewRow";
+    const chip = document.createElement("span");
+    chip.className = "revSev " + sevClass[f.sev];
+    chip.textContent = f.kind === "secret" ? "SECRET" : sevName[f.sev];
+    const jump = document.createElement("button");
+    jump.className = "revJump";
+    jump.textContent = f.file + ":" + f.line;
+    jump.onclick = async () => {
+      await openFile(f.file);
+      if (currentFile === f.file) jumpToLine(f.line);
+    };
+    const msg = document.createElement("span");
+    msg.textContent = f.msg;
+    const snip = document.createElement("div");
+    snip.className = "revSnip";
+    snip.textContent = f.snippet;
+    const dis = document.createElement("button");
+    dis.textContent = "✕ Dismiss";
+    dis.onclick = () => { reviewDismiss(f.id); row.remove(); };
+    row.append(chip, jump, msg, dis, snip);
+    out.appendChild(row);
+  }
+}
+$("gitReview").onclick = openReview;
+$("reviewClose").onclick = () =>
+  $("reviewPanel").classList.add("hidden");
+$("reviewAiBtn").onclick = async () => {
+  if (!modelUp) { alert("Start the model first."); return; }
+  if (!reviewLastDiff) { alert("Run the review first."); return; }
+  $("reviewAiOut").textContent = "Ghost is reading the diff…";
+  try {
+    const text = await collectChat([
+      { role: "system", content: "You are a strict but fair " +
+        "code reviewer. Read the diff and report real issues " +
+        "only: bugs, security risks, dead code. Anchor each " +
+        "point as file:line. If the diff is clean, say so in " +
+        "one line. No praise, no filler." },
+      { role: "user", content: "Review this diff:\n\n" +
+        reviewLastDiff.slice(0, 7000) }], 700);
+    $("reviewAiOut").textContent = text;
+  } catch (e) {
+    $("reviewAiOut").textContent = "AI review failed: " + e;
+  }
 };
 
 /* ---------------- Roadmap G25: asset tools ----------------
