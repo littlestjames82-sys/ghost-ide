@@ -237,7 +237,7 @@ instead of guessing at it.
 Done when: an API question gets answered from the bundled
 docs with the phone in airplane mode.
 
-**G29. Semantic code search.** "Find the code that
+**G29. Semantic code search.** ✅ DONE Oct 19, 2026 (v1.37.0) — zero-word-overlap fixture queries rank the right function first (6/6). Ranking is lexical-semantic (concepts + stemming), honestly labeled; a neural embedding model remains a possible future add. "Find the code that
 retries failed downloads" — natural-language search
 over the workspace using on-device embeddings, ranked
 alongside plain text search.

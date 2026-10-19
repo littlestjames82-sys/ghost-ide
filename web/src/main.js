@@ -1411,6 +1411,40 @@ $("findGo").onclick = async () => {
     box.appendChild(n);
   }
 };
+/* Roadmap G29: meaning search beside plain text search.
+   Describe what the code DOES in plain English; results are
+   functions ranked by concept (identifier words, body
+   terms, related coding terms), each with its why. */
+$("findSemantic").onclick = async () => {
+  const q = $("findQuery").value;
+  const box = $("findResults");
+  if (!q.trim()) return;
+  box.textContent = "reading the code by meaning…";
+  const d = await postJson("/api/semsearch", { query: q });
+  if (d.error) { box.textContent = d.error; return; }
+  box.innerHTML = "";
+  if (!d.results.length) {
+    box.textContent = "No functions matched that meaning.";
+    return;
+  }
+  for (const r of d.results) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = "🧠 " + r.name + "  " + r.path + ":" +
+      r.line + "  (why: " + r.matched.join(", ") + ")";
+    row.title = r.snippet;
+    row.onclick = async () => {
+      await openFile(r.path);
+      jumpToLine(r.line);
+    };
+    box.appendChild(row);
+  }
+  const n = document.createElement("div");
+  n.className = "dim";
+  n.textContent = "Meaning ranking: identifier words + body " +
+    "terms + related coding concepts. Not a neural embedding.";
+  box.appendChild(n);
+};
 $("findReplace").onclick = async () => {
   const q = $("findQuery").value;
   if (!q) return;

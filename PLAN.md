@@ -260,6 +260,9 @@ Context lab built and proven against GhostSlice. Next: G28 offline reference doc
 ## Phase 38 - Roadmap G28 - SHIPPED v1.36.0 Oct 19, 2026
 Offline reference docs built and proven end to end locally. Next: G29 semantic code search.
 
+## Phase 39 - Roadmap G29 - SHIPPED v1.37.0 Oct 19, 2026
+Semantic code search built and proven. Next: G30 error memory (closes Arc G).
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

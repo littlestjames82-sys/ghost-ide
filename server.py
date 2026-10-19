@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.36.0"
+APP_VERSION = "1.37.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -664,6 +664,190 @@ def _context_stats():
                   "per-language calibrated, not exact "
                   "tokenizer counts)",
     }
+
+
+# ---- Roadmap G29: semantic (meaning) code search ----
+_SEM_STOP = {
+    "the", "a", "an", "and", "or", "of", "to", "in", "on",
+    "for", "with", "that", "this", "it", "is", "are", "be",
+    "by", "at", "from", "into", "when", "where", "which",
+    "what", "does", "do", "how", "code", "function", "file",
+    "me", "find", "show",
+}
+_SEM_GROUPS = [
+    ["download", "fetch", "retrieve", "request", "pull"],
+    ["retry", "attempt", "backoff", "again", "repeat"],
+    ["fail", "failure", "error", "exception", "except",
+     "crash", "timeout", "broken"],
+    ["send", "deliver", "email", "mail", "notify", "message"],
+    ["welcome", "greet", "hello", "onboard"],
+    ["price", "cost", "total", "amount", "sum", "charge",
+     "due", "owe", "bill"],
+    ["tax", "vat", "fee", "rate", "levy", "duty"],
+    ["save", "store", "persist", "write", "dump"],
+    ["read", "parse", "load", "decode", "scan"],
+    ["delete", "remove", "erase", "drop", "clear"],
+    ["create", "make", "build", "generate"],
+    ["update", "change", "edit", "modify", "rename"],
+    ["search", "find", "lookup", "query", "filter"],
+    ["sort", "order", "rank", "arrange"],
+    ["check", "validate", "verify", "test", "assert"],
+    ["start", "begin", "launch", "run", "boot", "init"],
+    ["stop", "end", "halt", "kill", "close", "shutdown"],
+    ["user", "account", "customer", "member", "signup",
+     "register"],
+    ["pay", "payment", "checkout", "card", "invoice",
+     "billing"],
+    ["image", "picture", "photo", "icon", "thumbnail"],
+    ["time", "date", "clock", "schedule", "delay", "sleep",
+     "wait"],
+    ["password", "login", "auth", "token", "session",
+     "credential"],
+    ["encrypt", "decrypt", "hash", "cipher", "secure"],
+    ["compress", "archive", "zip", "backup", "export",
+     "import"],
+    ["print", "log", "display", "render", "show", "draw"],
+    ["connect", "socket", "network", "server", "client",
+     "port"],
+    ["database", "table", "record", "sql", "storage"],
+    ["string", "text", "word", "char", "format", "template"],
+    ["number", "count", "compute", "calculate", "math"],
+    ["file", "path", "directory", "folder", "extension"],
+]
+
+
+def _sem_stem(w):
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 5 and w.endswith("ing"):
+        return w[:-3]
+    if len(w) > 4 and w.endswith("ed"):
+        return w[:-2]
+    if len(w) > 4 and w.endswith("es"):
+        return w[:-2]
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _sem_words(text):
+    # Split snake_case, camelCase and plain text into words.
+    words = []
+    cur = ""
+    prev_lower = False
+    for ch in text:
+        if ch.isalnum():
+            if ch.isupper() and prev_lower and cur:
+                words.append(cur)
+                cur = ch
+            else:
+                cur += ch
+            prev_lower = ch.islower() or ch.isdigit()
+        else:
+            if cur:
+                words.append(cur)
+                cur = ""
+            prev_lower = False
+    if cur:
+        words.append(cur)
+    return [w.lower() for w in words if len(w) > 1]
+
+
+_SEM_EXPAND = {}
+for _grp in _SEM_GROUPS:
+    _stems = {_sem_stem(w) for w in _grp}
+    for _w in _stems:
+        _SEM_EXPAND.setdefault(_w, set()).update(_stems)
+
+
+def _sem_chunks():
+    idx = _symbol_index()
+    texts = idx["texts"]
+    by_file = {}
+    for s in idx["symbols"]:
+        by_file.setdefault(s["path"], []).append(s)
+    chunks = []
+    for path, defs in by_file.items():
+        defs.sort(key=lambda d: d["line"])
+        lines = texts.get(path, "").splitlines()
+        for i, d in enumerate(defs):
+            end = defs[i + 1]["line"] - 1 if i + 1 < len(defs) \
+                else len(lines)
+            end = min(end, d["line"] + 79)
+            body = "\n".join(lines[d["line"] - 1:end])
+            freq = {}
+            for w in _sem_words(body):
+                st = _sem_stem(w)
+                if st not in _SEM_STOP:
+                    freq[st] = freq.get(st, 0) + 1
+            name_stems = {_sem_stem(w)
+                          for w in _sem_words(d["name"])}
+            chunks.append({
+                "name": d["name"], "kind": d["kind"],
+                "path": path, "line": d["line"],
+                "snippet": lines[d["line"] - 1].strip()[:160]
+                if lines else "",
+                "freq": freq, "nameStems": name_stems})
+    return chunks
+
+
+def _sem_search(q):
+    q = (q or "").strip()
+    if not q:
+        return []
+    q_stems = []
+    for w in _sem_words(q):
+        # Stopwords match the RAW word first: stemming
+        # first would turn "does" into "doe" and slip it
+        # past the stop set.
+        if w in _SEM_STOP:
+            continue
+        st = _sem_stem(w)
+        if st not in _SEM_STOP and st not in q_stems:
+            q_stems.append(st)
+    if not q_stems:
+        return []
+    results = []
+    for c in _sem_chunks():
+        score = 0
+        matched = []
+        covered = 0
+        for t in q_stems:
+            hit = False
+            if t in c["nameStems"]:
+                score += 12
+                matched.append(t)
+                hit = True
+            elif t in c["freq"]:
+                score += 3 + min(2, c["freq"][t] - 1)
+                matched.append(t)
+                hit = True
+            for e in _SEM_EXPAND.get(t, ()):
+                if e == t:
+                    continue
+                if e in c["nameStems"]:
+                    score += 6
+                    if e not in matched:
+                        matched.append(e)
+                    hit = True
+                elif e in c["freq"]:
+                    score += 2
+                    if e not in matched:
+                        matched.append(e)
+                    hit = True
+            if hit:
+                covered += 1
+        if covered > 1:
+            score += 5 * (covered - 1)
+        if score > 0:
+            results.append({
+                "name": c["name"], "kind": c["kind"],
+                "path": c["path"], "line": c["line"],
+                "snippet": c["snippet"], "score": score,
+                "matched": matched[:8]})
+    results.sort(key=lambda r: (-r["score"], r["path"],
+                                r["line"]))
+    return results[:12]
 
 
 # ---- Roadmap G28: offline reference docs ----
@@ -2496,6 +2680,20 @@ class Handler(SimpleHTTPRequestHandler):
                         break
                 return self.send_json({"matches": matches,
                                        "truncated": len(matches) >= 200})
+            if parsed.path == "/api/semsearch":
+                # Roadmap G29: meaning search over the symbol
+                # index. Chunks are functions/classes; ranking
+                # combines identifier words, body terms, light
+                # stemming, and a curated coding-concept table
+                # (download ~ fetch/retrieve, retry ~ attempt/
+                # backoff) so plain-English queries find code
+                # that shares no words with the query. Honest
+                # scope: this is lexical-semantic ranking, not
+                # a neural embedding model.
+                data = self.read_json()
+                q = data.get("query", "")
+                return self.send_json(
+                    {"results": _sem_search(q)})
             if parsed.path == "/api/replace":
                 data = self.read_json()
                 q = data.get("query", "")
