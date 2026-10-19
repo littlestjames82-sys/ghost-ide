@@ -38,6 +38,87 @@ def pair_snapshot():
               if now - v["seen"] > 25]:
         PAIR_PEERS.pop(k, None)
     return [dict(v) for v in list(PAIR_PEERS.values())]
+
+
+# Encrypted backup (Roadmap G17). One format on both builds
+# (BackupCrypto.java on the phone mirrors this exactly):
+# PBKDF2-HMAC-SHA256 (200k rounds, random salt) derives an
+# encryption key + a MAC key; the workspace zip is XORed
+# with an HMAC-SHA256 keystream keyed by a random nonce,
+# and the MAC covers salt || nonce || ciphertext
+# (encrypt-then-MAC). A wrong passphrase fails the MAC.
+BACKUP_ITER = 200000
+
+
+def _bk_keys(passphrase, salt, iters):
+    import hashlib
+    master = hashlib.pbkdf2_hmac(
+        "sha256", passphrase.encode("utf-8"), salt, iters,
+        dklen=64)
+    return master[:32], master[32:]
+
+
+def _bk_crypt(enc_key, nonce, data):
+    import hashlib
+    import hmac
+    out = bytearray(len(data))
+    block = 0
+    off = 0
+    while off < len(data):
+        ks = hmac.new(enc_key, nonce + block.to_bytes(8, "big"),
+                      hashlib.sha256).digest()
+        chunk = data[off:off + 32]
+        for i, b in enumerate(chunk):
+            out[off + i] = b ^ ks[i]
+        off += len(chunk)
+        block += 1
+    return bytes(out)
+
+
+def backup_encrypt(passphrase, zip_bytes, files, nbytes):
+    import base64
+    import hashlib
+    import hmac
+    import os
+    salt = os.urandom(16)
+    nonce = os.urandom(16)
+    enc_key, mac_key = _bk_keys(passphrase, salt, BACKUP_ITER)
+    ct = _bk_crypt(enc_key, nonce, zip_bytes)
+    mac = hmac.new(mac_key, salt + nonce + ct,
+                   hashlib.sha256).digest()
+    env = {
+        "app": "ghostide-backup", "v": 1,
+        "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "files": files, "bytes": nbytes,
+        "kdf": {"algo": "PBKDF2-HMAC-SHA256", "iter": BACKUP_ITER,
+                "salt": base64.b64encode(salt).decode()},
+        "nonce": base64.b64encode(nonce).decode(),
+        "mac": base64.b64encode(mac).decode(),
+        "data": base64.b64encode(ct).decode(),
+    }
+    return json.dumps(env, indent=1)
+
+
+def backup_decrypt(passphrase, text):
+    import base64
+    import hashlib
+    import hmac
+    env = json.loads(text)
+    if env.get("app") != "ghostide-backup" or env.get("v") != 1:
+        raise ValueError("not a GhostIDE backup file")
+    salt = base64.b64decode(env["kdf"]["salt"])
+    iters = int(env["kdf"]["iter"])
+    nonce = base64.b64decode(env["nonce"])
+    ct = base64.b64decode(env["data"])
+    enc_key, mac_key = _bk_keys(passphrase, salt, iters)
+    mac = hmac.new(mac_key, salt + nonce + ct,
+                   hashlib.sha256).digest()
+    if not hmac.compare_digest(
+            mac, base64.b64decode(env["mac"])):
+        raise ValueError(
+            "wrong passphrase or damaged backup "
+            "(integrity check failed)")
+    return _bk_crypt(enc_key, nonce, ct)
 LLAMA_BIN = os.environ.get(
     "LLAMA_SERVER_BIN",
     str(Path.home() / "workspace/tools/llama.cpp/llama-b11429/llama-server"))
@@ -1690,6 +1771,82 @@ class Handler(SimpleHTTPRequestHandler):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 src.rename(dst)
                 return self.send_json({"ok": True, "path": data["to"]})
+            if parsed.path == "/api/backup/create":
+                data = self.read_json()
+                pw = str(data.get("passphrase", ""))
+                if len(pw) < 8:
+                    raise ValueError(
+                        "passphrase needs at least 8 characters")
+                import io
+                import zipfile
+                buf = io.BytesIO()
+                total = 0
+                count = 0
+                with zipfile.ZipFile(buf, "w",
+                                     zipfile.ZIP_DEFLATED) as z:
+                    for p in sorted(WORKSPACE.rglob("*")):
+                        rel = p.relative_to(WORKSPACE)
+                        if any(part.startswith(".")
+                               for part in rel.parts):
+                            continue
+                        if rel.parts and rel.parts[0] == "backups":
+                            continue
+                        if p.suffix == ".ghostbak":
+                            continue
+                        if not p.is_file():
+                            continue
+                        total += p.stat().st_size
+                        count += 1
+                        if total > 50 * 1024 * 1024:
+                            raise ValueError(
+                                "workspace is over the 50 MB "
+                                "backup cap")
+                        z.write(p, str(rel))
+                env = backup_encrypt(pw, buf.getvalue(),
+                                     count, total)
+                out_dir = WORKSPACE / "backups"
+                out_dir.mkdir(exist_ok=True)
+                name = ("ghostide-backup-"
+                        + time.strftime("%Y%m%d-%H%M%S")
+                        + ".ghostbak")
+                (out_dir / name).write_text(env)
+                return self.send_json({
+                    "ok": True, "path": "backups/" + name,
+                    "files": count, "bytes": total,
+                    "size": len(env)})
+            if parsed.path == "/api/backup/restore":
+                data = self.read_json()
+                pw = str(data.get("passphrase", ""))
+                p = safe_path(str(data.get("path", "")))
+                if not p.is_file():
+                    raise ValueError("backup file not found")
+                raw = backup_decrypt(pw, p.read_text())
+                import io
+                import zipfile
+                count = 0
+                total = 0
+                with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                    for info in z.infolist():
+                        parts = [x for x in
+                                 info.filename.replace(
+                                     "\\", "/").split("/")
+                                 if x not in ("", ".", "..")]
+                        if not parts:
+                            continue
+                        if any(x.startswith(".")
+                               for x in parts):
+                            continue
+                        if parts[0] == "backups":
+                            continue
+                        dst = WORKSPACE.joinpath(*parts)
+                        dst.parent.mkdir(parents=True,
+                                         exist_ok=True)
+                        content = z.read(info)
+                        dst.write_bytes(content)
+                        count += 1
+                        total += len(content)
+                return self.send_json({
+                    "ok": True, "files": count, "bytes": total})
             if parsed.path == "/api/pair/heartbeat":
                 data = self.read_json()
                 pid = str(data.get("id", ""))[:64]

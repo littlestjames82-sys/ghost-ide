@@ -224,6 +224,9 @@ Plugin system: workspace plugins/ folder, sandboxed iframes, ghost API, two samp
 ## Phase 26 - Roadmap G16 - BUILT Oct 19, 2026 (v1.26.0), device proof pending
 Pair mode: shared-server presence + conflict-safe sync. Next: G17 encrypted backup (Arc D close).
 
+## Phase 27 - Roadmap G17 - BUILT Oct 19, 2026 (v1.27.0), device proof pending
+Encrypted backup, one format both builds, cross-proven. Arc D complete pending proofs. Next: Arc E ship, G18 desktop apps.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

@@ -134,7 +134,7 @@ overwriting silently.
 Done when: Ryan edits the same project from phone and
 desktop in one session with no lost work.
 
-**G17. Optional encrypted backup.** Off by default:
+**G17. Optional encrypted backup.** 🔶 BUILT Oct 19, 2026 (v1.27.0), device proof pending — cross-implementation format proven both directions + byte-identical wipe/restore on desktop; closes when Ryan restores a backup on his phone. Arc D complete pending device proofs. Off by default:
 workspaces back up end-to-end-encrypted to storage the
 user picks (their Drive, a WebDAV server), restorable on
 a new device.
