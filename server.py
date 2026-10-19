@@ -1353,6 +1353,60 @@ class Handler(SimpleHTTPRequestHandler):
                         total += n
                 return self.send_json({"filesChanged": files_changed,
                                        "replacements": total})
+            if parsed.path == "/api/check-content":
+                # Agent mode (G5): syntax-check content that has
+                # not been written to disk yet.
+                data = self.read_json()
+                path = data.get("path", "")
+                content = data.get("content", "")
+                ext = Path(path).suffix.lower()
+                result = {"ok": None,
+                          "note": "no checker for " + (ext or "?")}
+                if ext == ".py":
+                    try:
+                        _ast.parse(content)
+                        result = {"ok": True}
+                    except SyntaxError as e:
+                        result = {"ok": False, "line": e.lineno,
+                                  "message": "SyntaxError: "
+                                             + (e.msg or "")}
+                elif ext == ".json":
+                    try:
+                        json.loads(content)
+                        result = {"ok": True}
+                    except Exception as e:
+                        result = {"ok": False, "message": str(e)}
+                elif ext in (".js", ".mjs"):
+                    tmpd = WORKSPACE / ".ghostide-tmp"
+                    tmpd.mkdir(exist_ok=True)
+                    tmpf = tmpd / ("check" + ext)
+                    tmpf.write_text(content)
+                    try:
+                        rc, out, err, ms = run_cmd(
+                            ["node", "--check", str(tmpf)],
+                            cwd=str(WORKSPACE))
+                        output = (out + err).strip()
+                        if rc == 0:
+                            result = {"ok": True}
+                        else:
+                            ln, msg = check_output_info(output)
+                            result = {"ok": False, "line": ln,
+                                      "message": msg}
+                    finally:
+                        tmpf.unlink(missing_ok=True)
+                return self.send_json(result)
+            if parsed.path == "/api/diff-text":
+                # Unified diff of proposed content vs the file on
+                # disk (agent review, G5).
+                data = self.read_json()
+                p = safe_path(data["path"])
+                old = p.read_text() if p.is_file() else ""
+                new = data.get("content", "")
+                diff = "\n".join(_difflib.unified_diff(
+                    old.splitlines(), new.splitlines(),
+                    fromfile="a/" + data["path"],
+                    tofile="b/" + data["path"], lineterm=""))
+                return self.send_json({"diff": diff})
             if parsed.path == "/api/refactor":
                 # Roadmap G3: compute -> preview diff -> apply.
                 data = self.read_json()

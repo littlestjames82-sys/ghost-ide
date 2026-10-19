@@ -807,6 +807,11 @@ async function sendChat() {
   const text = ta.value.trim();
   if (!text) return;
   if (!modelUp) { addMsg("SYSTEM", "Model is down - hit Start model first."); return; }
+  if ($("agentToggle") && $("agentToggle").checked) {
+    ta.value = "";
+    runAgent(text);
+    return;
+  }
 
   /* Context (Phase 2.2): current file, or a GhostSlice project bundle
      with a token meter. Built BEFORE the message enters history, so an
@@ -3065,6 +3070,264 @@ $("menuMove").onclick = () => {
   previewRefactor("Move " + menuTarget.path + " → " + to, {
     op: "move", from: menuTarget.path, to });
 };
+
+/* ---------------- Roadmap G5: agent mode ----------------
+   A multi-step loop over the plain chat endpoint. The model
+   replies with exactly ONE action per message:
+     READ <path>    - we answer with the file's content
+     WRITE <path>   - followed by a fenced block holding the
+                      file's COMPLETE new content; the write
+                      is STAGED in memory, never on disk
+     CHECK          - syntax-check everything staged
+     DONE <summary> - finish and open the review panel
+     ASK <question> - stop and ask the user
+   Nothing reaches disk until the user approves files in the
+   review panel, so Stop / reject leaves the workspace
+   exactly as it was. */
+const AGENT_MAX_STEPS = 12;
+let agentRunning = false;
+let agentStop = false;
+const AGENT_RULES = [
+  "You are Ghost in AGENT MODE. Complete the task by",
+  "replying with exactly ONE action per message:",
+  "READ <path> - ask for a file's current content",
+  "WRITE <path> - on the next line a fenced code block with",
+  "  the file's complete new content (whole file, no fragments)",
+  "CHECK - syntax-check everything you have written",
+  "DONE <one-line summary> - the task is complete",
+  "ASK <question> - you need the user to decide something",
+  "Rules: never invent file contents - READ a file before",
+  "rewriting it. Keep every WRITE syntactically valid. Do",
+  "not explain outside the action line. You have at most "
+    + AGENT_MAX_STEPS + " actions.",
+].join("\n");
+
+function parseAgentAction(reply) {
+  const text = reply || "";
+  let m = text.match(/^\s*READ\s+(\S+)\s*$/m);
+  if (m) return { type: "read", path: m[1] };
+  m = text.match(/^\s*WRITE\s+(\S+)\s*\n```[a-zA-Z0-9]*\n([\s\S]*?)```/m);
+  if (m) {
+    let content = m[2];
+    if (!content.endsWith("\n")) content += "\n";
+    return { type: "write", path: m[1], content };
+  }
+  if (/^\s*CHECK\s*$/m.test(text)) return { type: "check" };
+  m = text.match(/^\s*DONE\s*(.*)$/m);
+  if (m) return { type: "done", summary: m[1] || "" };
+  m = text.match(/^\s*ASK\s+(.+)$/m);
+  if (m) return { type: "ask", question: m[1].trim() };
+  return { type: "unknown", raw: text.slice(0, 200) };
+}
+window.__ghostParseAgent = parseAgentAction;
+
+async function runAgent(task) {
+  if (agentRunning) {
+    addMsg("SYSTEM", "An agent task is already running.");
+    return;
+  }
+  if (anyOpenDirty()) {
+    addMsg("SYSTEM", "Agent mode works from the saved files - "
+      + "save your open edits first.");
+    return;
+  }
+  agentRunning = true;
+  agentStop = false;
+  addMsg("YOU", "🤖 " + task);
+  const sendBtn = $("chatSend");
+  const oldSend = sendBtn.onclick;
+  sendBtn.textContent = "■ Stop agent";
+  sendBtn.onclick = () => { agentStop = true; };
+  const staged = new Map();
+  const readCache = new Map();
+  async function readForAgent(path) {
+    if (staged.has(path)) return staged.get(path);
+    if (readCache.has(path)) return readCache.get(path);
+    const r = await fetch("/api/file?path=" +
+      encodeURIComponent(path));
+    const d = await r.json();
+    if (d.error) return null;
+    readCache.set(path, d.content);
+    return d.content;
+  }
+  let mapText = "";
+  try { mapText = await getRepoMap(); } catch (e) { /* optional */ }
+  const messages = [
+    { role: "system", content: BEHAVIOR.systemPrompt + "\n\n" +
+      AGENT_RULES + (mapText ? "\n\n" + mapText : "") },
+    { role: "user", content: "Task: " + task +
+      (currentFile ? "\nThe user is currently editing: "
+        + currentFile : "") },
+  ];
+  let outcome = "cap";
+  let summary = "";
+  let nudges = 0;
+  for (let step = 1; step <= AGENT_MAX_STEPS; step++) {
+    if (agentStop) { outcome = "stopped"; break; }
+    addMsg("SYSTEM", "🤖 step " + step + "/" + AGENT_MAX_STEPS);
+    let reply = "";
+    try {
+      reply = await collectChat(messages, 2048);
+    } catch (e) {
+      addMsg("SYSTEM", "Agent: model call failed: " + e);
+      outcome = "failed";
+      break;
+    }
+    messages.push({ role: "assistant", content: reply });
+    const act = parseAgentAction(reply);
+    if (act.type === "read") {
+      const content = await readForAgent(act.path);
+      addMsg("SYSTEM", "📖 READ " + act.path);
+      messages.push({ role: "user", content: content == null
+        ? "READ failed: " + act.path + " does not exist yet. "
+          + "You may create it with WRITE."
+        : "Content of " + act.path + ":\n```\n" +
+          content.slice(0, 12000) + "\n```" });
+    } else if (act.type === "write") {
+      staged.set(act.path, act.content);
+      addMsg("SYSTEM", "✏️ WRITE " + act.path +
+        " (staged - not saved)");
+      messages.push({ role: "user", content: "Staged " +
+        act.path + ". " + staged.size +
+        " file(s) staged. Continue." });
+    } else if (act.type === "check") {
+      const notes = [];
+      for (const [p, c] of staged) {
+        const d = await postJson("/api/check-content",
+          { path: p, content: c });
+        if (d.ok === true) notes.push(p + ": OK");
+        else if (d.ok === false) notes.push(p + ": PROBLEM " +
+          (d.message || "") +
+          (d.line ? " (line " + d.line + ")" : ""));
+        else notes.push(p + ": check skipped (" +
+          (d.note || "not available") + ")");
+      }
+      addMsg("SYSTEM", "🔍 CHECK\n" + notes.join("\n"));
+      messages.push({ role: "user", content: "Check results:\n" +
+        notes.join("\n") +
+        "\nFix any problems with another WRITE, or finish "
+        + "with DONE." });
+    } else if (act.type === "done") {
+      outcome = "done";
+      summary = act.summary;
+      break;
+    } else if (act.type === "ask") {
+      addMsg("GHOST", "❓ " + act.question);
+      outcome = "asked";
+      break;
+    } else {
+      nudges++;
+      if (nudges > 1) {
+        addMsg("SYSTEM", "Agent stopped: two replies in a row "
+          + "had no action in them.");
+        outcome = "failed";
+        break;
+      }
+      messages.push({ role: "user", content: "That reply had "
+        + "no action. Reply with exactly one action: READ, "
+        + "WRITE, CHECK, DONE, or ASK." });
+    }
+  }
+  sendBtn.textContent = "Send";
+  sendBtn.onclick = oldSend;
+  agentRunning = false;
+  if (outcome === "stopped") {
+    addMsg("SYSTEM", "Agent stopped by you. Nothing was "
+      + "written - the staged changes were discarded.");
+  } else if (outcome === "cap") {
+    addMsg("SYSTEM", "Agent hit the " + AGENT_MAX_STEPS +
+      "-step cap.");
+  }
+  if ((outcome === "done" || outcome === "cap") && staged.size) {
+    addMsg("GHOST", "🤖 " + (summary || "Task run complete") +
+      " - review the " + staged.size +
+      " file(s) below. Nothing is saved until you approve.");
+    openAgentReview(staged);
+  } else if (outcome === "done") {
+    addMsg("GHOST", "🤖 Done: " + summary);
+  }
+}
+
+async function openAgentReview(staged) {
+  $("todoTitle").textContent =
+    "🤖 Agent changes - approve per file";
+  const box = $("todoResults");
+  box.innerHTML = '<div class="dim">Preparing diffs…</div>';
+  $("todoPanel").classList.remove("hidden");
+  let existing = new Set();
+  try {
+    const fr = await fetch("/api/files");
+    const fd = await fr.json();
+    existing = new Set((fd.files || [])
+      .filter((x) => x.type === "file").map((x) => x.path));
+  } catch (e) { /* labels only */ }
+  const approved = new Set(staged.keys());
+  box.innerHTML = "";
+  const applyRow = document.createElement("div");
+  applyRow.className = "findRow";
+  const rejectRow = document.createElement("div");
+  rejectRow.className = "findRow";
+  rejectRow.textContent = "✖ Reject all - write nothing";
+  rejectRow.onclick = () => {
+    $("todoPanel").classList.add("hidden");
+    addMsg("SYSTEM", "Agent changes rejected - nothing was "
+      + "written.");
+  };
+  function refreshApply() {
+    applyRow.textContent = "✓ Apply approved (" +
+      approved.size + " of " + staged.size + ")";
+  }
+  applyRow.onclick = async () => {
+    $("todoPanel").classList.add("hidden");
+    let n = 0;
+    for (const [p, c] of staged) {
+      if (!approved.has(p)) continue;
+      const d = await postJson("/api/file",
+        { path: p, content: c });
+      if (!d.error) {
+        n++;
+        if (p === currentFile) await reloadCurrentFromDisk();
+        else if (tabStates.has(p)) tabStates.delete(p);
+      }
+    }
+    loadFiles();
+    addMsg("SYSTEM", "Agent changes applied: " + n +
+      " file(s) saved.");
+  };
+  refreshApply();
+  box.appendChild(applyRow);
+  box.appendChild(rejectRow);
+  for (const [p, c] of staged) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    function label() {
+      row.textContent = (approved.has(p) ? "☑ " : "☐ ") + p +
+        (existing.has(p) ? "" : " (new file)");
+    }
+    label();
+    row.onclick = () => {
+      if (approved.has(p)) approved.delete(p);
+      else approved.add(p);
+      label();
+      refreshApply();
+    };
+    box.appendChild(row);
+    const diffRow = document.createElement("div");
+    diffRow.className = "findRow";
+    diffRow.textContent = "   👁 view diff for " + p;
+    diffRow.onclick = async () => {
+      const d = await postJson("/api/diff-text",
+        { path: p, content: c });
+      pendingRefactor = null;
+      $("diffApply").classList.add("hidden");
+      $("diffDiscard").classList.add("hidden");
+      $("diffTitle").textContent = "Agent diff: " + p;
+      $("diffOut").textContent = d.diff || "(no differences)";
+      $("diffPanel").classList.remove("hidden");
+    };
+    box.appendChild(diffRow);
+  }
+}
 
 /* ---------------- boot ---------------- */
 loadFiles();

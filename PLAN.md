@@ -188,6 +188,9 @@ G2 repo map + G3 refactoring engine closed per ROADMAP_20. Marathon continues at
 ## Phase 14 - Roadmap G4 - SHIPPED Oct 19, 2026 (phone v1.14.0 + desktop)
 Smart (dependency-aware) context mode on both builds, benchmark-proven. Next: G5 agent mode.
 
+## Phase 15 - Roadmap G5 - SHIPPED Oct 19, 2026 (phone v1.15.0 + desktop)
+Agent mode: staged multi-file edits with per-file approval. Next: G6 test runner.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
