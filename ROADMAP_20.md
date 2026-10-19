@@ -120,7 +120,7 @@ that tells the truth about how to run it.
 Done when: every template creates, opens, and runs (or
 previews) with zero fixes.
 
-**G15. Plugin system.** Third-party tools as small JS
+**G15. Plugin system.** 🔶 BUILT Oct 19, 2026 (v1.25.0), device proof pending — sandboxed iframe plugins + ghost API + samples, desktop-verified; closes when both samples install and run on Ryan's phone. Third-party tools as small JS
 bundles: a plugin adds Tools-panel actions and panels
 through a sandboxed API (read/write files, call Ghost,
 show UI), installed from a folder, removable cleanly.

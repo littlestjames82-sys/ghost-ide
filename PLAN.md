@@ -218,6 +218,9 @@ Voice coding via the system recognizer. Arc C complete pending device proofs. Ne
 ## Phase 24 - Roadmap G14 - SHIPPED Oct 19, 2026 (phone v1.24.0 + desktop)
 Project templates on both builds. Next: G15 plugin system.
 
+## Phase 25 - Roadmap G15 - BUILT Oct 19, 2026 (v1.25.0), device proof pending
+Plugin system: workspace plugins/ folder, sandboxed iframes, ghost API, two samples. Next: G16 pair mode.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

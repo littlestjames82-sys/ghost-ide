@@ -1464,8 +1464,9 @@ function renderQuick(q) {
   list.innerHTML = "";
   const needle = q.toLowerCase();
   if (quickMode === "command") {
-    const matches = COMMANDS.filter((c) =>
-      c.title.toLowerCase().includes(needle)).slice(0, 30);
+    const matches = COMMANDS.concat(pluginCommands)
+      .filter((c) =>
+        c.title.toLowerCase().includes(needle)).slice(0, 30);
     for (const c of matches) {
       const row = document.createElement("div");
       row.className = "findRow";
@@ -3942,6 +3943,392 @@ window.__ghostVoiceResult = (target, text) => {
   }
 };
 
+/* ---------------- Roadmap G15: plugin system ----------------
+   A plugin is a folder in plugins/<id>/ holding
+   plugin.json (manifest: name, version, description,
+   actions) and plugin.js. The script runs in a sandboxed
+   iframe (opaque origin, no access to this page) and talks
+   to the IDE only through the ghost API, carried over
+   postMessage RPC:
+     ghost.files.list() / read(path) / write(path, content)
+     ghost.editor.current() / selection() / insert(text)
+       / open(path)
+     ghost.ask(prompt) - one-shot chat with the local model
+     ghost.ui.show() / hide() / notify(text)
+     ghost.onAction(id, fn) - handle a manifest action
+   Writes go through /api/file, so they stay inside the
+   workspace and land in Local History like any save.
+   Honest limit: the sandbox isolates the plugin from this
+   page and confines it to the API; it is not a network
+   sandbox. Keep the literal text of a closing script tag
+   out of plugin.js - it would end the sandbox document. */
+const PLUGIN_DIR = "plugins";
+let plugins = [];
+let pluginCommands = [];
+let activePlugin = null;
+
+const PLUGIN_CSS = "body{font-family:system-ui,sans-serif;"
+  + "background:#14161c;color:#e8eaf2;margin:10px;"
+  + "font-size:14px}h3{margin:4px 0 8px}h4{margin:12px 0 4px}"
+  + "table{border-collapse:collapse}"
+  + "td{padding:2px 10px 2px 0}.dim{color:#9aa0b4}"
+  + "pre{white-space:pre-wrap}";
+
+const PLUGIN_SHIM = `
+var __id = 0, __pending = {}, __handlers = {};
+function __call(method, args) {
+  return new Promise(function (resolve, reject) {
+    var id = ++__id;
+    __pending[id] = { resolve: resolve, reject: reject };
+    parent.postMessage(
+      { kind: "rpc", id: id, method: method, args: args || [] },
+      "*");
+  });
+}
+window.addEventListener("message", function (ev) {
+  var m = ev.data || {};
+  if (m.kind === "rpc-result") {
+    var p = __pending[m.id];
+    if (!p) return;
+    delete __pending[m.id];
+    if (m.ok) p.resolve(m.value);
+    else p.reject(new Error(m.error || "plugin call failed"));
+  } else if (m.kind === "action") {
+    var h = __handlers[m.action];
+    if (!h) return;
+    Promise.resolve().then(h).catch(function (e) {
+      __call("ui.notify",
+        ["Plugin error: " + ((e && e.message) || e)]);
+    });
+  }
+});
+var ghost = {
+  onAction: function (id, fn) { __handlers[id] = fn; },
+  files: {
+    list: function () { return __call("files.list"); },
+    read: function (p) { return __call("files.read", [p]); },
+    write: function (p, c) {
+      return __call("files.write", [p, c]);
+    }
+  },
+  editor: {
+    current: function () { return __call("editor.current"); },
+    selection: function () {
+      return __call("editor.selection");
+    },
+    insert: function (t) {
+      return __call("editor.insert", [t]);
+    },
+    open: function (p) { return __call("editor.open", [p]); }
+  },
+  ask: function (prompt) {
+    return __call("ghost.ask", [prompt]);
+  },
+  ui: {
+    show: function () { return __call("ui.show"); },
+    hide: function () { return __call("ui.hide"); },
+    notify: function (t) { return __call("ui.notify", [t]); }
+  }
+};
+window.addEventListener("error", function (e) {
+  __call("ui.notify", ["Plugin error: " + e.message]);
+});
+`;
+
+const SAMPLE_PLUGINS = [
+  { id: "word-count-pro",
+    manifest: "{\"actions\":[{\"id\":\"count\",\"title\":\"Word count (pro)\"}],\"description\":\"Word, character and line counts with top words and reading time, for the current file or selection.\",\"id\":\"word-count-pro\",\"name\":\"Word Count Pro\",\"version\":\"1.0.0\"}", code: "// Word Count Pro - a GhostIDE sample plugin.\n// Counts the current selection, or the whole open file,\n// and shows a small report in the plugin panel.\nfunction esc(s) {\n  return String(s).replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\");\n}\n\nghost.onAction(\"count\", async function () {\n  var sel = await ghost.editor.selection();\n  var cur = await ghost.editor.current();\n  if (!cur) {\n    await ghost.ui.notify(\"Open a file first.\");\n    return;\n  }\n  var usingSel = !!(sel && sel.trim());\n  var text = usingSel ? sel : cur.content;\n  var label = (usingSel ? \"selection in \" : \"\") + cur.path;\n  var words = text.toLowerCase().match(/[a-z0-9']+/g) || [];\n  var freq = {};\n  words.forEach(function (w) { freq[w] = (freq[w] || 0) + 1; });\n  var top = Object.keys(freq)\n    .sort(function (a, b) { return freq[b] - freq[a]; })\n    .slice(0, 5);\n  var lines = text ? text.split(\"\\n\").length : 0;\n  var minutes = Math.max(1, Math.round(words.length / 200));\n  var topRows = top.map(function (w) {\n    return \"<tr><td>\" + esc(w) + \"</td><td>\" + freq[w]\n      + \"</td></tr>\";\n  }).join(\"\");\n  document.body.innerHTML =\n    \"<h3>Word Count Pro</h3>\"\n    + \"<p class='dim'>\" + esc(label) + \"</p>\"\n    + \"<table>\"\n    + \"<tr><td>Words</td><td><b>\" + words.length\n    + \"</b></td></tr>\"\n    + \"<tr><td>Characters</td><td><b>\" + text.length\n    + \"</b></td></tr>\"\n    + \"<tr><td>Lines</td><td><b>\" + lines + \"</b></td></tr>\"\n    + \"<tr><td>Reading time</td><td><b>~\" + minutes\n    + \" min</b></td></tr>\"\n    + \"</table>\"\n    + \"<h4>Top words</h4><table>\" + topRows + \"</table>\";\n  await ghost.ui.show();\n});\n" },
+  { id: "json-toolbox",
+    manifest: "{\"actions\":[{\"id\":\"format\",\"title\":\"JSON: format\"},{\"id\":\"minify\",\"title\":\"JSON: minify\"},{\"id\":\"validate\",\"title\":\"JSON: validate\"}],\"description\":\"Format, minify and validate JSON in the current file or selection.\",\"id\":\"json-toolbox\",\"name\":\"JSON Toolbox\",\"version\":\"1.0.0\"}", code: "// JSON Toolbox - a GhostIDE sample plugin.\n// Format, minify and validate the current selection,\n// or the whole open file.\nfunction esc(s) {\n  return String(s).replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\");\n}\n\nasync function target() {\n  var sel = await ghost.editor.selection();\n  var cur = await ghost.editor.current();\n  if (!cur) {\n    await ghost.ui.notify(\"Open a JSON file first.\");\n    return null;\n  }\n  var usingSel = !!(sel && sel.trim());\n  return {\n    cur: cur,\n    usingSel: usingSel,\n    text: usingSel ? sel : cur.content,\n  };\n}\n\nasync function apply(t, newText) {\n  if (t.usingSel) {\n    await ghost.editor.insert(newText);\n  } else {\n    await ghost.files.write(t.cur.path, newText);\n  }\n}\n\nghost.onAction(\"format\", async function () {\n  var t = await target();\n  if (!t) return;\n  try {\n    var v = JSON.parse(t.text);\n    await apply(t, JSON.stringify(v, null, 2));\n    await ghost.ui.notify(\"JSON formatted.\");\n  } catch (e) {\n    await ghost.ui.notify(\"Invalid JSON: \" + e.message);\n  }\n});\n\nghost.onAction(\"minify\", async function () {\n  var t = await target();\n  if (!t) return;\n  try {\n    var v = JSON.parse(t.text);\n    await apply(t, JSON.stringify(v));\n    await ghost.ui.notify(\"JSON minified.\");\n  } catch (e) {\n    await ghost.ui.notify(\"Invalid JSON: \" + e.message);\n  }\n});\n\nghost.onAction(\"validate\", async function () {\n  var t = await target();\n  if (!t) return;\n  try {\n    JSON.parse(t.text);\n    document.body.innerHTML =\n      \"<h3>JSON Toolbox</h3><p>Valid JSON \u2713</p>\"\n      + \"<p class='dim'>\" + esc(t.cur.path) + \"</p>\";\n  } catch (e) {\n    document.body.innerHTML =\n      \"<h3>JSON Toolbox</h3><p>Invalid JSON:</p>\"\n      + \"<pre>\" + esc(e.message) + \"</pre>\"\n      + \"<p class='dim'>\" + esc(t.cur.path) + \"</p>\";\n  }\n  await ghost.ui.show();\n});\n" },
+];
+
+function pluginsDisabled() {
+  try {
+    return JSON.parse(
+      localStorage.getItem("ghostide-plugins-disabled")
+      || "[]");
+  } catch (e) { return []; }
+}
+
+function setPluginDisabled(id, off) {
+  const arr = pluginsDisabled().filter((x) => x !== id);
+  if (off) arr.push(id);
+  localStorage.setItem("ghostide-plugins-disabled",
+    JSON.stringify(arr));
+}
+
+async function discoverPlugins() {
+  const host = $("pluginFrameHost");
+  host.innerHTML = "";
+  plugins = [];
+  pluginCommands = [];
+  activePlugin = null;
+  $("pluginPanel").classList.add("hidden");
+  let paths = [];
+  try {
+    const fr = await fetch("/api/files");
+    const fd = await fr.json();
+    paths = (fd.files || []).map((f) => f.path);
+  } catch (e) { renderPluginTools(); return; }
+  const dirs = [];
+  for (const p of paths) {
+    const m = p.match(
+      /^plugins\/([^/]+)\/plugin\.json$/);
+    if (m && !dirs.includes(m[1])) dirs.push(m[1]);
+  }
+  const disabled = pluginsDisabled();
+  for (const dir of dirs) {
+    try {
+      const base = PLUGIN_DIR + "/" + dir;
+      const mj = await (await fetch("/api/file?path="
+        + encodeURIComponent(base + "/plugin.json"))).json();
+      if (mj.error) continue;
+      const man = JSON.parse(mj.content);
+      const jj = await (await fetch("/api/file?path="
+        + encodeURIComponent(base + "/plugin.js"))).json();
+      if (jj.error) continue;
+      const id = man.id || dir;
+      plugins.push({
+        id: id, name: man.name || id,
+        version: man.version || "",
+        description: man.description || "",
+        actions: Array.isArray(man.actions) ? man.actions : [],
+        dir: base, js: jj.content,
+        enabled: !disabled.includes(id), frame: null,
+      });
+    } catch (e) { /* malformed plugin: skipped */ }
+  }
+  for (const p of plugins) if (p.enabled) makePluginFrame(p);
+  renderPluginTools();
+}
+
+function makePluginFrame(p) {
+  const f = document.createElement("iframe");
+  f.className = "pluginFrame";
+  f.setAttribute("sandbox", "allow-scripts");
+  f.style.display = "none";
+  f.srcdoc = "<!doctype html><html><head><meta charset='utf-8'>"
+    + "<style>" + PLUGIN_CSS + "</style></head><body>"
+    + "<script>" + PLUGIN_SHIM + "<\/script>"
+    + "<script>" + p.js + "<\/script>"
+    + "</body></html>";
+  $("pluginFrameHost").appendChild(f);
+  p.frame = f;
+}
+
+window.addEventListener("message", async (ev) => {
+  const p = plugins.find((x) =>
+    x.frame && x.frame.contentWindow === ev.source);
+  if (!p) return;
+  const m = ev.data || {};
+  if (m.kind !== "rpc") return;
+  try {
+    const value = await pluginRpc(p, m.method, m.args || []);
+    ev.source.postMessage({
+      kind: "rpc-result", id: m.id, ok: true,
+      value: value === undefined ? null : value,
+    }, "*");
+  } catch (e) {
+    ev.source.postMessage({
+      kind: "rpc-result", id: m.id, ok: false,
+      error: String((e && e.message) || e),
+    }, "*");
+  }
+});
+
+async function pluginRpc(p, method, args) {
+  switch (method) {
+    case "files.list": {
+      const fr = await fetch("/api/files");
+      const fd = await fr.json();
+      return (fd.files || []).map((f) => f.path);
+    }
+    case "files.read": {
+      const r = await fetch("/api/file?path="
+        + encodeURIComponent(args[0]));
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      return d.content;
+    }
+    case "files.write": {
+      const d = await postJson("/api/file",
+        { path: args[0], content: args[1] });
+      if (d.error) throw new Error(d.error);
+      if (args[0] === currentFile) {
+        if (dirty) throw new Error(
+          "the open file has unsaved changes - save it first");
+        accepting = true;
+        view.dispatch({ changes: {
+          from: 0, to: view.state.doc.length,
+          insert: args[1] } });
+        accepting = false;
+      }
+      return true;
+    }
+    case "editor.current": {
+      if (!currentFile) throw new Error("no file is open");
+      return {
+        path: currentFile,
+        content: view.state.doc.toString(),
+      };
+    }
+    case "editor.selection": {
+      const sel = view.state.selection.main;
+      return view.state.doc.sliceString(sel.from, sel.to);
+    }
+    case "editor.insert": {
+      const sel = view.state.selection.main;
+      view.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: args[0] },
+        selection: { anchor: sel.from + args[0].length },
+      });
+      view.focus();
+      return true;
+    }
+    case "editor.open": {
+      await openFile(args[0]);
+      return true;
+    }
+    case "ghost.ask": {
+      return await collectChat(
+        [{ role: "user", content: args[0] }], 1024);
+    }
+    case "ui.show": {
+      showPluginPanel(p);
+      return true;
+    }
+    case "ui.hide": {
+      $("pluginPanel").classList.add("hidden");
+      return true;
+    }
+    case "ui.notify": {
+      addMsg("SYSTEM", "🔌 " + p.name + ": " + args[0]);
+      return true;
+    }
+  }
+  throw new Error("unknown plugin method: " + method);
+}
+
+function showPluginPanel(p) {
+  activePlugin = p;
+  $("pluginPanelTitle").textContent = "🔌 " + p.name;
+  for (const x of plugins) {
+    if (x.frame)
+      x.frame.style.display = x === p ? "block" : "none";
+  }
+  $("pluginPanel").classList.remove("hidden");
+}
+$("pluginPanelClose").onclick = () =>
+  $("pluginPanel").classList.add("hidden");
+
+function runPluginAction(p, actionId) {
+  if (!p.frame) makePluginFrame(p);
+  if (p.frame.contentWindow)
+    p.frame.contentWindow.postMessage(
+      { kind: "action", action: actionId }, "*");
+}
+
+function renderPluginTools() {
+  const grid = $("toolPlugins");
+  grid.innerHTML = "";
+  pluginCommands = [];
+  for (const p of plugins) {
+    if (!p.enabled) continue;
+    for (const a of p.actions) {
+      const b = document.createElement("button");
+      b.textContent = "🔌 " + (a.title || a.id);
+      b.onclick = () => {
+        hideTools();
+        runPluginAction(p, a.id);
+      };
+      grid.appendChild(b);
+      pluginCommands.push({
+        title: (a.title || a.id) + " (" + p.name + ")",
+        run: () => runPluginAction(p, a.id),
+      });
+    }
+  }
+  if (!grid.children.length)
+    grid.innerHTML = '<span class="dim">No plugins yet. '
+      + "Manage plugins… installs the samples.</span>";
+}
+
+async function openPlugins() {
+  hideTools();
+  $("todoTitle").textContent = "Plugins";
+  const box = $("todoResults");
+  box.innerHTML = '<div class="dim">Scanning '
+    + PLUGIN_DIR + "/ …</div>";
+  $("todoPanel").classList.remove("hidden");
+  await discoverPlugins();
+  box.innerHTML = "";
+  const note = document.createElement("div");
+  note.className = "dim";
+  note.textContent = "Plugins live in " + PLUGIN_DIR
+    + "/<name>/ as plugin.json + plugin.js and run in a "
+    + "sandbox with only the GhostIDE API. Remove deletes "
+    + "the folder for good.";
+  box.appendChild(note);
+  for (const p of plugins) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    const label = document.createElement("span");
+    label.textContent = "🔌 " + p.name
+      + (p.version ? " v" + p.version : "")
+      + (p.enabled ? "" : " (disabled)")
+      + (p.description ? " - " + p.description : "");
+    row.appendChild(label);
+    const tgl = document.createElement("button");
+    tgl.textContent = p.enabled ? "Disable" : "Enable";
+    tgl.onclick = async (ev) => {
+      ev.stopPropagation();
+      setPluginDisabled(p.id, p.enabled);
+      await openPlugins();
+    };
+    row.appendChild(tgl);
+    const rm = document.createElement("button");
+    rm.textContent = "Remove";
+    rm.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (!confirm("Remove plugin " + p.name
+          + "? Its folder is deleted.")) return;
+      const d = await postJson("/api/file/delete",
+        { path: p.dir });
+      if (d.error) { alert(d.error); return; }
+      setPluginDisabled(p.id, false);
+      await openPlugins();
+    };
+    row.appendChild(rm);
+    box.appendChild(row);
+  }
+  const inst = document.createElement("div");
+  inst.className = "findRow";
+  inst.textContent = "⬇ Install the sample plugins "
+    + "(Word Count Pro, JSON Toolbox)";
+  inst.onclick = async () => {
+    for (const s of SAMPLE_PLUGINS) {
+      let d = await postJson("/api/file", {
+        path: PLUGIN_DIR + "/" + s.id + "/plugin.json",
+        content: s.manifest });
+      if (d.error) { alert(d.error); return; }
+      d = await postJson("/api/file", {
+        path: PLUGIN_DIR + "/" + s.id + "/plugin.js",
+        content: s.code });
+      if (d.error) { alert(d.error); return; }
+    }
+    await openPlugins();
+    addMsg("SYSTEM", "🔌 Sample plugins installed. "
+      + "Their actions are in Tools, Plugins.");
+  };
+  box.appendChild(inst);
+  const rs = document.createElement("div");
+  rs.className = "findRow";
+  rs.textContent = "↻ Rescan plugin folder";
+  rs.onclick = () => openPlugins();
+  box.appendChild(rs);
+}
+$("toolPluginsManage").onclick = openPlugins;
+
 /* ---------------- Roadmap G14: project templates ----------------
    Defined once here and created through /api/file, so the
    same catalog works identically on desktop and phone.
@@ -4249,6 +4636,7 @@ $("toolTemplates").onclick = openTemplates;
 /* ---------------- boot ---------------- */
 loadFiles();
 refreshWsLabel();
+discoverPlugins();
 /* Reaching this line proves the whole bundle evaluated without a
    startup crash - tell the watchdog in index.html, and surface
    anything the error trap caught on the way up. */
