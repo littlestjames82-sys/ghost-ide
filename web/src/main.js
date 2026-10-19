@@ -160,6 +160,7 @@ function baseExtensions(path) {
         $("cursorPos").textContent =
           `Ln ${line.number}, Col ${head - line.from + 1}` +
           ` · ${u.state.doc.lines} lines · ${u.state.doc.length} chars`;
+        updateCrumbs();
       }
       if (u.docChanged) {
         if (!accepting) { clearGhost(u.view); scheduleInfill(u.view); }
@@ -283,6 +284,12 @@ function checkDraft(path, diskContent) {
   $("draftBar").classList.remove("hidden");
 }
 
+let fileFilterText = "";
+$("fileFilter").addEventListener("input", (e) => {
+  fileFilterText = e.target.value.trim().toLowerCase();
+  loadFiles();
+});
+
 /* Collapsible folders (Phase 9): collapsed dir paths persist
    locally; children of collapsed dirs are skipped in the list. */
 let collapsedDirs = new Set();
@@ -310,7 +317,11 @@ async function loadFiles() {
   const tree = $("fileTree");
   tree.innerHTML = "";
   for (const f of d.files) {
-    if (isHiddenByCollapse(f.path)) continue;
+    if (fileFilterText) {
+      /* Filter mode (Phase 10): matching files only, flat. */
+      if (f.type !== "file") continue;
+      if (!f.path.toLowerCase().includes(fileFilterText)) continue;
+    } else if (isHiddenByCollapse(f.path)) continue;
     const row = document.createElement("div");
     row.className = "fileRow";
     const el = document.createElement("div");
@@ -423,6 +434,7 @@ $("menuDelete").onclick = async () => {
 /* Tabs (Phase 2.5): every open file keeps its own editor state, so
    switching tabs never loses edits, cursor position, or undo. */
 const tabOrder = [];
+const closedStack = [];
 const tabStates = new Map();
 const tabDirty = new Map();
 
@@ -458,6 +470,7 @@ function renderTabs() {
     t.appendChild(x);
     bar.appendChild(t);
   }
+  saveSession();
 }
 
 function activateTab(path) {
@@ -469,6 +482,7 @@ function activateTab(path) {
   renderTabs();
   loadFiles();
   noteRecentFile(path);
+  updateCrumbs();
 }
 
 function closeTab(p) {
@@ -478,6 +492,7 @@ function closeTab(p) {
   const isDirty = p === currentFile ? dirty : !!tabDirty.get(p);
   if (isDirty && !confirm("Close " + p + " with unsaved changes?")) return;
   tabOrder.splice(i, 1);
+  closedStack.push(p);
   tabStates.delete(p);
   tabDirty.delete(p);
   try { localStorage.removeItem(draftKey(p)); } catch (e) {}
@@ -496,7 +511,7 @@ function closeTab(p) {
   loadFiles();
 }
 
-async function openFile(path) {
+async function openFile(path, skipGuard) {
   if (path === currentFile) return;
   if (path === splitFile) {
     if (splitView) splitView.focus();
@@ -507,7 +522,7 @@ async function openFile(path) {
   const r = await fetch("/api/file?path=" + encodeURIComponent(path));
   const d = await r.json();
   if (d.error) { alert(d.error); return; }
-  if (d.content && d.content.length > 200000 &&
+  if (!skipGuard && d.content && d.content.length > 200000 &&
       !confirm(path + " is " + Math.round(d.content.length / 1024) +
         " KB - large files can make the editor sluggish, especially " +
         "on the phone. Open it anyway?")) return;
@@ -517,6 +532,7 @@ async function openFile(path) {
   tabDirty.set(path, false);
   activateTab(path);
   checkDraft(path, d.content);
+  checkQuiet();
 }
 
 function postJson(url, obj) {
@@ -2230,6 +2246,13 @@ const COMMANDS = [
   { title: "Go to line", run: () => $("toolGoto").click() },
   { title: "Outline (functions and classes)", run: () => $("toolOutline").click() },
   { title: "Go to symbol…", run: () => openSymbols() },
+  { title: "Go to definition", run: () => $("toolDef").click() },
+  { title: "Rename symbol…", run: () => $("toolRename").click() },
+  { title: "Reopen closed tab", run: () => {
+      const p = closedStack.pop();
+      if (p) openFile(p);
+      else alert("No closed tab to reopen.");
+    } },
   { title: "Bookmarks", run: () => { hideTools(); renderBookmarks(); } },
   { title: "Toggle focus mode (hide side panels)", run: () => toggleZen() },
   { title: "TODO / FIXME scan", run: () => $("toolTodos").click() },
@@ -2370,6 +2393,214 @@ async function checkQuiet() {
     chip.classList.add("hidden");
   }
 }
+
+/* ---------------- Phase 10: breadcrumbs, session restore,
+   rename symbol, go to definition, code-from-comment -------- */
+function wordAtCursor() {
+  const pos = view.state.selection.main.head;
+  const doc = view.state.doc;
+  const isWord = (ch) => /[A-Za-z0-9_$]/.test(ch);
+  let from = pos;
+  let to = pos;
+  while (from > 0 && isWord(doc.sliceString(from - 1, from))) from--;
+  while (to < doc.length && isWord(doc.sliceString(to, to + 1))) to++;
+  return { word: doc.sliceString(from, to), from, to };
+}
+
+function updateCrumbs() {
+  const el = $("crumbs");
+  if (!el) return;
+  if (!currentFile) { el.textContent = ""; return; }
+  let out = currentFile.split("/").join(" › ");
+  try {
+    const lineNo = view.state.doc.lineAt(
+      view.state.selection.main.head).number;
+    const syms = extractSymbols(view.state.doc.toString());
+    let cur = null;
+    for (const s of syms) {
+      if (s.line <= lineNo) cur = s;
+      else break;
+    }
+    if (cur) out += " › ƒ " + cur.name;
+  } catch (e) { /* crumbs are decorative */ }
+  el.textContent = out;
+}
+
+/* Session restore: the open tabs + current file persist locally
+   and reopen on launch (paths that no longer exist are skipped). */
+function saveSession() {
+  try {
+    localStorage.setItem("ghostide-session", JSON.stringify({
+      tabs: [...tabOrder], current: currentFile }));
+  } catch (e) { /* best-effort */ }
+}
+(async () => {
+  try {
+    const s = JSON.parse(
+      localStorage.getItem("ghostide-session") || "null");
+    if (!s || !s.tabs || !s.tabs.length) return;
+    const fr = await fetch("/api/files");
+    const fd = await fr.json();
+    const known = new Set((fd.files || [])
+      .filter((x) => x.type === "file").map((x) => x.path));
+    for (const p of s.tabs) {
+      if (known.has(p)) await openFile(p, true);
+    }
+    if (s.current && known.has(s.current) &&
+        tabOrder.includes(s.current) && s.current !== currentFile) {
+      stashTab();
+      activateTab(s.current);
+    }
+  } catch (e) { /* restore is best-effort */ }
+})();
+
+$("toolRename").onclick = async () => {
+  hideTools();
+  const w = wordAtCursor();
+  if (!w.word) {
+    alert("Put the cursor on a name (function, variable) first.");
+    return;
+  }
+  if (dirty) {
+    alert("Save your changes first - rename works on the saved "
+      + "files, and your open edits would go stale.");
+    return;
+  }
+  const nn = prompt("Rename symbol '" + w.word + "' to:", w.word);
+  if (!nn || nn === w.word) return;
+  const d = await postJson("/api/rename-symbol",
+    { word: w.word, replacement: nn });
+  if (d.error) { alert(d.error); return; }
+  alert("Renamed " + d.replacements + " occurrence(s) in " +
+    d.filesChanged + " file(s).");
+  if (currentFile && d.filesChanged &&
+      view.state.doc.toString().includes(w.word)) {
+    /* Reload the current buffer from disk (it changed). Drop its
+       tab first so openFile does not duplicate it. */
+    const path = currentFile;
+    const ti = tabOrder.indexOf(path);
+    if (ti >= 0) tabOrder.splice(ti, 1);
+    tabStates.delete(path);
+    tabDirty.set(path, false);
+    currentFile = null;
+    await openFile(path, true);
+  }
+  loadFiles();
+};
+
+$("toolDef").onclick = async () => {
+  hideTools();
+  const w = wordAtCursor();
+  if (!w.word) {
+    alert("Put the cursor on a name first.");
+    return;
+  }
+  const pats = ["def " + w.word, "class " + w.word,
+    "function " + w.word, "const " + w.word + " =",
+    "let " + w.word + " =", "var " + w.word + " =",
+    w.word + " = function", w.word + ": function"];
+  let hits = [];
+  for (const q of pats) {
+    const d = await postJson("/api/search", { query: q });
+    if (d.matches && d.matches.length) {
+      hits = d.matches;
+      break;
+    }
+  }
+  const seen = new Set();
+  hits = hits.filter((h) => {
+    const k = h.path + ":" + h.line;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  if (!hits.length) {
+    alert("No definition found for '" + w.word + "' (looked for "
+      + "def / class / function lines - it is a simple search, "
+      + "not a language server).");
+    return;
+  }
+  if (hits.length === 1) {
+    const h = hits[0];
+    if (h.path !== currentFile) await openFile(h.path);
+    jumpToLine(h.line);
+    return;
+  }
+  $("todoTitle").textContent = "Definitions of " + w.word;
+  const box = $("todoResults");
+  box.innerHTML = "";
+  for (const h of hits) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = h.path + " · line " + h.line;
+    row.onclick = async () => {
+      $("todoPanel").classList.add("hidden");
+      if (h.path !== currentFile) await openFile(h.path);
+      jumpToLine(h.line);
+    };
+    box.appendChild(row);
+  }
+  $("todoPanel").classList.remove("hidden");
+};
+
+$("menuCopyContents").onclick = async () => {
+  $("fileMenu").classList.add("hidden");
+  if (!menuTarget || menuTarget.type === "dir") return;
+  const r = await fetch("/api/file?path=" +
+    encodeURIComponent(menuTarget.path));
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  try {
+    await navigator.clipboard.writeText(d.content || "");
+  } catch (e) {
+    prompt("Copy the contents:", d.content || "");
+  }
+};
+
+/* Write code from a comment: Ghost drafts the code the comment
+   describes; the shared review panel gates insertion. */
+$("aiWrite").onclick = async () => {
+  hideTools();
+  if (!currentFile) { alert("Open a file first."); return; }
+  if (!modelUp) { alert("Start the model first."); return; }
+  const head = view.state.selection.main.head;
+  const lineNo = view.state.doc.lineAt(head).number;
+  let comment = "";
+  let commentLine = lineNo;
+  for (let n = lineNo; n >= Math.max(1, lineNo - 3); n--) {
+    const t = view.state.doc.line(n).text.trim();
+    if (/^(#|\/\/|\/\*|\*)/.test(t)) {
+      comment = t.replace(/^(#|\/\/|\/\*+|\*+)\s?/, "").trim();
+      if (comment) { commentLine = n; break; }
+    }
+  }
+  if (!comment) {
+    alert("Put the cursor on (or just under) a comment that "
+      + "describes the code you want.");
+    return;
+  }
+  const lineObj = view.state.doc.line(commentLine);
+  inlineTarget = { from: lineObj.to, to: lineObj.to };
+  $("inlineAiOut").textContent = "Ghost is writing…";
+  $("inlineAiApply").disabled = true;
+  $("inlineAiReview").classList.remove("hidden");
+  try {
+    let out = await collectChat([
+      { role: "system", content: BEHAVIOR.systemPrompt },
+      { role: "user", content: "Write the code described by this "
+        + "comment. Reply with ONLY the code - no explanations, "
+        + "no markdown fences.\nFile: " + currentFile
+        + "\nComment: " + comment }], 768);
+    out = (out || "").trim();
+    const fence = out.match(/^```\w*\n([\s\S]*?)```$/);
+    if (fence) out = fence[1];
+    inlineResult = out ? "\n" + out : "";
+    $("inlineAiOut").textContent = out || "(empty reply)";
+    $("inlineAiApply").disabled = !out;
+  } catch (e) {
+    $("inlineAiOut").textContent = "Failed: " + e;
+  }
+};
 
 /* ---------------- boot ---------------- */
 loadFiles();

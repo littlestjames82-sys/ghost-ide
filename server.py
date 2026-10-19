@@ -550,6 +550,36 @@ class Handler(SimpleHTTPRequestHandler):
                         total += n
                 return self.send_json({"filesChanged": files_changed,
                                        "replacements": total})
+            if parsed.path == "/api/rename-symbol":
+                # Phase 10: word-boundary rename of an identifier
+                # across the workspace (files on disk; the UI
+                # guards unsaved buffers before calling).
+                import re as _re
+                data = self.read_json()
+                word = data.get("word", "")
+                rep = data.get("replacement", "")
+                if not _re.match(r"^[A-Za-z_$][A-Za-z0-9_$]*$",
+                                 word or ""):
+                    raise ValueError("not an identifier: " + word)
+                if not _re.match(r"^[A-Za-z_$][A-Za-z0-9_$]*$",
+                                 rep or ""):
+                    raise ValueError("not an identifier: " + rep)
+                pat = _re.compile(r"\b" + _re.escape(word) + r"\b")
+                files_changed = 0
+                total = 0
+                for rel, p in iter_text_files():
+                    try:
+                        text = p.read_text(errors="strict")
+                    except Exception:
+                        continue
+                    new, n = pat.subn(rep, text)
+                    if n:
+                        p.write_text(new)
+                        files_changed += 1
+                        total += n
+                return self.send_json({
+                    "filesChanged": files_changed,
+                    "replacements": total})
             if parsed.path == "/api/format":
                 data = self.read_json()
                 p = safe_path(data["path"])

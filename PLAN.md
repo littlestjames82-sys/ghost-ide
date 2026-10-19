@@ -173,6 +173,9 @@ Command palette (27 commands), VS Code keymap pack (comment toggle, move/copy/de
 ## Phase 9 - More VS Code / Cursor - SHIPPED Oct 19, 2026 (phone v1.8.0 + desktop)
 Fixed the latent quick-open mapping bug (files objects vs strings - Quick Open/split/palette lists were silently empty since Phase 6). Added: collapsible folder tree, Go to Symbol, chat @file mentions + selection attach, Focus mode, indent/whitespace settings, Bookmarks, Fix-with-AI in Problems, quiet problems chip.
 
+## Phase 10 - Round ten - SHIPPED Oct 19, 2026 (phone v1.9.0 + desktop)
+Breadcrumbs, explorer filter, session restore (tabs reopen on launch), reopen closed tab, Rename symbol (new /api/rename-symbol on both servers, live-verified), Go to definition (heuristic), Copy contents, check-on-open, Write-code-from-comment.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
