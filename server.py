@@ -345,6 +345,342 @@ def _repo_map(budget_chars):
     return "\n".join(lines)
 
 
+# ---------------- Refactoring engine (Roadmap G3) ----------------
+# Every operation computes the full new contents first and
+# returns {files: [{path, content}], diff} for preview; with
+# apply=true the caller writes them through the normal save
+# path (which snapshots Local History, so refactors undo).
+import ast as _ast
+import builtins as _builtins
+import difflib as _difflib
+
+_IDENT_RE = _re_mod.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+
+
+def _refactor_diff(changes):
+    out = []
+    for path, old, new in changes:
+        out.extend(_difflib.unified_diff(
+            old.splitlines(), new.splitlines(),
+            fromfile="a/" + path, tofile="b/" + path, lineterm=""))
+    return "\n".join(out)
+
+
+def _check_ident(name):
+    if not _IDENT_RE.match(name or ""):
+        raise ValueError("not a valid name: " + str(name))
+
+
+def refactor_extract_function(data):
+    _check_ident(data.get("name", ""))
+    name = data["name"]
+    p = safe_path(data["path"])
+    text = p.read_text()
+    lines = text.splitlines()
+    start = int(data["startLine"])
+    end = int(data["endLine"])
+    tree = _ast.parse(text)
+    owners = [tree] + [n for n in _ast.walk(tree)
+                       if isinstance(n, (_ast.FunctionDef,
+                                         _ast.AsyncFunctionDef))]
+    block = None
+    owner = None
+    for cand in owners:
+        body = cand.body
+        inside = [st for st in body
+                  if start <= st.lineno and st.end_lineno <= end]
+        partial = [st for st in body
+                   if not (st.end_lineno < start or st.lineno > end)
+                   and st not in inside]
+        if inside and not partial:
+            idxs = [body.index(st) for st in inside]
+            if idxs == list(range(idxs[0], idxs[0] + len(idxs))):
+                block = inside
+                owner = cand
+                break
+    if block is None:
+        raise ValueError("Selection must cover whole statements "
+                         "inside one function or at module level.")
+    if any(isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef,
+                           _ast.ClassDef)) and n.name == name
+           for n in _ast.walk(tree)):
+        raise ValueError("A definition named " + name +
+                         " already exists in this file.")
+    first, last = block[0], block[-1]
+    loads, stores = set(), set()
+    for st in block:
+        for n in _ast.walk(st):
+            if isinstance(n, _ast.Name):
+                if isinstance(n.ctx, _ast.Load):
+                    loads.add(n.id)
+                elif isinstance(n.ctx, _ast.Store):
+                    stores.add(n.id)
+            elif isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef,
+                                _ast.ClassDef)):
+                stores.add(n.name)
+    defined_before = set()
+    if isinstance(owner, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+        a = owner.args
+        for arg in (list(a.posonlyargs) + list(a.args)
+                    + list(a.kwonlyargs)):
+            defined_before.add(arg.arg)
+        if a.vararg:
+            defined_before.add(a.vararg.arg)
+        if a.kwarg:
+            defined_before.add(a.kwarg.arg)
+    for st in owner.body:
+        if st.lineno >= first.lineno:
+            break
+        for n in _ast.walk(st):
+            if isinstance(n, _ast.Name) and isinstance(
+                    n.ctx, _ast.Store):
+                defined_before.add(n.id)
+            elif isinstance(n, (_ast.FunctionDef,
+                                _ast.AsyncFunctionDef, _ast.ClassDef)):
+                defined_before.add(n.name)
+            elif isinstance(n, _ast.Import):
+                for al in n.names:
+                    defined_before.add((al.asname or al.name)
+                                       .split(".")[0])
+            elif isinstance(n, _ast.ImportFrom):
+                for al in n.names:
+                    defined_before.add(al.asname or al.name)
+    builtin_names = set(dir(_builtins))
+    params = sorted((loads - stores) & defined_before - builtin_names)
+    loads_after = set()
+    for st in owner.body:
+        if st.lineno > last.end_lineno:
+            for n in _ast.walk(st):
+                if isinstance(n, _ast.Name) and isinstance(
+                        n.ctx, _ast.Load):
+                    loads_after.add(n.id)
+    returns = sorted(stores & loads_after)
+    indent = " " * first.col_offset
+    block_lines = lines[first.lineno - 1:last.end_lineno]
+    base = " " * first.col_offset
+    body_lines = [(l[len(base):] if l.startswith(base) else l)
+                  for l in block_lines]
+    fn = ["def " + name + "(" + ", ".join(params) + "):"]
+    for l in body_lines:
+        fn.append("    " + l if l.strip() else l)
+    if returns:
+        fn.append("    return " + ", ".join(returns))
+    call = name + "(" + ", ".join(params) + ")"
+    if returns:
+        call = ", ".join(returns) + " = " + call
+    call_line = indent + call
+    if isinstance(owner, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+        insert_at = min([owner.lineno]
+                        + [d.lineno for d in owner.decorator_list])
+    else:
+        insert_at = first.lineno
+    out = []
+    for i, l in enumerate(lines, 1):
+        if i == insert_at:
+            out.extend(fn)
+            out.append("")
+            out.append("")
+        if first.lineno <= i <= last.end_lineno:
+            if i == first.lineno:
+                out.append(call_line)
+            continue
+        out.append(l)
+    new_text = "\n".join(out) + ("\n" if text.endswith("\n") else "")
+    _ast.parse(new_text)
+    return {"files": [{"path": data["path"], "content": new_text}],
+            "info": {"params": params, "returns": returns}}
+
+
+def refactor_extract_variable(data):
+    _check_ident(data.get("name", ""))
+    name = data["name"]
+    p = safe_path(data["path"])
+    text = p.read_text()
+    lines = text.splitlines()
+    line_no = int(data["line"])
+    scol = int(data["startCol"])
+    ecol = int(data["endCol"])
+    if not (1 <= line_no <= len(lines)):
+        raise ValueError("line out of range")
+    expr = lines[line_no - 1][scol:ecol]
+    if not expr or not expr.strip() or "\n" in expr:
+        raise ValueError("Select an expression on one line first.")
+    is_py = p.suffix.lower() == ".py"
+    if is_py:
+        _ast.parse(expr, mode="eval")
+    lo, hi = 1, len(lines)
+    if is_py:
+        tree = _ast.parse(text)
+        best = None
+        for n in _ast.walk(tree):
+            if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef)) \
+                    and n.lineno <= line_no <= n.end_lineno:
+                if best is None or (n.end_lineno - n.lineno) < \
+                        (best.end_lineno - best.lineno):
+                    best = n
+        if best is not None:
+            lo, hi = best.lineno, best.end_lineno
+    bare = bool(_IDENT_RE.match(expr))
+    pat = None
+    if bare:
+        pat = _re_mod.compile(r"\b" + _re_mod.escape(expr) + r"\b")
+    count = 0
+    new_lines = list(lines)
+    for i in range(lo - 1, hi):
+        if pat:
+            new_lines[i], n = pat.subn(name, new_lines[i])
+        else:
+            n = new_lines[i].count(expr)
+            if n:
+                new_lines[i] = new_lines[i].replace(expr, name)
+        count += n
+    if count == 0:
+        raise ValueError("Expression not found in scope.")
+    first_idx = next(i for i in range(lo - 1, hi)
+                     if new_lines[i] != lines[i])
+    stmt_line = lines[first_idx]
+    indent = stmt_line[:len(stmt_line) - len(stmt_line.lstrip())]
+    decl = (indent + name + " = " + expr) if is_py else \
+        (indent + "const " + name + " = " + expr + ";")
+    new_lines.insert(first_idx, decl)
+    new_text = "\n".join(new_lines) + \
+        ("\n" if text.endswith("\n") else "")
+    if is_py:
+        _ast.parse(new_text)
+    return {"files": [{"path": data["path"], "content": new_text}],
+            "info": {"replaced": count, "expression": expr}}
+
+
+def refactor_inline(data):
+    _check_ident(data.get("name", ""))
+    name = data["name"]
+    idx = _symbol_index()
+    defs = [s for s in idx["symbols"]
+            if s["name"] == name and s["kind"] == "value"]
+    if len(defs) != 1:
+        raise ValueError("Inline needs exactly one simple "
+                         "assignment to " + name + " in the "
+                         "workspace; found " + str(len(defs)) + ".")
+    d0 = defs[0]
+    p = safe_path(d0["path"])
+    def_lines = p.read_text().splitlines()
+    def_line = def_lines[d0["line"] - 1]
+    m = _re_mod.match(r"^\s*(?:const\s+|let\s+|var\s+)?"
+                      + _re_mod.escape(name) + r"\s*=\s*(.+?);?\s*$",
+                      def_line)
+    if not m:
+        raise ValueError("The definition of " + name +
+                         " is not a simple one-line assignment.")
+    expr = m.group(1)
+    assign_pat = _re_mod.compile(r"\b" + _re_mod.escape(name)
+                                 + r"\s*=(?!=)")
+    refs = idx["refs"].get(name, [])
+    by_file = {}
+    for r in refs:
+        by_file.setdefault(r["path"], []).append(r)
+    simple = bool(_re_mod.match(r"^[\w$.\"'/\[\] ]+$", expr))
+    replacement = expr if simple else "(" + expr + ")"
+    word_pat = _re_mod.compile(r"\b" + _re_mod.escape(name) + r"\b")
+    changes = []
+    for path, file_refs in by_file.items():
+        fp = safe_path(path)
+        ftext = fp.read_text()
+        flines = ftext.splitlines()
+        touched = set(r["line"] for r in file_refs)
+        for ln in touched:
+            if assign_pat.search(flines[ln - 1]) and not (
+                    path == d0["path"] and ln == d0["line"]):
+                raise ValueError(name + " is assigned in more "
+                                 "than one place (" + path + ").")
+        out = []
+        for i, l in enumerate(flines, 1):
+            if path == d0["path"] and i == d0["line"]:
+                continue
+            if i in touched:
+                l = word_pat.sub(replacement, l)
+            out.append(l)
+        new_text = "\n".join(out) + \
+            ("\n" if ftext.endswith("\n") else "")
+        if fp.suffix.lower() == ".py":
+            _ast.parse(new_text)
+        if new_text != ftext:
+            changes.append({"path": path, "content": new_text,
+                            "_old": ftext})
+    if not changes:
+        raise ValueError("Nothing to inline.")
+    return {"files": changes,
+            "info": {"expression": expr, "files": len(changes)}}
+
+
+def refactor_move(data):
+    src = safe_path(data["from"])
+    dst = safe_path(data["to"])
+    if not src.is_file():
+        raise ValueError("no such file: " + data["from"])
+    if dst.exists():
+        raise ValueError("already exists: " + data["to"])
+    frm, to = data["from"], data["to"]
+    changes = []
+    total = 0
+    if frm.endswith(".py"):
+        old_mod = frm[:-3].replace("/", ".")
+        new_mod = to[:-3].replace("/", ".")
+        mod_pat = _re_mod.compile(
+            r"^(\s*(?:import|from)\s+)" + _re_mod.escape(old_mod)
+            + r"(?=[\s.]|$)")
+        for rel, fp in iter_text_files():
+            if str(rel) == frm or not str(rel).endswith(".py"):
+                continue
+            ftext = fp.read_text()
+            flines = ftext.splitlines()
+            hit = False
+            for i, l in enumerate(flines):
+                if mod_pat.search(l):
+                    flines[i] = mod_pat.sub(
+                        lambda mm: mm.group(1) + new_mod, l, count=1)
+                    hit = True
+                    total += 1
+            if hit:
+                new_text = "\n".join(flines) + \
+                    ("\n" if ftext.endswith("\n") else "")
+                _ast.parse(new_text)
+                changes.append({"path": str(rel),
+                                "content": new_text, "_old": ftext})
+    elif frm.endswith((".js", ".mjs")):
+        import posixpath
+        for rel, fp in iter_text_files():
+            rstr = str(rel)
+            if rstr == frm or not rstr.endswith((".js", ".mjs")):
+                continue
+            idir = posixpath.dirname(rstr) or "."
+
+            def spec(target):
+                s = posixpath.relpath(target, idir)
+                if s.endswith(".js"):
+                    s = s[:-3]
+                if not s.startswith("."):
+                    s = "./" + s
+                return s
+
+            old_spec, new_spec = spec(frm), spec(to)
+            ftext = fp.read_text()
+            if old_spec == new_spec:
+                continue
+            n = ftext.count("'" + old_spec + "'") \
+                + ftext.count('"' + old_spec + '"')
+            if n:
+                new_text = ftext.replace("'" + old_spec + "'",
+                                         "'" + new_spec + "'") \
+                    .replace('"' + old_spec + '"',
+                             '"' + new_spec + '"')
+                changes.append({"path": rstr, "content": new_text,
+                                "_old": ftext})
+                total += n
+    return {"files": changes, "move": {"from": frm, "to": to},
+            "info": {"filesFixed": len(changes),
+                     "replacements": total}}
+
+
 def git_out(args, timeout=30):
     if not shutil.which("git"):
         raise ValueError("git is not installed")
@@ -864,6 +1200,44 @@ class Handler(SimpleHTTPRequestHandler):
                         total += n
                 return self.send_json({"filesChanged": files_changed,
                                        "replacements": total})
+            if parsed.path == "/api/refactor":
+                # Roadmap G3: compute -> preview diff -> apply.
+                data = self.read_json()
+                ops = {
+                    "extract-function": refactor_extract_function,
+                    "extract-variable": refactor_extract_variable,
+                    "inline": refactor_inline,
+                    "move": refactor_move,
+                }
+                op = data.get("op", "")
+                if op not in ops:
+                    raise ValueError("unknown refactor: " + op)
+                result = ops[op](data)
+                changes = []
+                for f in result["files"]:
+                    fp = safe_path(f["path"])
+                    old = fp.read_text() if fp.is_file() else ""
+                    changes.append((f["path"], old, f["content"]))
+                diff = _refactor_diff(changes)
+                applied = False
+                if data.get("apply"):
+                    for f in result["files"]:
+                        fp = safe_path(f["path"])
+                        fp.parent.mkdir(parents=True, exist_ok=True)
+                        snapshot_history(fp, f["content"])
+                        fp.write_text(f["content"])
+                    if result.get("move"):
+                        src = safe_path(result["move"]["from"])
+                        dst = safe_path(result["move"]["to"])
+                        dst.parent.mkdir(parents=True,
+                                         exist_ok=True)
+                        src.rename(dst)
+                    applied = True
+                return self.send_json({
+                    "diff": diff, "applied": applied,
+                    "info": result.get("info", {}),
+                    "files": [f["path"] for f in result["files"]],
+                    "move": result.get("move")})
             if parsed.path == "/api/rename-symbol":
                 # Phase 10: word-boundary rename of an identifier
                 # across the workspace (files on disk; the UI

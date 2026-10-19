@@ -182,6 +182,9 @@ Local History on both servers (snapshot-on-save, self-undoing restore), project-
 ## Phase 12 - Roadmap G1 - SHIPPED Oct 19, 2026 (phone v1.11.0 + desktop)
 Workspace symbol index on both servers: definitions + references from a cached two-pass index; Go to Symbol is workspace-wide. Ryan directed: after G1, build the rest.
 
+## Phase 13 - Roadmap G2+G3 - SHIPPED Oct 19, 2026 (v1.12.0, v1.13.0)
+G2 repo map + G3 refactoring engine closed per ROADMAP_20. Marathon continues at G4.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
