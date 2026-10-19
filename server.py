@@ -28,6 +28,16 @@ WORKSPACE = Path(os.environ.get(
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
 LLAMA_BASE = os.environ.get("LLAMA_BASE", "http://127.0.0.1:8080")
+PAIR_PEERS = {}  # Roadmap G16: pair-mode presence, id -> peer dict
+
+
+def pair_snapshot():
+    """Live pair peers; entries older than 25 s are pruned."""
+    now = time.time()
+    for k in [k for k, v in list(PAIR_PEERS.items())
+              if now - v["seen"] > 25]:
+        PAIR_PEERS.pop(k, None)
+    return [dict(v) for v in list(PAIR_PEERS.values())]
 LLAMA_BIN = os.environ.get(
     "LLAMA_SERVER_BIN",
     str(Path.home() / "workspace/tools/llama.cpp/llama-b11429/llama-server"))
@@ -1556,6 +1566,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if parsed.path == "/api/pair/peers":
+                return self.send_json({"peers": pair_snapshot()})
             if parsed.path == "/api/todos":
                 # TODO/FIXME scanner (Tools pack): markers across the
                 # workspace, clickable in the UI to jump to the line.
@@ -1678,6 +1690,18 @@ class Handler(SimpleHTTPRequestHandler):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 src.rename(dst)
                 return self.send_json({"ok": True, "path": data["to"]})
+            if parsed.path == "/api/pair/heartbeat":
+                data = self.read_json()
+                pid = str(data.get("id", ""))[:64]
+                if pid:
+                    PAIR_PEERS[pid] = {
+                        "id": pid,
+                        "name": str(data.get("name", "device"))[:40],
+                        "file": str(data.get("file", ""))[:300],
+                        "dirty": bool(data.get("dirty")),
+                        "seen": time.time(),
+                    }
+                return self.send_json({"peers": pair_snapshot()})
             if parsed.path == "/api/file/delete":
                 data = self.read_json()
                 p = safe_path(data["path"])

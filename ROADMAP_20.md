@@ -127,7 +127,7 @@ show UI), installed from a folder, removable cleanly.
 Done when: two sample plugins (word count pro, JSON
 toolbox) install and run on the phone.
 
-**G16. Pair mode.** Two devices, one workspace, over LAN:
+**G16. Pair mode.** 🔶 BUILT Oct 19, 2026 (v1.26.0), device proof pending — presence + hash-guarded conflict-safe sync, proven by live two-client simulation; closes when Ryan runs one phone+desktop session with no lost work. Two devices, one workspace, over LAN:
 presence, shared view of who is editing what, and
 conflict-safe sync that merges by file instead of
 overwriting silently.

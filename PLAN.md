@@ -221,6 +221,9 @@ Project templates on both builds. Next: G15 plugin system.
 ## Phase 25 - Roadmap G15 - BUILT Oct 19, 2026 (v1.25.0), device proof pending
 Plugin system: workspace plugins/ folder, sandboxed iframes, ghost API, two samples. Next: G16 pair mode.
 
+## Phase 26 - Roadmap G16 - BUILT Oct 19, 2026 (v1.26.0), device proof pending
+Pair mode: shared-server presence + conflict-safe sync. Next: G17 encrypted backup (Arc D close).
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
