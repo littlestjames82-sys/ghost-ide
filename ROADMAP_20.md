@@ -189,7 +189,7 @@ Done when: a mixed-language fixture project opens with
 every file highlighted, checkable, and runnable where a
 runtime exists.
 
-**G22. SQLite studio.** Open a .db/.sqlite file and get
+**G22. SQLite studio.** 🔶 BUILT Oct 19, 2026 (v1.30.0) — desktop-proven exact on the fixture db; closes when Ryan opens a real app database on the phone and a SELECT returns the right rows. Open a .db/.sqlite file and get
 tables, schemas, and a query box with results as a grid —
 read-only by default, edits behind an explicit toggle.
 Done when: Ryan can inspect a real app database on the

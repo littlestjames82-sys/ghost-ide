@@ -27,7 +27,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.29.0"
+APP_VERSION = "1.30.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2533,6 +2533,79 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({
                     "ok": rc == 0, "output": output, "ms": ms,
                     "line": line_no, "message": message})
+            if parsed.path == "/api/db/info":
+                # Roadmap G22: SQLite studio. Read-only open;
+                # tables with columns and row counts.
+                data = self.read_json()
+                p = safe_path(data["path"])
+                if not p.is_file():
+                    raise ValueError("file not found: " + data["path"])
+                import sqlite3 as _sq
+                con = _sq.connect("file:%s?mode=ro" % p, uri=True)
+                try:
+                    tables = []
+                    names = [r[0] for r in con.execute(
+                        "SELECT name FROM sqlite_master WHERE "
+                        "type='table' AND name NOT LIKE "
+                        "'sqlite_%' ORDER BY name")]
+                    for name in names:
+                        cols = [{"name": r[1], "type": r[2],
+                                 "pk": bool(r[5])}
+                                for r in con.execute(
+                                    'PRAGMA table_info("%s")'
+                                    % name.replace('"', '""'))]
+                        count = con.execute(
+                            'SELECT COUNT(*) FROM "%s"'
+                            % name.replace('"', '""')).fetchone()[0]
+                        tables.append({"name": name,
+                                       "columns": cols,
+                                       "count": count})
+                    return self.send_json({"ok": True,
+                                           "tables": tables})
+                finally:
+                    con.close()
+            if parsed.path == "/api/db/query":
+                # One statement per call. Read-only unless the
+                # caller passes write:true — enforcement is by
+                # the engine itself (mode=ro rejects writes).
+                data = self.read_json()
+                p = safe_path(data["path"])
+                if not p.is_file():
+                    raise ValueError("file not found: " + data["path"])
+                sql = (data.get("sql") or "").strip()
+                if not sql:
+                    raise ValueError("empty query")
+                write = bool(data.get("write"))
+                import sqlite3 as _sq
+                import time as _time
+                uri = ("file:%s" % p) if write else (
+                    "file:%s?mode=ro" % p)
+                con = _sq.connect(uri, uri=True)
+                t0 = _time.time()
+                try:
+                    cur = con.execute(sql)
+                    if cur.description:
+                        cols = [d[0] for d in cur.description]
+                        rows = []
+                        for row in cur.fetchmany(501):
+                            rows.append([
+                                None if v is None else (
+                                    v if isinstance(
+                                        v, (int, float))
+                                    else str(v)[:500])
+                                for v in row])
+                        return self.send_json({
+                            "ok": True, "columns": cols,
+                            "rows": rows[:500],
+                            "truncated": len(rows) > 500,
+                            "ms": int((_time.time() - t0) * 1000)})
+                    con.commit()
+                    return self.send_json({
+                        "ok": True, "columns": [], "rows": [],
+                        "rowcount": cur.rowcount,
+                        "ms": int((_time.time() - t0) * 1000)})
+                finally:
+                    con.close()
             if parsed.path == "/api/model/switch":
                 # Desktop model manager (Phase 3.1): point the IDE at
                 # another local GGUF (e.g. the 1.5B/3B for a lighter

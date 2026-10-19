@@ -594,6 +594,7 @@ function closeTab(p) {
 }
 
 async function openFile(path, skipGuard) {
+  if (/\.(db|sqlite3?)$/i.test(path)) { openDbStudio(path); return; }
   if (path === currentFile) return;
   if (path === splitFile) {
     if (splitView) splitView.focus();
@@ -3997,6 +3998,104 @@ function openFixReport(log, verdict, backups, touched) {
 $("toolFix").onclick = () => {
   hideTools();
   runFixLoop();
+};
+
+/* ---------------- Roadmap G22: SQLite studio ----------------
+   Opening a .db/.sqlite file opens this studio instead of
+   the text editor. Read-only by default; the write toggle
+   is explicit, and SQLite itself enforces read-only (the
+   server opens the file mode=ro), so a write query in
+   read-only mode fails with SQLite's own error. */
+const dbState = { path: null, write: false, tables: [] };
+async function dbPost(url, body) {
+  const r = await fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+function dbRenderGrid(cols, rows) {
+  const t = $("dbGrid");
+  t.innerHTML = "";
+  if (!cols.length) return;
+  const head = document.createElement("tr");
+  for (const c of cols) {
+    const th = document.createElement("th");
+    th.textContent = c;
+    head.appendChild(th);
+  }
+  t.appendChild(head);
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    for (const v of row) {
+      const td = document.createElement("td");
+      td.textContent = v === null ? "NULL" : String(v);
+      if (v === null) td.className = "dim";
+      tr.appendChild(td);
+    }
+    t.appendChild(tr);
+  }
+}
+async function dbRun(sql) {
+  const d = await dbPost("/api/db/query", {
+    path: dbState.path, sql, write: dbState.write,
+  });
+  if (d.error) { $("dbMsg").textContent = "⚠ " + d.error; return; }
+  if (d.columns && d.columns.length) {
+    dbRenderGrid(d.columns, d.rows);
+    $("dbMsg").textContent = d.rows.length + " row(s) in " +
+      d.ms + " ms" + (d.truncated ? " (capped at 500)" : "");
+  } else {
+    $("dbGrid").innerHTML = "";
+    $("dbMsg").textContent = "Done: " + d.rowcount +
+      " row(s) affected in " + d.ms + " ms";
+  }
+}
+async function dbLoadInfo() {
+  const d = await dbPost("/api/db/info", { path: dbState.path });
+  if (d.error) { $("dbMsg").textContent = "⚠ " + d.error; return; }
+  dbState.tables = d.tables;
+  const wrap = $("dbTables");
+  wrap.innerHTML = "";
+  for (const t of d.tables) {
+    const b = document.createElement("button");
+    b.textContent = "🗄️ " + t.name + " (" + t.count + ")";
+    b.onclick = () => {
+      $("dbSchema").textContent = t.name + ": " +
+        t.columns.map((c) => c.name + " " + (c.type || "") +
+          (c.pk ? " PK" : "")).join(", ");
+      $("dbSql").value = "SELECT * FROM \"" + t.name +
+        "\" LIMIT 100";
+      dbRun($("dbSql").value);
+    };
+    wrap.appendChild(b);
+  }
+  $("dbMsg").textContent = d.tables.length +
+    " table(s). Tap a table to preview it, or write a query.";
+}
+function openDbStudio(path) {
+  dbState.path = path;
+  dbState.write = false;
+  $("dbWriteBtn").textContent = "🔒 Read-only";
+  $("dbTitle").textContent = "🗄️ " + path;
+  $("dbPanel").classList.remove("hidden");
+  $("dbSchema").textContent = "";
+  $("dbGrid").innerHTML = "";
+  $("dbSql").value = "";
+  dbLoadInfo();
+}
+$("dbClose").onclick = () => $("dbPanel").classList.add("hidden");
+$("dbWriteBtn").onclick = () => {
+  dbState.write = !dbState.write;
+  $("dbWriteBtn").textContent = dbState.write
+    ? "🔓 Edits allowed" : "🔒 Read-only";
+  $("dbMsg").textContent = dbState.write
+    ? "Write mode ON: INSERT/UPDATE/DELETE will change the file."
+    : "Read-only mode.";
+};
+$("dbRunBtn").onclick = () => {
+  const sql = $("dbSql").value.trim();
+  if (sql) dbRun(sql);
 };
 
 /* ---------------- Roadmap G13: voice coding ----------------

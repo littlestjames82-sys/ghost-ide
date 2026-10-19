@@ -239,6 +239,9 @@ Story assets prepared (READMEs, launch drafts). Site deploy, film, and posting s
 ## Phase 31 - Roadmap G21 - SHIPPED v1.29.0 Oct 19, 2026
 Language packs closed on the langpack fixture. Next: G22 SQLite studio.
 
+## Phase 32 - Roadmap G22 - SHIPPED v1.30.0 Oct 19, 2026
+SQLite studio built on both, desktop-proven. Also Oct 19: the APK upload service recovered; v1.29.0 link delivered. Next: G23 API client.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
