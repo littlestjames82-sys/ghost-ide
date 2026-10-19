@@ -230,6 +230,9 @@ Encrypted backup, one format both builds, cross-proven. Arc D complete pending p
 ## Phase 28 - Roadmap G18 - BUILT Oct 19, 2026 (v1.28.0)
 Desktop apps: PyInstaller packaging, in-app 7B download, report-only update check. Linux clean-room proven. Next: G19 store launch (Ryan gates: signing key, policy, screenshots).
 
+## Phase 29 - Roadmap G19 - PREPARED Oct 19, 2026
+Store launch prep complete (key, AAB, policy, listing). Submission gates are Ryan's. Next: G20 the story (site deploy + film are Ryan gates; README/docs refresh is buildable).
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

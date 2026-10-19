@@ -150,7 +150,7 @@ check that never auto-installs.
 Done when: a clean machine installs and runs it from
 the package alone.
 
-**G19. Store launch.** Production signing key handled
+**G19. Store launch.** 🔶 PREPARED Oct 19, 2026 — production key + signed AAB + tester universal APK built and verified, privacy policy and listing drafted; closes when Ryan funds the Play account, hosts the policy, adds real screenshots, and a tester installs from the closed track. Production signing key handled
 properly, privacy policy, listing with REAL screenshots
 from Ryan's phone, closed testing track first, staged
 rollout decision stays Ryan's, as does the $25 fee.
