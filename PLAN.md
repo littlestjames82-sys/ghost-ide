@@ -167,6 +167,9 @@ Split view (2.5 completed), Quick Open (Ctrl+K), Outline, Go to line, chat Stop 
 ## Phase 7 - Editor + app round - SHIPPED Oct 19, 2026 (phone v1.6.0 + desktop)
 Editor: find-in-file, fold/unfold all, text transforms (sort/dedupe/trim/case), quick-open recents, git log panel, workspace zip download, chat Regenerate + Export-as-file. App: native Share file via a containment-checked read-only ContentProvider. Desktop endpoints (git log, export-zip) live-tested.
 
+## Phase 8 - VS Code / Cursor round - SHIPPED Oct 19, 2026 (phone v1.7.0 + desktop)
+Command palette (27 commands), VS Code keymap pack (comment toggle, move/copy/delete line, select next occurrence), autosave + trim-on-save, Cursor-style inline AI edit with review/apply, Problems panel (check returns line+message), TODO status chip, AI commit message from the diff. Preceded by two hotfixes: v1.6.1 (wrapComp TDZ startup death) and v1.6.2 (missing WebChromeClient dialog bridge). DOM-stub evaluation gate now stands before every APK.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

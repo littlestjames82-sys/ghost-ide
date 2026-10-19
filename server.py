@@ -285,6 +285,15 @@ class Handler(SimpleHTTPRequestHandler):
                         "hash": parts[0],
                         "subject": parts[1] if len(parts) > 1 else ""})
                 return self.send_json({"commits": commits})
+            if parsed.path == "/api/git/diff-all":
+                # Whole-change diff for the AI commit message tool.
+                rc, out, err, _ = git_out(["diff", "HEAD", "--no-color"])
+                if rc != 0:
+                    rc, out, err, _ = git_out(
+                        ["diff", "--cached", "--no-color"])
+                if rc != 0:
+                    return self.send_json({"repo": False})
+                return self.send_json({"diff": out[:8000]})
             if parsed.path == "/api/export-zip":
                 # Download the whole workspace as one zip (backup /
                 # move a project). Dot paths skipped, 50 MB cap.
@@ -615,10 +624,35 @@ class Handler(SimpleHTTPRequestHandler):
                         "No syntax checker for " + (ext or "this file")
                         + " files - py/js/json supported."})
                 rc, out, err, ms = run_cmd(argv, cwd=str(WORKSPACE))
+                output = (out + err).strip() or (
+                    "Syntax OK: " + data["path"])
+                # Phase 8: surface a line number + short message so
+                # the IDE can show a VS Code-style Problems entry.
+                line_no = None
+                message = ""
+                if rc != 0:
+                    import re as _re
+                    # Tracebacks mention several lines (interpreter
+                    # internals first); the LAST "line N" is where
+                    # the user's error actually is.
+                    hits = _re.findall(r"line (\d+)", output)
+                    if hits:
+                        line_no = int(hits[-1])
+                    else:
+                        m = _re.search(r":(\d+)\s*\n", output)
+                        if m:
+                            line_no = int(m.group(1))
+                    lines = [ln for ln in output.splitlines()
+                             if ln.strip()]
+                    for ln in reversed(lines):
+                        if "Error" in ln:
+                            message = ln.strip()
+                            break
+                    if not message and lines:
+                        message = lines[-1].strip()
                 return self.send_json({
-                    "ok": rc == 0,
-                    "output": (out + err).strip()
-                    or "Syntax OK: " + data["path"], "ms": ms})
+                    "ok": rc == 0, "output": output, "ms": ms,
+                    "line": line_no, "message": message})
             if parsed.path == "/api/model/switch":
                 # Desktop model manager (Phase 3.1): point the IDE at
                 # another local GGUF (e.g. the 1.5B/3B for a lighter
