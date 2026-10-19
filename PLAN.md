@@ -245,6 +245,9 @@ SQLite studio built on both, desktop-proven. Also Oct 19: the APK upload service
 ## Phase 33 - Roadmap G23 - SHIPPED v1.31.0 Oct 19, 2026
 API client closed on desktop proof. Next: G24 docs mode.
 
+## Phase 34 - Roadmap G24 - SHIPPED v1.32.0 Oct 19, 2026
+Docs mode closed. Next: G25 asset tools (closes Arc F).
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

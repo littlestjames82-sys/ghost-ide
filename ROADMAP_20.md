@@ -202,7 +202,7 @@ it pairs with the projects GhostIDE builds.
 Done when: a local dev server's endpoints can be
 exercised end-to-end without leaving the app.
 
-**G24. Docs mode.** Markdown gets a live preview pane,
+**G24. Docs mode.** ✅ CLOSED Oct 19, 2026 (v1.32.0) — the roadmap itself previews through the new renderer; docs export to a standalone single page, verified. Markdown gets a live preview pane,
 Mermaid diagrams render, and a folder of docs exports
 to a single static HTML site.
 Done when: this roadmap previews correctly and exports
