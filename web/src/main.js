@@ -2401,6 +2401,7 @@ const COMMANDS = [
   { title: "Repo map", run: () => $("toolRepoMap").click() },
   { title: "Run tests", run: () => $("toolTests").click() },
   { title: "Debug this file", run: () => $("toolDebug").click() },
+  { title: "Fix my tests (AI)", run: () => $("toolFix").click() },
   { title: "Local history (previous versions)", run: () => $("toolHistory").click() },
   { title: "Check whole project (Problems)", run: () => $("toolCheckAll").click() },
   { title: "Reopen closed tab", run: () => {
@@ -3608,6 +3609,229 @@ $("dbgStop").onclick = async () => {
   $("debugVars").textContent = "";
 };
 $("debugClose").onclick = () => debugShowPanel(false);
+
+/* ---------------- Roadmap G8: self-fixing loop ----------------
+   Run tests -> hand failures to the agent -> it repairs with
+   the G5 protocol, but writes APPLY immediately (each one is
+   snapshotted by Local History and backed up in memory) ->
+   re-run. A round that increases failures is reverted on the
+   spot. Max 3 rounds; the attempt log ends in a report panel
+   with an Undo-everything button. */
+const FIX_MAX_ROUNDS = 3;
+const FIX_MAX_STEPS = 10;
+
+async function runTestsAll() {
+  return postJson("/api/tests/run", {});
+}
+
+async function runFixLoop() {
+  if (agentRunning) {
+    addMsg("SYSTEM", "An agent task is already running.");
+    return;
+  }
+  if (anyOpenDirty()) {
+    addMsg("SYSTEM", "Fix-my-tests works from the saved files "
+      + "- save your open edits first.");
+    return;
+  }
+  let res = await runTestsAll();
+  if (res.error) { addMsg("SYSTEM", "Fix my tests: " + res.error); return; }
+  if (!res.results || !res.results.length) {
+    addMsg("SYSTEM", "No tests found in this project.");
+    return;
+  }
+  if (!res.failed) {
+    addMsg("GHOST", "✅ Your tests already pass (" + res.passed
+      + " of " + res.results.length + "). Nothing to fix.");
+    return;
+  }
+  agentRunning = true;
+  agentStop = false;
+  const sendBtn = $("chatSend");
+  const oldSend = sendBtn.onclick;
+  sendBtn.textContent = "■ Stop fixing";
+  sendBtn.onclick = () => { agentStop = true; };
+  const backups = new Map();
+  const log = [];
+  const note = (s) => { log.push(s); addMsg("SYSTEM", s); };
+  note("🛠 Fix-my-tests: " + res.failed + " failing of " +
+    res.results.length + ". Up to " + FIX_MAX_ROUNDS +
+    " repair rounds. Writes apply as the agent makes them, " +
+    "each one recoverable (Local History + the Undo button " +
+    "in the final report).");
+  let outcome = "gaveup";
+  let prevFailed = res.failed;
+  const touched = new Set();
+  for (let round = 1; round <= FIX_MAX_ROUNDS; round++) {
+    if (agentStop) { outcome = "stopped"; break; }
+    const failures = res.results.filter(
+      (r) => r.status === "fail");
+    const failText = failures.map((f) => "- " + f.name +
+      " in " + f.file + (f.line ? " line " + f.line : "") +
+      (f.message ? ": " + f.message : "")).join("\n");
+    note("🔁 Round " + round + ": handing " + failures.length +
+      " failure(s) to Ghost.");
+    const roundStart = new Map();
+    const roundFiles = new Map();
+    async function readRound(path) {
+      if (roundFiles.has(path)) return roundFiles.get(path);
+      const r = await fetch("/api/file?path=" +
+        encodeURIComponent(path));
+      const d = await r.json();
+      if (d.error) return null;
+      roundFiles.set(path, d.content);
+      return d.content;
+    }
+    const messages = [
+      { role: "system", content: BEHAVIOR.systemPrompt + "\n\n" +
+        AGENT_RULES },
+      { role: "user", content: "Fix the failing tests below " +
+        "by fixing the SOURCE code. Do not edit the tests " +
+        "themselves unless a test is plainly wrong. Work in " +
+        "the agent protocol: READ files before rewriting " +
+        "them, WRITE complete fixed files, CHECK, then DONE." +
+        "\n\nFailing tests:\n" + failText },
+    ];
+    let nudges = 0;
+    let roundDone = false;
+    for (let step = 1; step <= FIX_MAX_STEPS; step++) {
+      if (agentStop) break;
+      let reply = "";
+      try {
+        reply = await collectChat(messages, 2048);
+      } catch (e) {
+        note("Round " + round + ": model call failed: " + e);
+        break;
+      }
+      messages.push({ role: "assistant", content: reply });
+      const act = parseAgentAction(reply);
+      if (act.type === "read") {
+        const content = await readRound(act.path);
+        messages.push({ role: "user", content: content == null
+          ? "READ failed: " + act.path + " does not exist."
+          : "Content of " + act.path + ":\n```\n" +
+            content.slice(0, 12000) + "\n```" });
+      } else if (act.type === "write") {
+        if (!roundStart.has(act.path)) {
+          const cur = await readRound(act.path);
+          roundStart.set(act.path, cur);
+          if (!backups.has(act.path)) backups.set(act.path, cur);
+        }
+        roundFiles.set(act.path, act.content);
+        touched.add(act.path);
+        const sd = await postJson("/api/file",
+          { path: act.path, content: act.content });
+        addMsg("SYSTEM", "✏️ Applied fix to " + act.path +
+          (sd.error ? " - SAVE FAILED: " + sd.error : ""));
+        messages.push({ role: "user", content: "Applied " +
+          act.path + ". Continue." });
+      } else if (act.type === "check") {
+        const notes = [];
+        for (const [p, c] of roundFiles) {
+          const d = await postJson("/api/check-content",
+            { path: p, content: c });
+          notes.push(p + ": " + (d.ok === true ? "OK"
+            : d.ok === false
+              ? "PROBLEM " + (d.message || "")
+              : "skipped"));
+        }
+        messages.push({ role: "user", content: "Check results:\n"
+          + notes.join("\n") +
+          "\nFix problems with another WRITE, or DONE." });
+      } else if (act.type === "done") {
+        roundDone = true;
+        break;
+      } else if (act.type === "ask") {
+        addMsg("GHOST", "❓ " + act.question);
+        outcome = "asked";
+        break;
+      } else {
+        nudges++;
+        if (nudges > 1) break;
+        messages.push({ role: "user", content: "That reply had "
+          + "no action. Reply with exactly one action: READ, "
+          + "WRITE, CHECK, DONE, or ASK." });
+      }
+    }
+    if (outcome === "asked" || agentStop) {
+      if (agentStop) outcome = "stopped";
+      break;
+    }
+    void roundDone;
+    res = await runTestsAll();
+    if (res.error) { note("Re-run failed: " + res.error); break; }
+    note("Round " + round + " result: " + prevFailed + " → " +
+      res.failed + " failing (" + res.passed + " passing).");
+    if (touched.has(currentFile)) reloadCurrentFromDisk();
+    loadFiles();
+    if (res.failed === 0) { outcome = "green"; break; }
+    if (res.failed > prevFailed) {
+      for (const [p, content] of roundStart) {
+        if (content == null) continue;
+        await postJson("/api/file", { path: p, content });
+      }
+      note("Round " + round + " made things worse - its " +
+        "changes were reverted.");
+      outcome = "worse";
+      res = await runTestsAll();
+      break;
+    }
+    prevFailed = res.failed;
+  }
+  sendBtn.textContent = "Send";
+  sendBtn.onclick = oldSend;
+  agentRunning = false;
+  const verdict = outcome === "green"
+    ? "✅ All tests pass now (" + res.passed + " of " +
+      res.results.length + ")."
+    : outcome === "stopped"
+      ? "⏹ Stopped. Tests still failing: " + res.failed + "."
+      : outcome === "asked"
+        ? "❓ Ghost stopped to ask a question (above)."
+        : "🧯 Still " + res.failed + " failing after the loop. "
+          + "The attempt log above shows every round.";
+  addMsg("GHOST", "🛠 Fix-my-tests: " + verdict);
+  openFixReport(log, verdict, backups, touched);
+}
+
+function openFixReport(log, verdict, backups, touched) {
+  $("todoTitle").textContent = "🛠 Fix-my-tests report";
+  const box = $("todoResults");
+  box.innerHTML = "";
+  $("todoPanel").classList.remove("hidden");
+  const head = document.createElement("div");
+  head.className = "dim";
+  head.textContent = verdict + " Files changed: " +
+    (touched.size ? [...touched].join(", ") : "none");
+  box.appendChild(head);
+  for (const line of log) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = line;
+    box.appendChild(row);
+  }
+  if (backups.size) {
+    const undo = document.createElement("div");
+    undo.className = "findRow";
+    undo.textContent = "↩ Undo all loop changes (restore " +
+      backups.size + " file(s))";
+    undo.onclick = async () => {
+      for (const [p, content] of backups) {
+        if (content == null) continue;
+        await postJson("/api/file", { path: p, content });
+      }
+      if (touched.has(currentFile)) reloadCurrentFromDisk();
+      loadFiles();
+      $("todoPanel").classList.add("hidden");
+      addMsg("SYSTEM", "Fix-my-tests changes undone.");
+    };
+    box.appendChild(undo);
+  }
+}
+$("toolFix").onclick = () => {
+  hideTools();
+  runFixLoop();
+};
 
 /* ---------------- boot ---------------- */
 loadFiles();

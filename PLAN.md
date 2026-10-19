@@ -197,6 +197,9 @@ Test runner panel with per-test results and jump-to-failure. Next: G7 debugger.
 ## Phase 17 - Roadmap G7 - SHIPPED Oct 19, 2026 (phone v1.17.0 + desktop)
 Debugger: gutter breakpoints, pdb bridge sessions, variables pane. Next: G8 self-fixing loop.
 
+## Phase 18 - Roadmap G8 - SHIPPED Oct 19, 2026 (phone v1.18.0 + desktop)
+Self-fixing test loop: agent repairs against the suite, 3 rounds, revert-on-worse. Arc B complete. Next: G9 on-device run.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

@@ -68,7 +68,7 @@ driven by a stdlib pdb-based bridge for Python.
 Done when: a fixture bug is found by stepping, not by
 reading, in a recorded session.
 
-**G8. Self-fixing loop.** When a run or check fails, Ghost
+**G8. Self-fixing loop.** ✅ CLOSED Oct 19, 2026 (v1.18.0) — red fixture suite turned green in one agent round with no human edits; revert-on-worse and Undo-all in place. When a run or check fails, Ghost
 gets the error, proposes a fix as a diff, applies on
 approval, and re-runs — at most three rounds, then it
 reports honestly and stops.
