@@ -983,6 +983,59 @@ def make_smart_context(seed, budget_tokens):
 # dependency, identical output everywhere): plain test_*
 # functions plus unittest TestCase classes, one JSON line
 # per test. Node tests use node --test's TAP output.
+# Roadmap G21: SQL checker and runner, run through the
+# stdlib sqlite3 against a throwaway in-memory database.
+# The checker executes statements in order, so it catches
+# syntax errors and missing-table references in sequence;
+# the runner also prints result rows for queries.
+_SQL_SPLIT = r'''
+def _stmts(src):
+    import sqlite3
+    out, cur = [], ""
+    start = 1
+    for ln, line in enumerate(src.splitlines(True), 1):
+        if not cur.strip():
+            start = ln
+        cur += line
+        if sqlite3.complete_statement(cur):
+            if cur.strip():
+                out.append((start, cur))
+            cur = ""
+    if cur.strip():
+        out.append((start, cur))
+    return out
+'''
+SQL_CHECKER = (
+    "import sqlite3, sys\n"
+    + _SQL_SPLIT
+    + "src = open(sys.argv[1], encoding='utf-8').read()\n"
+    + "db = sqlite3.connect(':memory:')\n"
+    + "ss = _stmts(src)\n"
+    + "for start, st in ss:\n"
+    + "    try:\n"
+    + "        db.execute(st)\n"
+    + "    except Exception as e:\n"
+    + "        print('SQL error at line %d: %s' % (start, e))\n"
+    + "        sys.exit(1)\n"
+    + "print('SQL OK: %d statement(s) checked on an empty '\n"
+    + "      'in-memory database' % len(ss))\n")
+SQL_RUNNER = (
+    "import sqlite3, sys\n"
+    + _SQL_SPLIT
+    + "src = open(sys.argv[1], encoding='utf-8').read()\n"
+    + "db = sqlite3.connect(':memory:')\n"
+    + "for _ln, st in _stmts(src):\n"
+    + "    c = db.execute(st)\n"
+    + "    if c.description:\n"
+    + "        print(' | '.join(d[0] for d in c.description))\n"
+    + "        for row in c.fetchall():\n"
+    + "            print(' | '.join(['NULL' if v is None else str(v) for v in row]))\n"
+    + "    elif c.rowcount and c.rowcount > 0:\n"
+    + "        print('ok, %d row(s) affected' % c.rowcount)\n"
+    + "    else:\n"
+    + "        print('ok')\n"
+    + "db.commit()\n")
+
 _TEST_RUNNER = r'''
 import importlib.util, json, os, re, sys, traceback, unittest
 path = sys.argv[1]
@@ -2069,11 +2122,51 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("no such file: " + data["path"])
                 runners = {".py": py_cmd(), ".js": ["node"],
                            ".sh": ["bash"], ".mjs": ["node"]}
-                cmd = runners.get(p.suffix.lower())
+                ext = p.suffix.lower()
+                if ext == ".sql":
+                    # Roadmap G21: SQL runs on an in-memory
+                    # database; query results print as rows.
+                    cmd = [py_cmd()[0], "-c", SQL_RUNNER]
+                elif ext == ".go":
+                    if not shutil.which("go"):
+                        raise ValueError(
+                            "Go is not installed on this machine, "
+                            "so .go files cannot run here yet.")
+                    cmd = ["go", "run"]
+                elif ext == ".rs":
+                    if not shutil.which("rustc"):
+                        raise ValueError(
+                            "Rust is not installed on this "
+                            "machine, so .rs files cannot run "
+                            "here yet. Install rustc to enable "
+                            "Rust runs.")
+                    import tempfile
+                    tmpd = tempfile.mkdtemp(prefix="ghostide-rs-")
+                    binp = os.path.join(tmpd, "prog")
+                    rc2, o2, e2, _ms2 = run_cmd(
+                        ["rustc", "--edition", "2021", "-o", binp,
+                         str(p)], WORKSPACE, timeout=60)
+                    if rc2 != 0:
+                        shutil.rmtree(tmpd, ignore_errors=True)
+                        return self.send_json({
+                            "ok": True, "code": rc2,
+                            "stdout": o2[-32768:],
+                            "stderr": e2[-8192:], "ms": 0,
+                            "cmd": "rustc " + data["path"]})
+                    rc, out, err, ms = run_cmd(
+                        [binp], WORKSPACE, timeout=20)
+                    shutil.rmtree(tmpd, ignore_errors=True)
+                    return self.send_json({
+                        "ok": True, "code": rc,
+                        "stdout": out[-32768:],
+                        "stderr": err[-8192:], "ms": ms,
+                        "cmd": "rustc + run " + data["path"]})
+                else:
+                    cmd = runners.get(ext)
                 if cmd is None:
                     raise ValueError(
-                        "no runner for %s files (runners: .py .js .sh)"
-                        % (p.suffix or "(none)"))
+                        "no runner for %s files (runners: .py .js "
+                        ".sh .go .sql .rs)" % (p.suffix or "(none)"))
                 rc, out, err, ms = run_cmd(cmd + [str(p)], WORKSPACE,
                                            timeout=20)
                 return self.send_json({
@@ -2386,11 +2479,48 @@ class Handler(SimpleHTTPRequestHandler):
                     argv = [py_cmd()[0], "-c",
                             "import json,sys; "
                             "json.load(open(sys.argv[1]))", str(p)]
+                elif ext == ".sql":
+                    argv = [py_cmd()[0], "-c", SQL_CHECKER, str(p)]
+                elif ext == ".go":
+                    # Roadmap G21: gofmt is the Go syntax gate.
+                    if not shutil.which("gofmt"):
+                        return self.send_json({
+                            "ok": None, "output":
+                            "Go is not installed on this machine, "
+                            "so .go files cannot be checked here "
+                            "yet. Install Go to enable gofmt "
+                            "checks and Go runs."})
+                    rc, out, err, ms = run_cmd(
+                        ["gofmt", "-e", str(p)], cwd=str(WORKSPACE))
+                    if rc == 0:
+                        return self.send_json({
+                            "ok": True,
+                            "output": "Syntax OK (gofmt): "
+                            + data["path"],
+                            "ms": ms, "line": None, "message": ""})
+                    output = (err or out).strip()
+                    line_no, message = check_output_info(output)
+                    return self.send_json({
+                        "ok": False, "output": output, "ms": ms,
+                        "line": line_no, "message": message})
+                elif ext == ".rs":
+                    if not shutil.which("rustc"):
+                        return self.send_json({
+                            "ok": None, "output":
+                            "Rust is not installed on this machine, "
+                            "so .rs files cannot be checked here "
+                            "yet. Install rustc to enable Rust "
+                            "checks and runs."})
+                    argv = ["rustc", "--edition", "2021",
+                            "--emit=metadata", "-o", os.devnull,
+                            str(p)]
                 else:
                     return self.send_json({
                         "ok": None, "output":
                         "No syntax checker for " + (ext or "this file")
-                        + " files - py/js/json supported."})
+                        + " files - py/js/json/sql supported; go "
+                        "and rust check when their toolchains are "
+                        "installed."})
                 rc, out, err, ms = run_cmd(argv, cwd=str(WORKSPACE))
                 output = (out + err).strip() or (
                     "Syntax OK: " + data["path"])

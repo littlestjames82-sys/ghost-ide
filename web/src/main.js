@@ -11,6 +11,9 @@ import { html } from "@codemirror/lang-html";
 import { css } from "@codemirror/lang-css";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
+import { sql } from "@codemirror/lang-sql";
+import { rust } from "@codemirror/lang-rust";
+import { go } from "@codemirror/lang-go";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { openSearchPanel, selectNextOccurrence } from "@codemirror/search";
 import { snippet } from "@codemirror/autocomplete";
@@ -156,7 +159,20 @@ function langFor(path) {
   if (/\.css$/.test(path)) return css();
   if (/\.json$/.test(path)) return json();
   if (/\.md$/.test(path)) return markdown();
+  if (/\.sql$/.test(path)) return sql();
+  if (/\.rs$/.test(path)) return rust();
+  if (/\.go$/.test(path)) return go();
   return null;
+}
+
+/* Roadmap G21: file-tree icons that tell languages apart. */
+function fileIcon(path) {
+  const ext = (path.split(".").pop() || "").toLowerCase();
+  return {
+    py: "🐍", js: "🟨", mjs: "🟨", ts: "🟦", tsx: "🟦", jsx: "🟨",
+    html: "🌐", htm: "🌐", css: "🎨", json: "🧾", md: "📝",
+    sql: "🗄️", rs: "🦀", go: "🐹", sh: "⌨️",
+  }[ext] || "📄";
 }
 
 let currentFile = null;
@@ -405,7 +421,7 @@ async function loadFiles() {
         loadFiles();
       };
     } else {
-      el.textContent = "📄 " + baseName;
+      el.textContent = fileIcon(f.path) + " " + baseName;
       if (f.path === currentFile) el.classList.add("active");
       el.onclick = () => openFile(f.path);
     }
