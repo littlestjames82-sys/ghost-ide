@@ -1,0 +1,980 @@
+import { EditorView, keymap, Decoration, WidgetType } from "@codemirror/view";
+import { EditorState, StateEffect, StateField, Prec } from "@codemirror/state";
+import { basicSetup } from "codemirror";
+import { indentWithTab } from "@codemirror/commands";
+import { javascript } from "@codemirror/lang-javascript";
+import { python } from "@codemirror/lang-python";
+import { html } from "@codemirror/lang-html";
+import { css } from "@codemirror/lang-css";
+import { json } from "@codemirror/lang-json";
+import { markdown } from "@codemirror/lang-markdown";
+import { oneDark } from "@codemirror/theme-one-dark";
+import { BEHAVIOR } from "./behavior.js";
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------------- ghost text (inline autocomplete) ---------------- */
+const setGhost = StateEffect.define();
+
+class GhostWidget extends WidgetType {
+  constructor(text, onTap) { super(); this.text = text; this.onTap = onTap; }
+  toDOM() {
+    const s = document.createElement("span");
+    s.className = "ghost-text";
+    s.textContent = this.text;
+    // Tap-to-accept (Phase 1.1): phones have no Tab key.
+    s.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.onTap) this.onTap();
+    });
+    return s;
+  }
+  ignoreEvent() { return false; }
+}
+
+const ghostField = StateField.define({
+  create() { return Decoration.none; },
+  update(deco, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setGhost)) {
+        if (!e.value) return Decoration.none;
+        const w = Decoration.widget({
+          widget: new GhostWidget(e.value.text, e.value.onTap), side: 1 });
+        return Decoration.set([w.range(e.value.from)]);
+      }
+    }
+    return tr.docChanged ? Decoration.none : deco.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+let ghost = null;        // {from, text}
+let accepting = false;
+
+function showGhost(view, from, text) {
+  ghost = { from, text };
+  view.dispatch({ effects: setGhost.of({
+    from, text, onTap: () => acceptGhost(view) }) });
+  $("acceptChip").classList.remove("hidden");
+  $("autocompleteState").textContent =
+    "autocomplete: suggestion ready - tap it or press Tab";
+}
+function clearGhost(view) {
+  $("acceptChip").classList.add("hidden");
+  if (!ghost) return;
+  ghost = null;
+  view.dispatch({ effects: setGhost.of(null) });
+}
+
+/* ---------------- settings (persisted locally) ---------------- */
+const settings = Object.assign(
+  { temperature: 0.3, autocomplete: true, infillTokens: 48,
+    formatOnSave: false, ctxMode: "file" },
+  JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
+function saveSettings() {
+  localStorage.setItem("ghostide-settings", JSON.stringify(settings));
+}
+
+/* ---------------- editor ---------------- */
+function langFor(path) {
+  if (/\.tsx?$/.test(path)) return javascript({ typescript: true });
+  if (/\.jsx?$/.test(path)) return javascript({ jsx: true });
+  if (/\.py$/.test(path)) return python();
+  if (/\.html?$/.test(path)) return html();
+  if (/\.css$/.test(path)) return css();
+  if (/\.json$/.test(path)) return json();
+  if (/\.md$/.test(path)) return markdown();
+  return null;
+}
+
+let currentFile = null;
+let dirty = false;
+let modelUp = false;
+
+const view = new EditorView({
+  parent: $("editor"),
+  state: EditorState.create({
+    doc: "// Open a file from the left, or create a new one.\n",
+    extensions: baseExtensions(null),
+  }),
+});
+
+function baseExtensions(path) {
+  const lang = langFor(path || "");
+  return [
+    basicSetup,
+    oneDark,
+    ghostField,
+    keymap.of([indentWithTab]),
+    Prec.high(keymap.of([
+      { key: "Tab", run: acceptGhost },
+      { key: "Escape", run: (v) => { clearGhost(v); return !!ghost; } },
+      { key: "Mod-s", run: () => { saveFile(); return true; } },
+    ])),
+    EditorView.updateListener.of((u) => {
+      if (u.selectionSet) {
+        const head = u.state.selection.main.head;
+        const line = u.state.doc.lineAt(head);
+        $("cursorPos").textContent =
+          `Ln ${line.number}, Col ${head - line.from + 1}`;
+      }
+      if (u.docChanged) {
+        if (!accepting) { clearGhost(u.view); scheduleInfill(u.view); }
+        if (currentFile && !dirty) { dirty = true; setSaveState("unsaved changes"); }
+        if (currentFile && dirty) setSaveState("unsaved changes");
+        if (currentFile && !tabDirty.get(currentFile)) {
+          tabDirty.set(currentFile, true);
+          renderTabs();
+        }
+        if (currentFile) queueDraftSave();
+      }
+    }),
+  ];
+}
+
+function acceptGhost(v) {
+  if (!ghost) return false;
+  accepting = true;
+  const { from, text } = ghost;
+  ghost = null;
+  v.dispatch({
+    changes: { from, insert: text },
+    selection: { anchor: from + text.length },
+    effects: setGhost.of(null),
+  });
+  accepting = false;
+  $("acceptChip").classList.add("hidden");
+  $("autocompleteState").textContent = "autocomplete: accepted";
+  return true;
+}
+
+/* ---------------- autocomplete via /api/infill ---------------- */
+let infillTimer = null;
+let infillSeq = 0;
+
+function scheduleInfill(v) {
+  if (!modelUp) return;
+  if (!settings.autocomplete) return;
+  clearTimeout(infillTimer);
+  $("autocompleteState").textContent = "autocomplete: thinking…";
+  infillTimer = setTimeout(() => runInfill(v), 750);
+}
+
+async function runInfill(v) {
+  const seq = ++infillSeq;
+  const state = v.state;
+  const pos = state.selection.main.head;
+  if (state.selection.main.from !== state.selection.main.to) return;
+  const doc = state.doc.toString();
+  const prefix = doc.slice(
+    Math.max(0, pos - BEHAVIOR.infill.prefixChars), pos);
+  const suffix = doc.slice(pos, pos + BEHAVIOR.infill.suffixChars);
+  if (prefix.trim().length < 3) return;
+  try {
+    const r = await fetch("/api/infill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prefix, suffix,
+        max_tokens: settings.infillTokens }),
+    });
+    const d = await r.json();
+    if (seq !== infillSeq) return;
+    let text = (d.content || "").replace(/\s+$/, "");
+    if (!text) {
+      $("autocompleteState").textContent = "autocomplete: no suggestion";
+      return;
+    }
+    // Show at most 3 lines; drop anything after a blank line.
+    text = text.split("\n\n")[0].split("\n")
+      .slice(0, BEHAVIOR.infill.maxLines).join("\n");
+    if (v.state.doc.toString() !== doc ||
+        v.state.selection.main.head !== pos) return;
+    showGhost(v, pos, text);
+  } catch (e) {
+    $("autocompleteState").textContent = "autocomplete: model unreachable";
+  }
+}
+
+/* ---------------- files ---------------- */
+function setSaveState(t) { $("saveState").textContent = t; }
+
+/* Autosave drafts (Phase 1.7): edits are stashed locally every few
+   seconds; if the app dies before Save, the draft is offered back. */
+let draftTimer = null;
+let pendingDraft = null;
+function draftKey(path) { return "ghostide-draft:" + path; }
+function queueDraftSave() {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(draftKey(currentFile), JSON.stringify({
+        content: view.state.doc.toString(), ts: Date.now() }));
+    } catch (e) { /* storage blocked/full - drafts are best-effort */ }
+  }, 3000);
+}
+function checkDraft(path, diskContent) {
+  pendingDraft = null;
+  $("draftBar").classList.add("hidden");
+  let raw = null;
+  try { raw = localStorage.getItem(draftKey(path)); } catch (e) { return; }
+  if (!raw) return;
+  let d = null;
+  try { d = JSON.parse(raw); } catch (e) { return; }
+  if (!d || d.content === diskContent) return;
+  pendingDraft = d;
+  $("draftText").textContent = "Unsaved draft from " +
+    new Date(d.ts).toLocaleTimeString() + " differs from the saved file.";
+  $("draftBar").classList.remove("hidden");
+}
+
+async function loadFiles() {
+  const r = await fetch("/api/files");
+  const d = await r.json();
+  const tree = $("fileTree");
+  tree.innerHTML = "";
+  for (const f of d.files) {
+    const row = document.createElement("div");
+    row.className = "fileRow";
+    const el = document.createElement("div");
+    const depth = f.path.split("/").length - 1;
+    el.style.paddingLeft = (6 + depth * 14) + "px";
+    el.className = f.type;
+    el.textContent = (f.type === "dir" ? "📁 " : "📄 ") +
+      f.path.split("/").pop();
+    if (f.type === "file") {
+      if (f.path === currentFile) el.classList.add("active");
+      el.onclick = () => openFile(f.path);
+    }
+    const menu = document.createElement("button");
+    menu.className = "fileMenuBtn";
+    menu.textContent = "⋯";
+    menu.title = "Rename or delete";
+    menu.onclick = (e) => { e.stopPropagation(); showFileMenu(f, e); };
+    row.appendChild(el);
+    row.appendChild(menu);
+    tree.appendChild(row);
+  }
+  refreshGit();
+}
+
+/* Per-file menu: rename/move + delete (Phase 1.5). */
+let menuTarget = null;
+function showFileMenu(f, e) {
+  menuTarget = f;
+  const m = $("fileMenu");
+  m.classList.remove("hidden");
+  const r = e.target.getBoundingClientRect();
+  m.style.top = (r.bottom + 4) + "px";
+  m.style.left = Math.max(8, r.left - 110) + "px";
+}
+document.addEventListener("click", (e) => {
+  const m = $("fileMenu");
+  if (!m.classList.contains("hidden") && !m.contains(e.target) &&
+      !e.target.classList.contains("fileMenuBtn"))
+    m.classList.add("hidden");
+});
+$("menuRename").onclick = async () => {
+  $("fileMenu").classList.add("hidden");
+  if (!menuTarget) return;
+  const to = prompt("Rename / move to:", menuTarget.path);
+  if (!to || to === menuTarget.path) return;
+  const r = await fetch("/api/file/rename", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from: menuTarget.path, to }) });
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  if (currentFile === menuTarget.path) {
+    currentFile = to;
+    $("currentFile").textContent = to;
+    try { localStorage.removeItem(draftKey(menuTarget.path)); } catch (e) {}
+  }
+  const ti = tabOrder.indexOf(menuTarget.path);
+  if (ti >= 0) {
+    tabOrder[ti] = to;
+    if (tabStates.has(menuTarget.path)) {
+      tabStates.set(to, tabStates.get(menuTarget.path));
+      tabStates.delete(menuTarget.path);
+    }
+    if (tabDirty.has(menuTarget.path)) {
+      tabDirty.set(to, tabDirty.get(menuTarget.path));
+      tabDirty.delete(menuTarget.path);
+    }
+    renderTabs();
+  }
+  loadFiles();
+};
+$("menuDelete").onclick = async () => {
+  $("fileMenu").classList.add("hidden");
+  if (!menuTarget) return;
+  const what = menuTarget.type === "dir"
+    ? "folder and everything in it" : "file";
+  if (!confirm("Delete this " + what + "?\n" + menuTarget.path)) return;
+  const r = await fetch("/api/file/delete", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: menuTarget.path }) });
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  if (currentFile === menuTarget.path) {
+    currentFile = null;
+    $("currentFile").textContent = "(no file open)";
+    view.dispatch({ changes: {
+      from: 0, to: view.state.doc.length, insert: "" } });
+    setSaveState("");
+  }
+  const ti2 = tabOrder.indexOf(menuTarget.path);
+  if (ti2 >= 0) {
+    tabOrder.splice(ti2, 1);
+    tabStates.delete(menuTarget.path);
+    tabDirty.delete(menuTarget.path);
+    renderTabs();
+  }
+  loadFiles();
+};
+
+/* Tabs (Phase 2.5): every open file keeps its own editor state, so
+   switching tabs never loses edits, cursor position, or undo. */
+const tabOrder = [];
+const tabStates = new Map();
+const tabDirty = new Map();
+
+function stashTab() {
+  if (!currentFile) return;
+  tabStates.set(currentFile, view.state);
+  tabDirty.set(currentFile, dirty);
+}
+
+function renderTabs() {
+  const bar = $("tabBar");
+  bar.innerHTML = "";
+  for (const p of tabOrder) {
+    const t = document.createElement("div");
+    t.className = "tab" + (p === currentFile ? " active" : "");
+    const name = document.createElement("span");
+    const isDirty = p === currentFile ? dirty : !!tabDirty.get(p);
+    name.textContent = (isDirty ? "● " : "") + p.split("/").pop();
+    name.title = p;
+    name.onclick = () => {
+      if (p !== currentFile) { stashTab(); activateTab(p); }
+    };
+    const x = document.createElement("button");
+    x.className = "tabClose";
+    x.textContent = "✕";
+    x.title = "Close tab";
+    x.onclick = (e) => { e.stopPropagation(); closeTab(p); };
+    t.appendChild(name);
+    t.appendChild(x);
+    bar.appendChild(t);
+  }
+}
+
+function activateTab(path) {
+  currentFile = path;
+  view.setState(tabStates.get(path));
+  dirty = !!tabDirty.get(path);
+  $("currentFile").textContent = path;
+  setSaveState(dirty ? "unsaved changes" : "saved");
+  renderTabs();
+  loadFiles();
+}
+
+function closeTab(p) {
+  const i = tabOrder.indexOf(p);
+  if (i < 0) return;
+  const isDirty = p === currentFile ? dirty : !!tabDirty.get(p);
+  if (isDirty && !confirm("Close " + p + " with unsaved changes?")) return;
+  tabOrder.splice(i, 1);
+  tabStates.delete(p);
+  tabDirty.delete(p);
+  try { localStorage.removeItem(draftKey(p)); } catch (e) {}
+  if (p === currentFile) {
+    currentFile = null;
+    const next = tabOrder[Math.min(i, tabOrder.length - 1)];
+    if (next) { activateTab(next); return; }
+    dirty = false;
+    view.setState(EditorState.create({
+      doc: "", extensions: baseExtensions(null) }));
+    $("currentFile").textContent = "no file open";
+    setSaveState("");
+    $("draftBar").classList.add("hidden");
+  }
+  renderTabs();
+  loadFiles();
+}
+
+async function openFile(path) {
+  if (path === currentFile) return;
+  stashTab();
+  if (tabStates.has(path)) { activateTab(path); return; }
+  const r = await fetch("/api/file?path=" + encodeURIComponent(path));
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  tabOrder.push(path);
+  tabStates.set(path, EditorState.create({
+    doc: d.content, extensions: baseExtensions(path) }));
+  tabDirty.set(path, false);
+  activateTab(path);
+  checkDraft(path, d.content);
+}
+
+function postJson(url, obj) {
+  return fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(obj) }).then((r) => r.json());
+}
+
+async function saveFile() {
+  if (!currentFile) return;
+  await fetch("/api/file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path: currentFile, content: view.state.doc.toString() }),
+  });
+  dirty = false;
+  tabDirty.set(currentFile, false);
+  renderTabs();
+  try { localStorage.removeItem(draftKey(currentFile)); } catch (e) {}
+  setSaveState("saved ✓ " + new Date().toLocaleTimeString());
+  if (settings.formatOnSave) {
+    const d = await postJson("/api/format", { path: currentFile });
+    if (d.formatted) {
+      const r = await fetch("/api/file?path=" +
+        encodeURIComponent(currentFile));
+      const fd = await r.json();
+      if (!fd.error && fd.content !== view.state.doc.toString()) {
+        const pos = Math.min(view.state.selection.main.head,
+                             fd.content.length);
+        accepting = true;
+        view.dispatch({ changes: {
+          from: 0, to: view.state.doc.length, insert: fd.content },
+          selection: { anchor: pos } });
+        accepting = false;
+        dirty = false;
+        tabDirty.set(currentFile, false);
+        tabStates.set(currentFile, view.state);
+        renderTabs();
+        try { localStorage.removeItem(draftKey(currentFile)); }
+        catch (e) {}
+      }
+      setSaveState("saved + formatted ✓ " +
+        new Date().toLocaleTimeString());
+    }
+  }
+}
+
+$("saveBtn").onclick = saveFile;
+$("newFileBtn").onclick = async () => {
+  const name = prompt(
+    "New file name (e.g. notes.py, src/app.js).\n" +
+    "End with / to create a folder instead:");
+  if (!name) return;
+  if (name.endsWith("/")) {
+    const r = await fetch("/api/dir", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: name.slice(0, -1) }),
+    });
+    const d = await r.json();
+    if (d.error) { alert(d.error); return; }
+    loadFiles();
+    return;
+  }
+  const r = await fetch("/api/file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: name, content: "" }),
+  });
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  await loadFiles();
+  openFile(name);
+};
+
+/* Draft bar + accept chip */
+$("draftRestore").onclick = () => {
+  if (!pendingDraft) return;
+  view.dispatch({ changes: {
+    from: 0, to: view.state.doc.length, insert: pendingDraft.content } });
+  dirty = true;
+  setSaveState("unsaved changes (draft restored)");
+  pendingDraft = null;
+  $("draftBar").classList.add("hidden");
+};
+$("draftDiscard").onclick = () => {
+  if (currentFile) {
+    try { localStorage.removeItem(draftKey(currentFile)); } catch (e) {}
+  }
+  pendingDraft = null;
+  $("draftBar").classList.add("hidden");
+};
+$("acceptChip").onclick = () => acceptGhost(view);
+
+/* Settings panel (Phase 1.6) */
+$("settingsBtn").onclick = () =>
+  $("settingsPanel").classList.toggle("hidden");
+$("settingsClose").onclick = () =>
+  $("settingsPanel").classList.add("hidden");
+{
+  const tempEl = $("setTemp");
+  tempEl.value = settings.temperature;
+  $("setTempVal").textContent = settings.temperature;
+  tempEl.oninput = () => {
+    settings.temperature = parseFloat(tempEl.value);
+    $("setTempVal").textContent = tempEl.value;
+    saveSettings();
+  };
+  $("setAuto").checked = settings.autocomplete;
+  $("setAuto").onchange = (e) => {
+    settings.autocomplete = e.target.checked;
+    saveSettings();
+  };
+  $("setTokens").value = settings.infillTokens;
+  $("setTokens").onchange = (e) => {
+    const n = parseInt(e.target.value, 10);
+    if (n >= 16 && n <= 256) {
+      settings.infillTokens = n;
+      saveSettings();
+    }
+  };
+  $("setFormat").checked = settings.formatOnSave;
+  $("setFormat").onchange = (e) => {
+    settings.formatOnSave = e.target.checked;
+    saveSettings();
+  };
+}
+$("ctxMode").value = settings.ctxMode;
+$("ctxMode").onchange = (e) => {
+  settings.ctxMode = e.target.value;
+  saveSettings();
+};
+$("modelSwitch").onclick = async () => {
+  const p = $("modelPath").value.trim();
+  if (!p) { alert("Paste a model file path first."); return; }
+  const d = await postJson("/api/model/switch", { path: p });
+  if (d.error) { alert(d.error); return; }
+  $("modelPath").value = "";
+  alert("Model switched to " + d.modelName +
+    " - use Start model to load it.");
+  pollHealth();
+};
+
+/* ---------------- model status ---------------- */
+async function pollHealth() {
+  try {
+    const r = await fetch("/api/health");
+    const d = await r.json();
+    modelUp = d.model === "up";
+    $("modelInfo").textContent =
+      "Model: " + d.modelName + " · status: " + d.model;
+    const pill = $("modelPill");
+    pill.textContent = "model: " + (modelUp ? "up · " + d.modelName : "down");
+    pill.className = "pill " + (modelUp ? "up" : "down");
+    $("startModelBtn").classList.toggle("hidden", modelUp);
+  } catch (e) { /* backend hiccup; next poll retries */ }
+}
+$("startModelBtn").onclick = async () => {
+  $("modelPill").textContent = "model: starting… (about a minute)";
+  $("modelPill").className = "pill loading";
+  $("startModelBtn").classList.add("hidden");
+  await fetch("/api/model/start", { method: "POST" });
+};
+setInterval(pollHealth, 4000);
+pollHealth();
+
+/* ---------------- chat ---------------- */
+const history = [];
+
+/* Session continuity (Phase 3.4): chat history is saved per project
+   (keyed by workspace path; the phone's scope is "on-device") and
+   restored when you come back to that project. */
+const GREETING =
+  "Hey - I'm your offline coding partner, running on the local " +
+  "Qwen2.5-Coder. Open a file, ask me anything about it, and pause " +
+  "while typing to get inline suggestions (tap the suggestion or " +
+  "press Tab to accept). Nothing leaves this device.";
+let historyScope = null;
+function historyKey() { return "ghostide-history:" + historyScope; }
+function saveHistory() {
+  if (!historyScope) return;
+  try {
+    localStorage.setItem(historyKey(),
+      JSON.stringify(history.slice(-60)));
+  } catch (e) { /* best-effort */ }
+}
+function loadHistory() {
+  history.length = 0;
+  $("chatLog").innerHTML = "";
+  let items = [];
+  try {
+    items = JSON.parse(localStorage.getItem(historyKey()) || "[]");
+  } catch (e) { items = []; }
+  for (const m of items) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    history.push(m);
+    if (m.role === "user") {
+      addMsg("YOU", m.content);
+    } else {
+      renderRich(addMsg("GHOST", ""), m.content);
+    }
+  }
+  if (!items.length) addMsg("GHOST", GREETING);
+}
+
+function renderRich(el, text) {
+  el.innerHTML = "";
+  const parts = text.split("```");
+  parts.forEach((part, i) => {
+    if (i % 2 === 1) {
+      const lines = part.split("\n");
+      const code = lines.slice(1).join("\n").replace(/\n$/, "");
+      const wrap = document.createElement("div");
+      const pre = document.createElement("pre");
+      pre.textContent = code;
+      const btn = document.createElement("button");
+      btn.textContent = "Insert at cursor";
+      btn.onclick = () => {
+        const pos = view.state.selection.main.head;
+        view.dispatch({
+          changes: { from: pos, insert: code },
+          selection: { anchor: pos + code.length },
+        });
+        view.focus();
+      };
+      wrap.appendChild(pre);
+      wrap.appendChild(btn);
+      el.appendChild(wrap);
+    } else if (part.trim()) {
+      const div = document.createElement("div");
+      div.style.whiteSpace = "pre-wrap";
+      div.textContent = part;
+      el.appendChild(div);
+    }
+  });
+}
+
+function addMsg(who, text) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg";
+  const w = document.createElement("div");
+  w.className = "who";
+  w.textContent = who;
+  const body = document.createElement("div");
+  body.textContent = text;
+  wrap.appendChild(w);
+  wrap.appendChild(body);
+  $("chatLog").appendChild(wrap);
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+  return body;
+}
+
+async function sendChat() {
+  const ta = $("chatText");
+  const text = ta.value.trim();
+  if (!text) return;
+  if (!modelUp) { addMsg("SYSTEM", "Model is down - hit Start model first."); return; }
+
+  /* Context (Phase 2.2): current file, or a GhostSlice project bundle
+     with a token meter. Built BEFORE the message enters history, so an
+     over-budget slice can hard-stop the send honestly. */
+  const SYS = BEHAVIOR.systemPrompt;
+  let sysContent = SYS;
+  if ($("ctxToggle").checked) {
+    const mode = $("ctxMode").value;
+    if (mode === "file" && currentFile) {
+      const body = view.state.doc.toString()
+        .slice(0, BEHAVIOR.context.fileChars);
+      sysContent = SYS + "\nCurrent file: " + currentFile +
+        "\n```\n" + body + "\n```";
+      $("ctxMeter").textContent = "context: current file · ~" +
+        Math.round(body.length / 4) + " tok (rough estimate)";
+    } else if (mode !== "file") {
+      const d = await postJson("/api/context", {
+        mode, budget: BEHAVIOR.context.sliceBudget });
+      if (d.error) {
+        addMsg("SYSTEM", "Project slice unavailable: " + d.error +
+          " - sending with no project context.");
+        $("ctxMeter").textContent = "context: none (slice failed)";
+      } else if (d.over) {
+        addMsg("SYSTEM", "Project slice is ~" + d.tokens +
+          " tokens - over the " + BEHAVIOR.context.sliceBudget.toLocaleString() + " budget, so this message was NOT " +
+          "sent. Switch context to current file, or shrink the project.");
+        return;
+      } else {
+        sysContent = SYS + "\nProject context (" + d.mode +
+          " slice, " + d.files + " files):\n" + d.text;
+        $("ctxMeter").textContent = "context: " + d.mode + " slice · " +
+          d.tokens.toLocaleString() + " / " + BEHAVIOR.context.sliceBudget.toLocaleString() + " tok · " + d.files +
+          " files (full project ~" +
+          d.originalTokens.toLocaleString() + " tok)";
+      }
+    }
+  }
+
+  ta.value = "";
+  addMsg("YOU", text);
+  history.push({ role: "user", content: text });
+  saveHistory();
+  const messages = [{ role: "system", content: sysContent }, ...history];
+
+  const body = addMsg("GHOST", "");
+  let full = "";
+  try {
+    const r = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages, stream: true, max_tokens: BEHAVIOR.chat.maxTokens,
+        temperature: settings.temperature }),
+    });
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6);
+        if (data === "[DONE]") continue;
+        try {
+          const j = JSON.parse(data);
+          const delta = j.choices?.[0]?.delta?.content || "";
+          full += delta;
+          body.textContent = full;
+          $("chatLog").scrollTop = $("chatLog").scrollHeight;
+        } catch (e) { /* partial JSON line; wait for more */ }
+      }
+    }
+  } catch (e) {
+    full = full || ("(error talking to the model: " + e + ")");
+  }
+  renderRich(body, full);
+  history.push({ role: "assistant", content: full });
+  saveHistory();
+}
+
+$("chatSend").onclick = sendChat;
+$("chatText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+
+/* ---------------- Phase 2: run / git / workspace / find ------- */
+$("runBtn").onclick = async () => {
+  if (!currentFile) { alert("Open a file first."); return; }
+  if (dirty) await saveFile();
+  $("runPane").classList.remove("hidden");
+  $("runTitle").textContent = "Running " + currentFile + " …";
+  $("runOut").textContent = "";
+  const d = await postJson("/api/run", { path: currentFile });
+  if (d.error) {
+    $("runTitle").textContent = "Run unavailable";
+    $("runOut").textContent = d.error +
+      "\n\n(Runs are local and unsandboxed: your machine, your code.)";
+    return;
+  }
+  $("runTitle").textContent =
+    "$ " + d.cmd + "  ·  exit " + d.code + "  ·  " + d.ms + " ms";
+  $("runOut").textContent =
+    (d.stdout || "") +
+    (d.stderr ? "\n— stderr —\n" + d.stderr : "") || "(no output)";
+};
+$("runClose").onclick = () => $("runPane").classList.add("hidden");
+
+async function refreshGit() {
+  const box = $("gitChanges");
+  if (!box) return;
+  try {
+    const r = await fetch("/api/git/status");
+    const d = await r.json();
+    if (!d.repo) {
+      $("gitBranch").textContent = "";
+      box.textContent = d.error || "Not a git repo.";
+      return;
+    }
+    $("gitBranch").textContent = d.branch || "";
+    box.innerHTML = "";
+    if (!d.changes.length) {
+      box.textContent = "Clean - nothing changed.";
+      return;
+    }
+    for (const c of d.changes) {
+      const row = document.createElement("div");
+      row.className = "gitRow";
+      const staged = c.index !== " " && c.index !== "?";
+      const untracked = c.index === "?" && c.worktree === "?";
+      const label = document.createElement("span");
+      label.textContent = c.path + " ";
+      const tag = document.createElement("em");
+      tag.textContent = untracked ? "untracked"
+        : staged ? "staged" : "modified";
+      label.appendChild(tag);
+      row.appendChild(label);
+      if (!staged) {
+        const b = document.createElement("button");
+        b.textContent = "Stage";
+        b.onclick = async () => {
+          await postJson("/api/git/stage", { path: c.path });
+          refreshGit();
+        };
+        row.appendChild(b);
+      }
+      const db = document.createElement("button");
+      db.textContent = "Diff";
+      db.onclick = () => showDiff(c.path);
+      row.appendChild(db);
+      box.appendChild(row);
+    }
+  } catch (e) {
+    box.textContent = "git unavailable";
+  }
+}
+
+async function showDiff(path) {
+  const r = await fetch("/api/git/diff?path=" + encodeURIComponent(path));
+  const d = await r.json();
+  $("diffTitle").textContent = "Diff: " + path;
+  $("diffOut").textContent =
+    d.error || d.diff || "(no diff - file may be untracked)";
+  $("diffPanel").classList.remove("hidden");
+}
+$("diffClose").onclick = () => $("diffPanel").classList.add("hidden");
+$("commitBtn").onclick = async () => {
+  const msg = $("commitMsg").value.trim();
+  if (!msg) { alert("Write a commit message first."); return; }
+  const d = await postJson("/api/git/commit", { message: msg });
+  if (d.error) { alert(d.error); return; }
+  $("commitMsg").value = "";
+  addMsg("SYSTEM", "Committed: " + d.output);
+  refreshGit();
+};
+
+/* Workspace switching (2.1) + recents */
+let wsRecents = JSON.parse(
+  localStorage.getItem("ghostide-recent-workspaces") || "[]");
+async function refreshWsLabel() {
+  try {
+    const r = await fetch("/api/workspace");
+    const d = await r.json();
+    $("wsPath").textContent = "📂 " + (d.workspace || "");
+    $("wsPath").title = d.workspace || "";
+    const scope = d.workspace || "on-device";
+    if (scope !== historyScope) {
+      historyScope = scope;
+      loadHistory();
+    }
+    return d.workspace;
+  } catch (e) { return null; }
+}
+$("wsBtn").onclick = async () => {
+  const cur = await refreshWsLabel();
+  if (cur === "on-device") {
+    alert("On the phone, the workspace is the app's own folder. " +
+          "Use Import / Export in the app menu to move files.");
+    return;
+  }
+  const m = $("wsMenu");
+  m.innerHTML = "";
+  const open = document.createElement("button");
+  open.textContent = "Open folder…";
+  open.onclick = () => {
+    m.classList.add("hidden");
+    const p = prompt("Folder path to open as workspace:", cur || "");
+    if (p) switchWorkspace(p);
+  };
+  m.appendChild(open);
+  for (const p of wsRecents) {
+    if (p === cur) continue;
+    const b = document.createElement("button");
+    b.textContent = p;
+    b.onclick = () => { m.classList.add("hidden"); switchWorkspace(p); };
+    m.appendChild(b);
+  }
+  m.classList.toggle("hidden");
+};
+document.addEventListener("click", (e) => {
+  const m = $("wsMenu");
+  if (!m.classList.contains("hidden") && !m.contains(e.target) &&
+      e.target.id !== "wsBtn")
+    m.classList.add("hidden");
+});
+async function switchWorkspace(p) {
+  const d = await postJson("/api/workspace", { path: p });
+  if (d.error) { alert(d.error); return; }
+  wsRecents = [d.workspace,
+    ...wsRecents.filter((x) => x !== d.workspace)].slice(0, 6);
+  localStorage.setItem("ghostide-recent-workspaces",
+    JSON.stringify(wsRecents));
+  tabOrder.length = 0;
+  tabStates.clear();
+  tabDirty.clear();
+  currentFile = null;
+  dirty = false;
+  view.setState(EditorState.create({
+    doc: "// Workspace: " + d.workspace + "\n",
+    extensions: baseExtensions(null) }));
+  $("currentFile").textContent = "no file open";
+  setSaveState("");
+  renderTabs();
+  refreshWsLabel();
+  loadFiles();
+}
+
+/* Project find / replace (2.5) */
+$("findBtn").onclick = () => $("findPanel").classList.toggle("hidden");
+$("findClose").onclick = () => $("findPanel").classList.add("hidden");
+function jumpToLine(n) {
+  try {
+    const line = view.state.doc.line(n);
+    view.dispatch({ selection: { anchor: line.from },
+                    scrollIntoView: true });
+    view.focus();
+  } catch (e) { /* line out of range after edits */ }
+}
+$("findGo").onclick = async () => {
+  const q = $("findQuery").value;
+  const box = $("findResults");
+  if (!q) return;
+  box.textContent = "searching…";
+  const d = await postJson("/api/search", { query: q });
+  if (d.error) { box.textContent = d.error; return; }
+  box.innerHTML = "";
+  if (!d.matches.length) { box.textContent = "No matches."; return; }
+  for (const m of d.matches) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = m.path + ":" + m.line + "  " + m.text;
+    row.onclick = async () => {
+      await openFile(m.path);
+      jumpToLine(m.line);
+    };
+    box.appendChild(row);
+  }
+  if (d.truncated) {
+    const n = document.createElement("div");
+    n.className = "dim";
+    n.textContent = "(stopped at 200 matches)";
+    box.appendChild(n);
+  }
+};
+$("findReplace").onclick = async () => {
+  const q = $("findQuery").value;
+  if (!q) return;
+  if (!confirm("Replace ALL occurrences of \"" + q + "\" across the " +
+      "project? Open tabs keep their in-editor copy until reopened."))
+    return;
+  const d = await postJson("/api/replace", {
+    query: q, replacement: $("findReplacement").value });
+  if (d.error) { alert(d.error); return; }
+  $("findResults").textContent =
+    "Replaced " + d.replacements + " occurrence(s) in " +
+    d.filesChanged + " file(s).";
+  loadFiles();
+};
+
+/* ---------------- boot ---------------- */
+loadFiles();
+refreshWsLabel();
