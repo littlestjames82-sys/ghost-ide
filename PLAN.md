@@ -263,6 +263,9 @@ Offline reference docs built and proven end to end locally. Next: G29 semantic c
 ## Phase 39 - Roadmap G29 - SHIPPED v1.37.0 Oct 19, 2026
 Semantic code search built and proven. Next: G30 error memory (closes Arc G).
 
+## Phase 40 - Roadmap G30 - SHIPPED v1.38.0 Oct 19, 2026
+Error memory built; Arc G complete. Next: Arc H, G31 macros and multi-cursor pack.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

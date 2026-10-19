@@ -245,7 +245,7 @@ Done when: on a fixture project, the right function is
 top-3 for plain-English queries that share no words
 with it.
 
-**G30. Error memory.** Every error and the fix that
+**G30. Error memory.** ✅ DONE Oct 19, 2026 (v1.38.0) — harness 9/9 on the roadmap scenario (fix in one file surfaces for the repeat in a new file). Arc G complete. Every error and the fix that
 cleared it are remembered locally; when the same error
 recurs, Ghost opens with "last time, this fixed it."
 Done when: a repeated error in a new file surfaces the
