@@ -830,6 +830,168 @@ def make_smart_context(seed, budget_tokens):
     }
 
 
+# ---------------- Test runner (Roadmap G6) ----------------
+# Python tests run through a tiny stdlib runner (no pytest
+# dependency, identical output everywhere): plain test_*
+# functions plus unittest TestCase classes, one JSON line
+# per test. Node tests use node --test's TAP output.
+_TEST_RUNNER = r'''
+import importlib.util, json, os, re, sys, traceback, unittest
+path = sys.argv[1]
+sys.path.insert(0, os.path.dirname(os.path.abspath(path)))
+sys.path.insert(0, os.getcwd())
+spec = importlib.util.spec_from_file_location("ghost_test_mod", path)
+mod = importlib.util.module_from_spec(spec)
+def last_line(tb):
+    line = None
+    for ln in tb.splitlines():
+        if 'File "' in ln and os.path.basename(path) in ln:
+            m = re.search(r"line (\d+)", ln)
+            if m:
+                line = int(m.group(1))
+    return line
+try:
+    spec.loader.exec_module(mod)
+except Exception:
+    print(json.dumps({"name": "(module load)", "status": "fail",
+                      "message": traceback.format_exc(limit=3),
+                      "line": None}))
+    sys.exit(0)
+for name in sorted(dir(mod)):
+    if name.startswith("test_"):
+        fn = getattr(mod, name)
+        if callable(fn) and getattr(fn, "__module__", None) == mod.__name__:
+            try:
+                fn()
+                print(json.dumps({"name": name, "status": "pass",
+                                  "message": "", "line": None}))
+            except Exception:
+                tb = traceback.format_exc()
+                print(json.dumps({"name": name, "status": "fail",
+                    "message": tb.strip().splitlines()[-1]
+                               if tb.strip() else "",
+                    "line": last_line(tb)}))
+loader = unittest.TestLoader()
+for name in sorted(dir(mod)):
+    obj = getattr(mod, name)
+    if isinstance(obj, type) and issubclass(obj, unittest.TestCase) \
+            and obj is not unittest.TestCase:
+        suite = loader.loadTestsFromTestCase(obj)
+        for test in suite:
+            result = unittest.TestResult()
+            test.run(result)
+            tname = name + "." + test._testMethodName
+            if result.wasSuccessful():
+                print(json.dumps({"name": tname, "status": "pass",
+                                  "message": "", "line": None}))
+            else:
+                probs = result.failures + result.errors
+                tb = probs[0][1] if probs else ""
+                print(json.dumps({"name": tname, "status": "fail",
+                    "message": tb.strip().splitlines()[-1]
+                               if tb.strip() else "",
+                    "line": last_line(tb)}))
+'''
+
+
+def discover_tests():
+    files = []
+    for rel, p in iter_text_files():
+        rstr = str(rel)
+        base = p.name
+        kind = None
+        if base.startswith("test_") and base.endswith(".py") or \
+                base.endswith("_test.py"):
+            kind = "py"
+        elif base.endswith((".test.js", ".spec.js", ".test.mjs")):
+            kind = "node"
+        if not kind:
+            continue
+        tests = []
+        if kind == "py":
+            try:
+                text = p.read_text(errors="strict")
+            except Exception:
+                text = ""
+            for i, line in enumerate(text.splitlines(), 1):
+                m = _re_mod.match(r"def (test_\w+)", line) or \
+                    _re_mod.match(r"\s+def (test_\w+)", line)
+                if m:
+                    tests.append({"name": m.group(1), "line": i})
+        files.append({"path": rstr, "kind": kind, "tests": tests})
+    return files
+
+
+def run_test_file(rel):
+    p = safe_path(rel)
+    results = []
+    if rel.endswith(".py"):
+        rc, out, err, ms = run_cmd(
+            [sys.executable, "-c", _TEST_RUNNER, str(p)],
+            cwd=str(WORKSPACE), timeout=60)
+        for line in out.splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                results.append({"name": d["name"], "file": rel,
+                                "line": d.get("line"),
+                                "status": d["status"],
+                                "message": d.get("message", "")})
+        if not results:
+            results.append({"name": "(runner)", "file": rel,
+                            "line": None, "status": "fail",
+                            "message": (err or out).strip()[-200:]})
+    else:
+        rc, out, err, ms = run_cmd(["node", "--test", str(p)],
+                                   cwd=str(WORKSPACE), timeout=60)
+        output = out + err
+        # Two output dialects: TAP ("ok 1 - name") and the spec
+        # reporter ("✔ name (1.0ms)" / "✖ name ..."), which also
+        # repeats failures under a "failing tests:" section -
+        # dedupe by name, and harvest fail lines from the
+        # "test at <file>:<line>:<col>" markers there.
+        fail_lines = {}
+        olines = output.splitlines()
+        for i, line in enumerate(olines):
+            m = _re_mod.match(r"test at \S+:(\d+):\d+", line.strip())
+            if m:
+                for j in range(i + 1, min(i + 3, len(olines))):
+                    nm = _re_mod.match(r"✖ (.+?) \(", olines[j].strip())
+                    if nm:
+                        fail_lines[nm.group(1)] = int(m.group(1))
+                        break
+        seen_names = set()
+        for line in olines:
+            s = line.strip()
+            status = None
+            name = None
+            m = _re_mod.match(r"^(not )?ok \d+ - (.+)$", s)
+            if m:
+                status = "fail" if m.group(1) else "pass"
+                name = m.group(2)
+            else:
+                m = _re_mod.match(r"^(✔|✖) (.+?) \([\d.]+m?s\)$", s)
+                if m:
+                    status = "pass" if m.group(1) == "✔" else "fail"
+                    name = m.group(2)
+            if name is None or name in seen_names:
+                continue
+            seen_names.add(name)
+            results.append({
+                "name": name, "file": rel,
+                "line": fail_lines.get(name),
+                "status": status, "message": ""})
+        if not results:
+            results.append({
+                "name": "(file)", "file": rel, "line": None,
+                "status": "pass" if rc == 0 else "fail",
+                "message": output.strip()[-200:] if rc != 0 else ""})
+    return results
+
+
 def git_out(args, timeout=30):
     if not shutil.which("git"):
         raise ValueError("git is not installed")
@@ -992,6 +1154,8 @@ class Handler(SimpleHTTPRequestHandler):
                             "message": msg})
                 return self.send_json({
                     "problems": results, "checked": checked})
+            if parsed.path == "/api/tests/discover":
+                return self.send_json({"files": discover_tests()})
             if parsed.path == "/api/symbols":
                 idx = _symbol_index()
                 return self.send_json({
@@ -1353,6 +1517,23 @@ class Handler(SimpleHTTPRequestHandler):
                         total += n
                 return self.send_json({"filesChanged": files_changed,
                                        "replacements": total})
+            if parsed.path == "/api/tests/run":
+                data = self.read_json()
+                want = data.get("path")
+                targets = [f["path"] for f in discover_tests()
+                           if not want or f["path"] == want]
+                if want and not targets:
+                    raise ValueError("not a test file: " + want)
+                results = []
+                t0 = time.time()
+                for rel in targets:
+                    results.extend(run_test_file(rel))
+                passed = sum(1 for r in results
+                             if r["status"] == "pass")
+                return self.send_json({
+                    "results": results, "passed": passed,
+                    "failed": len(results) - passed,
+                    "ms": int((time.time() - t0) * 1000)})
             if parsed.path == "/api/check-content":
                 # Agent mode (G5): syntax-check content that has
                 # not been written to disk yet.

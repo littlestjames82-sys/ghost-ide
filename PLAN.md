@@ -191,6 +191,9 @@ Smart (dependency-aware) context mode on both builds, benchmark-proven. Next: G5
 ## Phase 15 - Roadmap G5 - SHIPPED Oct 19, 2026 (phone v1.15.0 + desktop)
 Agent mode: staged multi-file edits with per-file approval. Next: G6 test runner.
 
+## Phase 16 - Roadmap G6 - SHIPPED Oct 19, 2026 (phone v1.16.0 + desktop)
+Test runner panel with per-test results and jump-to-failure. Next: G7 debugger.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

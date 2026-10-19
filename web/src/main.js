@@ -77,7 +77,7 @@ const settings = Object.assign(
   { temperature: 0.3, autocomplete: true, infillTokens: 48,
     formatOnSave: false, ctxMode: "file", wrap: false,
     shortAnswers: false, fontSize: "14px", infillDelay: 750,
-    repoMap: false,
+    repoMap: false, testOnSave: false,
     autosave: "off", trimOnSave: false, indent: 2,
     whitespace: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
@@ -595,6 +595,7 @@ async function saveFile() {
   }
   refreshTodoChip();
   checkQuiet();
+  maybeRunTestsOnSave(currentFile);
 }
 
 $("saveBtn").onclick = saveFile;
@@ -1597,6 +1598,11 @@ $("setRepoMap").onchange = (e) => {
   settings.repoMap = e.target.checked;
   saveSettings();
 };
+$("setTestOnSave").checked = !!settings.testOnSave;
+$("setTestOnSave").onchange = (e) => {
+  settings.testOnSave = e.target.checked;
+  saveSettings();
+};
 $("setFont").value = settings.fontSize;
 document.documentElement.style.setProperty(
   "--ghost-font", settings.fontSize);
@@ -2329,6 +2335,7 @@ const COMMANDS = [
   { title: "Inline variable", run: () => $("toolInline").click() },
   { title: "Rename symbol…", run: () => $("toolRename").click() },
   { title: "Repo map", run: () => $("toolRepoMap").click() },
+  { title: "Run tests", run: () => $("toolTests").click() },
   { title: "Local history (previous versions)", run: () => $("toolHistory").click() },
   { title: "Check whole project (Problems)", run: () => $("toolCheckAll").click() },
   { title: "Reopen closed tab", run: () => {
@@ -3327,6 +3334,130 @@ async function openAgentReview(staged) {
     };
     box.appendChild(diffRow);
   }
+}
+
+/* ---------------- Roadmap G6: test runner ---------------- */
+let testDefLines = {};
+async function openTests() {
+  hideTools();
+  $("todoTitle").textContent = "Tests";
+  const box = $("todoResults");
+  box.innerHTML = '<div class="dim">Discovering tests…</div>';
+  $("todoPanel").classList.remove("hidden");
+  const r = await fetch("/api/tests/discover");
+  const d = await r.json();
+  box.innerHTML = "";
+  if (d.error) {
+    const el = document.createElement("div");
+    el.className = "dim";
+    el.textContent = d.error;
+    box.appendChild(el);
+    return;
+  }
+  const files = d.files || [];
+  testDefLines = {};
+  for (const f of files)
+    for (const t of f.tests || [])
+      testDefLines[f.path + ":" + t.name] = t.line;
+  if (!files.length) {
+    const el = document.createElement("div");
+    el.className = "dim";
+    el.textContent = "No test files found (test_*.py, "
+      + "*_test.py, *.test.js).";
+    box.appendChild(el);
+    return;
+  }
+  const all = document.createElement("div");
+  all.className = "findRow";
+  all.textContent = "▶ Run all tests (" + files.length
+    + " file(s))";
+  all.onclick = () => runTests(null);
+  box.appendChild(all);
+  for (const f of files) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = "▶ " + f.path +
+      (f.tests && f.tests.length
+        ? " · " + f.tests.length + " test(s)" : "");
+    row.onclick = () => runTests(f.path);
+    box.appendChild(row);
+  }
+}
+
+async function runTests(path) {
+  $("todoTitle").textContent = "Tests - running…";
+  const box = $("todoResults");
+  box.innerHTML = '<div class="dim">Running…</div>';
+  $("todoPanel").classList.remove("hidden");
+  const d = await postJson("/api/tests/run",
+    path ? { path } : {});
+  box.innerHTML = "";
+  if (d.error) {
+    const el = document.createElement("div");
+    el.className = "dim";
+    el.textContent = d.error;
+    box.appendChild(el);
+    $("todoTitle").textContent = "Tests";
+    return;
+  }
+  $("todoTitle").textContent = "Tests: " + d.passed +
+    " passed, " + d.failed + " failed (" + d.ms + " ms)";
+  if (!d.results.length) {
+    const el = document.createElement("div");
+    el.className = "dim";
+    el.textContent = "No tests ran.";
+    box.appendChild(el);
+    return;
+  }
+  for (const r of d.results) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = (r.status === "pass" ? "✓ " : "✗ ") +
+      r.name + " · " + r.file +
+      (r.line ? ":" + r.line : "") +
+      (r.message ? " - " + String(r.message).slice(0, 120) : "");
+    row.onclick = async () => {
+      $("todoPanel").classList.add("hidden");
+      if (r.file !== currentFile) await openFile(r.file);
+      const ln = r.line ||
+        testDefLines[r.file + ":" + r.name];
+      if (ln) jumpToLine(ln);
+    };
+    box.appendChild(row);
+  }
+}
+$("toolTests").onclick = openTests;
+
+async function maybeRunTestsOnSave(savedPath) {
+  if (!settings.testOnSave || !savedPath) return;
+  try {
+    const r = await fetch("/api/tests/discover");
+    const d = await r.json();
+    if (d.error || !d.files || !d.files.length) return;
+    const stem = savedPath.split("/").pop()
+      .replace(/\.\w+$/, "");
+    const related = d.files.filter((f) =>
+      f.path === savedPath || f.path.includes(stem));
+    if (!related.length) return;
+    let failed = 0;
+    let passed = 0;
+    for (const f of related) {
+      const rd = await postJson("/api/tests/run",
+        { path: f.path });
+      if (rd.error) return;
+      passed += rd.passed;
+      failed += rd.failed;
+    }
+    const chip = $("testChip");
+    if (failed) {
+      chip.textContent = "🧪 ✗ " + failed + " failing";
+      chip.classList.remove("hidden");
+      chip.onclick = () => openTests();
+    } else {
+      chip.classList.add("hidden");
+      setSaveState("saved · tests ✓ " + passed + " passed");
+    }
+  } catch (e) { /* run-on-save is best-effort */ }
 }
 
 /* ---------------- boot ---------------- */
