@@ -96,7 +96,7 @@ to be honest git, interoperable with desktop clones.
 Done when: a repo created on the phone clones cleanly on
 the desktop and vice versa.
 
-**G12. Model store.** More brains in the manager: a
+**G12. Model store.** 🔶 BUILT Oct 19, 2026 (v1.22.0), device proof pending — 4-model curated catalog with verified downloads + delete-to-reclaim; closes when a second model downloads and runs on Ryan's phone. More brains in the manager: a
 curated GGUF list (sizes for different RAM), verified
 downloads like the current two, per-model speed/context
 notes measured on device, and a safe auto-pick by free
