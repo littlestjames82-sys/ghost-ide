@@ -104,7 +104,7 @@ RAM.
 Done when: a third model installs, verifies, loads, and
 chats from the manager with no manual steps.
 
-**G13. Voice coding.** On-device speech-to-text (small
+**G13. Voice coding.** 🔶 BUILT Oct 19, 2026 (v1.23.0), device proof pending — recognizer bridge + spoken commands; closes when Ryan dictates a prompt and says "save file" on his phone. On-device speech-to-text (small
 whisper-class model): dictate chat prompts and code
 comments, plus a handful of voice commands (save, run,
 open file).

@@ -212,6 +212,9 @@ Full git on phone via bundled git. Next: G12 model store.
 ## Phase 22 - Roadmap G12 - BUILT Oct 19, 2026 (phone v1.22.0), device proof pending
 Model store: 0.5B/1.5B/3B/7B catalog. Next: G13 voice coding (Arc C close).
 
+## Phase 23 - Roadmap G13 - BUILT Oct 19, 2026 (phone v1.23.0), device proof pending
+Voice coding via the system recognizer. Arc C complete pending device proofs. Next: Arc D, G14 project templates.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
