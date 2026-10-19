@@ -303,6 +303,48 @@ def _symbol_index():
     return index
 
 
+def _repo_map(budget_chars):
+    """Repo map (Roadmap G2): the workspace's symbols grouped by
+    file, files ranked by total references, symbols ranked by
+    reference count. Whole files drop off the bottom when the
+    character budget runs out."""
+    idx = _symbol_index()
+    by_file = {}
+    for s in idx["symbols"]:
+        by_file.setdefault(s["path"], []).append(s)
+
+    def refcount(name):
+        return len(idx["refs"].get(name, []))
+
+    def file_score(item):
+        return sum(refcount(s["name"]) for s in item[1])
+
+    files_sorted = sorted(by_file.items(), key=file_score,
+                          reverse=True)
+    header = ("# Repo map - %d files, %d symbols "
+              "(ranked by references)"
+              % (len(by_file), len(idx["symbols"])))
+    lines = [header]
+    used = len(header) + 1
+    shown = 0
+    for path, syms in files_sorted:
+        syms_sorted = sorted(syms, key=lambda s: -refcount(s["name"]))
+        block = ["## " + path]
+        for s in syms_sorted:
+            block.append("- %s %s (line %d, %d refs)"
+                         % (s["kind"], s["name"], s["line"],
+                            refcount(s["name"])))
+        block_text = "\n".join(block)
+        if shown and used + len(block_text) + 1 > budget_chars:
+            lines.append("## ... +%d more files (over map budget)"
+                         % (len(files_sorted) - shown))
+            break
+        lines.extend(block)
+        used += len(block_text) + 1
+        shown += 1
+    return "\n".join(lines)
+
+
 def git_out(args, timeout=30):
     if not shutil.which("git"):
         raise ValueError("git is not installed")
@@ -486,6 +528,15 @@ class Handler(SimpleHTTPRequestHandler):
                     "references": all_refs[:300],
                     "total": len(all_refs),
                     "truncated": len(all_refs) > 300})
+            if parsed.path == "/api/repomap":
+                qs = urllib.parse.parse_qs(parsed.query)
+                try:
+                    budget = int(qs.get("budget", ["6000"])[0])
+                except Exception:
+                    budget = 6000
+                budget = max(1000, min(20000, budget))
+                return self.send_json({
+                    "map": _repo_map(budget)})
             if parsed.path == "/api/file":
                 rel = urllib.parse.parse_qs(parsed.query)["path"][0]
                 p = safe_path(rel)

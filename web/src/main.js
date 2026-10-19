@@ -77,6 +77,7 @@ const settings = Object.assign(
   { temperature: 0.3, autocomplete: true, infillTokens: 48,
     formatOnSave: false, ctxMode: "file", wrap: false,
     shortAnswers: false, fontSize: "14px", infillDelay: 750,
+    repoMap: false,
     autosave: "off", trimOnSave: false, indent: 2,
     whitespace: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
@@ -882,6 +883,21 @@ async function sendChat() {
     $("ctxMeter").textContent =
       "attached: " + attachedNames.join(", ");
 
+  /* Repo map (Roadmap G2): the ranked workspace map rides along
+     when the setting is on, or once when armed from Tools. */
+  if (settings.repoMap || repoMapOnce) {
+    repoMapOnce = false;
+    try {
+      const mapText = await getRepoMap();
+      if (mapText) {
+        sysContent += "\n\n" + mapText;
+        attachedNames.push("repo map");
+        $("ctxMeter").textContent =
+          "attached: " + attachedNames.join(", ");
+      }
+    } catch (e) { /* the map is best-effort */ }
+  }
+
   ta.value = "";
   addMsg("YOU", text);
   history.push({ role: "user", content: text });
@@ -1561,6 +1577,11 @@ $("setWrap").onchange = (e) => {
 $("setShort").checked = settings.shortAnswers;
 $("setShort").onchange = (e) => {
   settings.shortAnswers = e.target.checked;
+  saveSettings();
+};
+$("setRepoMap").checked = !!settings.repoMap;
+$("setRepoMap").onchange = (e) => {
+  settings.repoMap = e.target.checked;
   saveSettings();
 };
 $("setFont").value = settings.fontSize;
@@ -2291,6 +2312,7 @@ const COMMANDS = [
   { title: "Go to definition", run: () => $("toolDef").click() },
   { title: "Find all references", run: () => $("toolRefs").click() },
   { title: "Rename symbol…", run: () => $("toolRename").click() },
+  { title: "Repo map", run: () => $("toolRepoMap").click() },
   { title: "Local history (previous versions)", run: () => $("toolHistory").click() },
   { title: "Check whole project (Problems)", run: () => $("toolCheckAll").click() },
   { title: "Reopen closed tab", run: () => {
@@ -2858,6 +2880,53 @@ $("toolCheckAll").onclick = async () => {
       if (p.line) jumpToLine(p.line);
     };
     box.appendChild(row);
+  }
+};
+
+/* ---------------- Roadmap G2: repo map ---------------- */
+let repoMapOnce = false;
+let repoMapCache = { at: 0, text: "" };
+async function getRepoMap() {
+  if (Date.now() - repoMapCache.at < 60000 && repoMapCache.text)
+    return repoMapCache.text;
+  const r = await fetch("/api/repomap?budget=6000");
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  repoMapCache = { at: Date.now(), text: d.map || "" };
+  return repoMapCache.text;
+}
+
+$("toolRepoMap").onclick = async () => {
+  hideTools();
+  $("todoTitle").textContent = "Repo map";
+  const box = $("todoResults");
+  box.innerHTML = '<div class="dim">Building the map…</div>';
+  $("todoPanel").classList.remove("hidden");
+  try {
+    const mapText = await getRepoMap();
+    box.innerHTML = "";
+    const arm = document.createElement("div");
+    arm.className = "findRow";
+    arm.textContent = settings.repoMap
+      ? "✓ The map rides along with every chat message "
+        + "(Settings → repo map is on)"
+      : "➕ Attach this map to my next chat message";
+    arm.onclick = () => {
+      repoMapOnce = true;
+      arm.textContent = "✓ Armed - it will ride along with "
+        + "your next chat message";
+    };
+    box.appendChild(arm);
+    const pre = document.createElement("div");
+    pre.className = "mapText";
+    pre.textContent = mapText || "(no symbols yet)";
+    box.appendChild(pre);
+  } catch (e) {
+    box.innerHTML = "";
+    const el = document.createElement("div");
+    el.className = "dim";
+    el.textContent = "Repo map unavailable: " + e.message;
+    box.appendChild(el);
   }
 };
 
