@@ -181,7 +181,7 @@ a goal closes only when its "done when" is proven.
 
 ## Arc F — Toolbox depth
 
-**G21. Language packs.** First-class support beyond
+**G21. Language packs.** ✅ CLOSED Oct 19, 2026 (v1.29.0) — SQL/Rust/Go highlighting + icons, SQL/Go/JSON checkers live-proven (Rust wired, toolchain-gated), SQL/Go run configs proven on the mixed fixture. First-class support beyond
 Python/JS: HTML, CSS, JSON, Markdown, SQL, Rust, and Go —
 highlighting, checkers where a checker can run, run
 configs, and file icons that tell them apart.

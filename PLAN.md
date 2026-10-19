@@ -236,6 +236,9 @@ Store launch prep complete (key, AAB, policy, listing). Submission gates are Rya
 ## Phase 30 - Roadmap G20 - PARTIAL Oct 19, 2026
 Story assets prepared (READMEs, launch drafts). Site deploy, film, and posting stay Ryan's gates. Arc E done except Ryan's taps. Next: Arc F toolbox, G21 language packs.
 
+## Phase 31 - Roadmap G21 - SHIPPED v1.29.0 Oct 19, 2026
+Language packs closed on the langpack fixture. Next: G22 SQLite studio.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
