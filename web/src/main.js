@@ -3005,6 +3005,7 @@ const COMMANDS = [
   { title: "Pair mode", run: () => $("toolPair").click() },
   { title: "Review changes (pre-commit)", run: () => $("gitReview").click() },
   { title: "Context lab", run: () => $("toolContext").click() },
+  { title: "Reference docs", run: () => $("toolRefdocs").click() },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
   { title: "API client", run: () => $("toolApi").click() },
   { title: "Export docs site", run: () => $("toolDocs").click() },
@@ -4639,6 +4640,81 @@ $("reviewAiBtn").onclick = async () => {
   } catch (e) {
     $("reviewAiOut").textContent = "AI review failed: " + e;
   }
+};
+
+/* ---------------- Roadmap G28: offline reference docs ----
+   Search the bundled refdocs.json (Python stdlib slice from
+   the real pydoc data + hand-written JavaScript core). The
+   Ask button drops the page into the chat box so Ghost
+   answers from the page instead of guessing - the whole
+   loop is offline. */
+let rdCurrentEntry = null;
+async function rdSearch() {
+  const q = $("rdQuery").value.trim();
+  $("rdEntry").classList.add("hidden");
+  const box = $("rdResults");
+  if (!q) { box.innerHTML = ""; return; }
+  box.innerHTML = "<div class=\"dim\">Searching…</div>";
+  try {
+    const r = await fetch("/api/refdocs/search?q=" +
+      encodeURIComponent(q));
+    const d = await r.json();
+    box.innerHTML = "";
+    if (!d.results.length) {
+      box.innerHTML = "<div class=\"dim\">No matches in the " +
+        "bundled reference.</div>";
+      return;
+    }
+    for (const res of d.results) {
+      const row = document.createElement("div");
+      row.className = "ctxRow";
+      row.textContent = (res.lang === "py" ? "🐍 " : "🟨 ") +
+        res.title + " — " + res.summary;
+      row.onclick = () => rdOpen(res.id);
+      box.appendChild(row);
+    }
+  } catch (e) {
+    box.innerHTML = "<div class=\"dim\">Search failed: " +
+      e + "</div>";
+  }
+}
+async function rdOpen(id) {
+  try {
+    const r = await fetch("/api/refdocs/get?id=" +
+      encodeURIComponent(id));
+    const d = await r.json();
+    if (d.error) { alert(d.error); return; }
+    rdCurrentEntry = d.entry;
+    $("rdEntryTitle").textContent = d.entry.title;
+    $("rdEntryBody").textContent = d.entry.body;
+    $("rdEntry").classList.remove("hidden");
+    $("rdResults").innerHTML = "";
+  } catch (e) { alert("Could not open the page: " + e); }
+}
+$("toolRefdocs").onclick = () => {
+  hideTools();
+  $("rdPanel").classList.remove("hidden");
+  $("rdQuery").focus();
+};
+$("rdClose").onclick = () =>
+  $("rdPanel").classList.add("hidden");
+$("rdSearchBtn").onclick = rdSearch;
+$("rdQuery").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") rdSearch();
+});
+$("rdBack").onclick = () => {
+  $("rdEntry").classList.add("hidden");
+  rdSearch();
+};
+$("rdAsk").onclick = () => {
+  if (!rdCurrentEntry) return;
+  $("rdPanel").classList.add("hidden");
+  $("chatText").value =
+    "Answer from this reference page, not from memory.\n\n" +
+    "--- " + rdCurrentEntry.title + " ---\n" +
+    rdCurrentEntry.body.slice(0, 3000) +
+    "\n\nMy question: ";
+  $("chatText").focus();
 };
 
 /*@@CTX@@*/

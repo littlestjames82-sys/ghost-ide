@@ -257,6 +257,9 @@ Pre-commit AI review built. Next: G27 context lab.
 ## Phase 37 - Roadmap G27 - SHIPPED v1.35.0 Oct 19, 2026
 Context lab built and proven against GhostSlice. Next: G28 offline reference docs.
 
+## Phase 38 - Roadmap G28 - SHIPPED v1.36.0 Oct 19, 2026
+Offline reference docs built and proven end to end locally. Next: G29 semantic code search.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

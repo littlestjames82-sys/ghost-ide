@@ -230,7 +230,7 @@ what-if comparison of slice settings before you ask.
 Done when: the lab's numbers match GhostSlice's own
 counts on a benchmark tree.
 
-**G28. Offline reference docs.** Bundled, searchable
+**G28. Offline reference docs.** ✅ DONE Oct 19, 2026 (v1.36.0) — search ranks correctly; the offline loop answered an API question from the bundled page on loopback only (airplane-mode equivalent). Bundled, searchable
 slices of the Python and JavaScript references; Ghost
 can pull the exact doc page for an API into context
 instead of guessing at it.

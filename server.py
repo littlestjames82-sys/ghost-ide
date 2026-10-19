@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.35.0"
+APP_VERSION = "1.36.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -664,6 +664,72 @@ def _context_stats():
                   "per-language calibrated, not exact "
                   "tokenizer counts)",
     }
+
+
+# ---- Roadmap G28: offline reference docs ----
+_refdocs_cache = None
+
+
+def _refdocs():
+    global _refdocs_cache
+    if _refdocs_cache is not None:
+        return _refdocs_cache
+    try:
+        data = json.loads(
+            (ROOT / "refdocs.json").read_text(encoding="utf-8"))
+        _refdocs_cache = data.get("entries", [])
+    except Exception:
+        _refdocs_cache = []
+    return _refdocs_cache
+
+
+def _rd_tokens(text):
+    toks = []
+    cur = ""
+    for ch in text.lower():
+        if ch.isalnum():
+            cur += ch
+        elif cur:
+            toks.append(cur)
+            cur = ""
+    if cur:
+        toks.append(cur)
+    return toks
+
+
+def _refdoc_search(q, limit=12):
+    q = (q or "").strip().lower()
+    if not q:
+        return []
+    tokens = _rd_tokens(q)
+    scored = []
+    for e in _refdocs():
+        title = e["title"].lower()
+        s = 0
+        if title == q:
+            s += 100
+        elif q and title.endswith(q):
+            s += 60
+        elif q in title:
+            s += 40
+        parts = title.replace(".", " ").split()
+        summary = e["summary"].lower()
+        body = e["body"].lower()
+        for t in tokens:
+            if t in parts:
+                s += 15
+            elif t in title:
+                s += 6
+            if t in summary:
+                s += 3
+            if t in body:
+                s += 1
+        if s > 0:
+            scored.append((s, e["title"], e))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [{"id": e["id"], "lang": e["lang"],
+             "title": e["title"], "summary": e["summary"],
+             "score": s} for s, _t, e in scored[:limit]]
 
 
 def _refactor_diff(changes):
@@ -1896,6 +1962,22 @@ class Handler(SimpleHTTPRequestHandler):
                 # extensionless files in, 5 MB per-file cap
                 # (bytes reported, tokens null past the cap).
                 return self.send_json(_context_stats())
+            if parsed.path == "/api/refdocs/search":
+                # Roadmap G28: search the bundled offline
+                # reference (refdocs.json, built by
+                # tools/gen_refdocs.py).
+                qs = urllib.parse.parse_qs(parsed.query)
+                q = qs.get("q", [""])[0]
+                return self.send_json(
+                    {"results": _refdoc_search(q)})
+            if parsed.path == "/api/refdocs/get":
+                qs = urllib.parse.parse_qs(parsed.query)
+                want = qs.get("id", [""])[0]
+                for e in _refdocs():
+                    if e["id"] == want:
+                        return self.send_json({"entry": e})
+                return self.send_json(
+                    {"error": "No such reference entry."})
             if parsed.path == "/api/repomap":
                 qs = urllib.parse.parse_qs(parsed.query)
                 try:
