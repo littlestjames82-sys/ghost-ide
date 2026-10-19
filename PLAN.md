@@ -233,6 +233,9 @@ Desktop apps: PyInstaller packaging, in-app 7B download, report-only update chec
 ## Phase 29 - Roadmap G19 - PREPARED Oct 19, 2026
 Store launch prep complete (key, AAB, policy, listing). Submission gates are Ryan's. Next: G20 the story (site deploy + film are Ryan gates; README/docs refresh is buildable).
 
+## Phase 30 - Roadmap G20 - PARTIAL Oct 19, 2026
+Story assets prepared (READMEs, launch drafts). Site deploy, film, and posting stay Ryan's gates. Arc E done except Ryan's taps. Next: Arc F toolbox, G21 language packs.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

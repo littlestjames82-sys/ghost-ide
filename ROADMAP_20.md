@@ -157,7 +157,7 @@ rollout decision stays Ryan's, as does the $25 fee.
 Done when: the closed track build is installable by a
 tester who is not Ryan.
 
-**G20. The story.** Studio site page goes live (draft
+**G20. The story.** 🔶 PARTIAL Oct 19, 2026 — READMEs and docs rewritten to the v1.28.0 reality and launch posts drafted for approval; closes when Ryan deploys the site page, films the 60-90 s real-use capture, approves posts, and the Nov 2 real-use verdict lands. Studio site page goes live (draft
 already written), a 60–90 second real-use film, launch
 posts drafted for Ryan's approval, README and docs
 brought up to what the app actually does.
