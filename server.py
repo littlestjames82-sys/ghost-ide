@@ -1726,6 +1726,15 @@ class Handler(SimpleHTTPRequestHandler):
                     "ok": True, "code": rc, "stdout": out[-32768:],
                     "stderr": err[-8192:], "ms": ms,
                     "cmd": " ".join(cmd + [data["path"]])})
+            if parsed.path == "/api/git/init":
+                # Roadmap G11: create the repo (the panel's Init
+                # button). Plain `git init` works on every git.
+                rc, out, err, _ = git_out(["init"])
+                if rc != 0:
+                    raise ValueError(err.strip()[:300]
+                                     or "git init failed")
+                return self.send_json({"ok": True,
+                                       "output": out.strip()})
             if parsed.path == "/api/git/stage":
                 data = self.read_json()
                 if data["path"] != ".":

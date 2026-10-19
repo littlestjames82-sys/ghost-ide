@@ -206,6 +206,9 @@ On-device Python run + real Python check. Next: G10 terminal.
 ## Phase 20 - Roadmap G10 - SHIPPED Oct 19, 2026 (phone v1.20.0 + desktop)
 Persistent terminal sessions + Python REPL pane. Next: G11 full git on phone.
 
+## Phase 21 - Roadmap G11 - BUILT Oct 19, 2026 (phone v1.21.0), device proof pending
+Full git on phone via bundled git. Next: G12 model store.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

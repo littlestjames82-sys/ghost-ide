@@ -1072,7 +1072,18 @@ async function refreshGit() {
       $("gitLog").textContent = "";
       $("gitAiMsg").disabled = true;
       $("branchChip").classList.add("hidden");
-      box.textContent = d.error || "Not a git repo.";
+      box.innerHTML = "";
+      const note = document.createElement("div");
+      note.textContent = d.error || "Not a git repo.";
+      box.appendChild(note);
+      const initBtn = document.createElement("button");
+      initBtn.textContent = "Init repo here";
+      initBtn.onclick = async () => {
+        const r2 = await postJson("/api/git/init", {});
+        if (r2.error) alert(r2.error);
+        refreshGit();
+      };
+      box.appendChild(initBtn);
       return;
     }
     $("gitBranch").textContent = d.branch || "";
