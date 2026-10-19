@@ -170,6 +170,9 @@ Editor: find-in-file, fold/unfold all, text transforms (sort/dedupe/trim/case), 
 ## Phase 8 - VS Code / Cursor round - SHIPPED Oct 19, 2026 (phone v1.7.0 + desktop)
 Command palette (27 commands), VS Code keymap pack (comment toggle, move/copy/delete line, select next occurrence), autosave + trim-on-save, Cursor-style inline AI edit with review/apply, Problems panel (check returns line+message), TODO status chip, AI commit message from the diff. Preceded by two hotfixes: v1.6.1 (wrapComp TDZ startup death) and v1.6.2 (missing WebChromeClient dialog bridge). DOM-stub evaluation gate now stands before every APK.
 
+## Phase 9 - More VS Code / Cursor - SHIPPED Oct 19, 2026 (phone v1.8.0 + desktop)
+Fixed the latent quick-open mapping bug (files objects vs strings - Quick Open/split/palette lists were silently empty since Phase 6). Added: collapsible folder tree, Go to Symbol, chat @file mentions + selection attach, Focus mode, indent/whitespace settings, Bookmarks, Fix-with-AI in Problems, quiet problems chip.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

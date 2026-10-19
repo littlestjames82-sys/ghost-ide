@@ -1,4 +1,5 @@
-import { EditorView, keymap, Decoration, WidgetType } from "@codemirror/view";
+import { EditorView, keymap, Decoration, WidgetType,
+  highlightWhitespace } from "@codemirror/view";
 import { EditorState, StateEffect, StateField, Prec, Compartment } from "@codemirror/state";
 import { basicSetup } from "codemirror";
 import { indentWithTab, toggleComment, copyLineDown, moveLineUp,
@@ -11,7 +12,7 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { openSearchPanel, selectNextOccurrence } from "@codemirror/search";
-import { foldAll, unfoldAll } from "@codemirror/language";
+import { foldAll, unfoldAll, indentUnit } from "@codemirror/language";
 import { BEHAVIOR } from "./behavior.js";
 
 const $ = (id) => document.getElementById(id);
@@ -75,7 +76,8 @@ const settings = Object.assign(
   { temperature: 0.3, autocomplete: true, infillTokens: 48,
     formatOnSave: false, ctxMode: "file", wrap: false,
     shortAnswers: false, fontSize: "14px", infillDelay: 750,
-    autosave: "off", trimOnSave: false },
+    autosave: "off", trimOnSave: false, indent: 2,
+    whitespace: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
 function saveSettings() {
   localStorage.setItem("ghostide-settings", JSON.stringify(settings));
@@ -105,6 +107,16 @@ let modelUp = false;
 const wrapComp = new Compartment();
 function wrapExt() {
   return settings.wrap ? EditorView.lineWrapping : [];
+}
+/* Same TDZ rule as wrapComp: these compartments are read by
+   baseExtensions() during view creation, so they live up here. */
+const indentComp = new Compartment();
+function indentExt() {
+  return indentUnit.of(settings.indent === 4 ? "    " : "  ");
+}
+const wsComp = new Compartment();
+function wsExt() {
+  return settings.whitespace ? highlightWhitespace() : [];
 }
 
 const view = new EditorView({
@@ -139,6 +151,8 @@ function baseExtensions(path) {
       { key: "Mod-d", run: selectNextOccurrence },
     ]),
     wrapComp.of(wrapExt()),
+    indentComp.of(indentExt()),
+    wsComp.of(wsExt()),
     EditorView.updateListener.of((u) => {
       if (u.selectionSet || u.docChanged) {
         const head = u.state.selection.main.head;
@@ -269,21 +283,52 @@ function checkDraft(path, diskContent) {
   $("draftBar").classList.remove("hidden");
 }
 
+/* Collapsible folders (Phase 9): collapsed dir paths persist
+   locally; children of collapsed dirs are skipped in the list. */
+let collapsedDirs = new Set();
+try {
+  collapsedDirs = new Set(JSON.parse(
+    localStorage.getItem("ghostide-collapsed") || "[]"));
+} catch (e) { /* fresh start */ }
+function saveCollapsed() {
+  try {
+    localStorage.setItem("ghostide-collapsed",
+      JSON.stringify([...collapsedDirs]));
+  } catch (e) { /* best-effort */ }
+}
+function isHiddenByCollapse(path) {
+  const parts = path.split("/");
+  for (let i = 1; i < parts.length; i++) {
+    if (collapsedDirs.has(parts.slice(0, i).join("/"))) return true;
+  }
+  return false;
+}
+
 async function loadFiles() {
   const r = await fetch("/api/files");
   const d = await r.json();
   const tree = $("fileTree");
   tree.innerHTML = "";
   for (const f of d.files) {
+    if (isHiddenByCollapse(f.path)) continue;
     const row = document.createElement("div");
     row.className = "fileRow";
     const el = document.createElement("div");
     const depth = f.path.split("/").length - 1;
     el.style.paddingLeft = (6 + depth * 14) + "px";
     el.className = f.type;
-    el.textContent = (f.type === "dir" ? "📁 " : "📄 ") +
-      f.path.split("/").pop();
-    if (f.type === "file") {
+    const baseName = f.path.split("/").pop();
+    if (f.type === "dir") {
+      const closed = collapsedDirs.has(f.path);
+      el.textContent = (closed ? "▸ 📁 " : "▾ 📂 ") + baseName;
+      el.onclick = () => {
+        if (closed) collapsedDirs.delete(f.path);
+        else collapsedDirs.add(f.path);
+        saveCollapsed();
+        loadFiles();
+      };
+    } else {
+      el.textContent = "📄 " + baseName;
       if (f.path === currentFile) el.classList.add("active");
       el.onclick = () => openFile(f.path);
     }
@@ -531,6 +576,7 @@ async function saveFile() {
     }
   }
   refreshTodoChip();
+  checkQuiet();
 }
 
 $("saveBtn").onclick = saveFile;
@@ -780,6 +826,44 @@ async function sendChat() {
       }
     }
   }
+
+  /* @file mentions + selection attach (Phase 9, Cursor-style):
+     referenced files and any selected code ride along as context. */
+  const attachedNames = [];
+  if (text.includes("@")) {
+    try {
+      const fr = await fetch("/api/files");
+      const fd = await fr.json();
+      const known = new Set((fd.files || [])
+        .filter((x) => x.type === "file").map((x) => x.path));
+      const mentioned = [...new Set(
+        [...text.matchAll(/@([\w.\-/]+)/g)]
+          .map((m) => m[1]).filter((p) => known.has(p)))].slice(0, 2);
+      for (const p of mentioned) {
+        const r2 = await fetch("/api/file?path=" +
+          encodeURIComponent(p));
+        const d2 = await r2.json();
+        if (!d2.error && d2.content != null) {
+          sysContent += "\nAttached file " + p + ":\n```\n" +
+            d2.content.slice(0, BEHAVIOR.context.fileChars) + "\n```";
+          attachedNames.push(p);
+        }
+      }
+    } catch (e) { /* mentions are best-effort */ }
+  }
+  const selNow = view.state.selection.main;
+  if (!selNow.empty && currentFile) {
+    const selText = view.state.doc
+      .sliceString(selNow.from, selNow.to).slice(0, 3000);
+    if (selText.trim()) {
+      sysContent += "\nSelected code from " + currentFile +
+        ":\n```\n" + selText + "\n```";
+      attachedNames.push("selection");
+    }
+  }
+  if (attachedNames.length)
+    $("ctxMeter").textContent =
+      "attached: " + attachedNames.join(", ");
 
   ta.value = "";
   addMsg("YOU", text);
@@ -1089,6 +1173,8 @@ function splitExtensions(path) {
     basicSetup,
     oneDark,
     wrapComp.of(wrapExt()),
+    indentComp.of(indentExt()),
+    wsComp.of(wsExt()),
     langFor(path || ""),
     keymap.of([
       { key: "Mod-s", run: () => { saveSplit(); return true; } },
@@ -1187,6 +1273,7 @@ $("splitSave").onclick = () => saveSplit();
 /* ---------------- Phase 6: quick open ---------------- */
 let quickMode = "open";
 let quickFiles = [];
+let quickSymbols = [];
 async function openQuick(mode) {
   quickMode = mode || "open";
   if (quickMode === "command") {
@@ -1200,10 +1287,19 @@ async function openQuick(mode) {
   }
   $("quickInput").placeholder =
     "Open file by name… (Enter opens, Esc closes)";
+  if (quickMode === "mention")
+    $("quickInput").placeholder = "Mention a file… (tap to insert @file)";
   try {
     const r = await fetch("/api/files");
     const d = await r.json();
-    quickFiles = (d.files || []).filter((f) => !f.endsWith("/"));
+    /* /api/files returns {path, type} objects on BOTH builds -
+       map them to file path strings. Treating the entries as
+       strings threw inside this try, silently emptying the list:
+       Quick Open, the split picker and palette file commands all
+       showed "No files match" (Phase 6-8 latent bug, fixed P9). */
+    quickFiles = (d.files || [])
+      .filter((f) => f.type === "file")
+      .map((f) => f.path);
   } catch (e) { quickFiles = []; }
   $("quickInput").value = "";
   renderQuick("");
@@ -1236,6 +1332,40 @@ function renderQuick(q) {
     }
     if (!matches.length)
       list.innerHTML = '<div class="dim">No commands match.</div>';
+    return;
+  }
+  if (quickMode === "symbol") {
+    const matches = quickSymbols.filter((s) =>
+      s.name.toLowerCase().includes(needle)).slice(0, 30);
+    for (const s of matches) {
+      const row = document.createElement("div");
+      row.className = "findRow";
+      row.textContent = "ƒ " + s.name + "  · line " + s.line;
+      row.onclick = () => { closeQuick(); jumpToLine(s.line); };
+      list.appendChild(row);
+    }
+    if (!matches.length)
+      list.innerHTML = '<div class="dim">No symbols in this file.</div>';
+    return;
+  }
+  if (quickMode === "mention") {
+    const matches = quickFiles
+      .filter((f) => f.toLowerCase().includes(needle)).slice(0, 30);
+    for (const f of matches) {
+      const row = document.createElement("div");
+      row.className = "findRow";
+      row.textContent = "@ " + f;
+      row.onclick = () => {
+        closeQuick();
+        const ta = $("chatText");
+        ta.value += (ta.value && !ta.value.endsWith(" ") ? " " : "") +
+          "@" + f + " ";
+        ta.focus();
+      };
+      list.appendChild(row);
+    }
+    if (!matches.length)
+      list.innerHTML = '<div class="dim">No files match.</div>';
     return;
   }
   let recents = [];
@@ -1293,10 +1423,7 @@ document.addEventListener("keydown", (e) => {
 $("toolQuick").onclick = () => { hideTools(); openQuick("open"); };
 
 /* ---------------- Phase 6: outline + go to line ---------------- */
-$("toolOutline").onclick = () => {
-  hideTools();
-  if (!currentFile) { alert("Open a file first."); return; }
-  const lines = view.state.doc.toString().split("\n");
+function extractSymbols(text) {
   const res = [
     /^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)/,
     /^\s*class\s+([A-Za-z_]\w*)/,
@@ -1304,12 +1431,19 @@ $("toolOutline").onclick = () => {
     /^\s*(?:const|let|var)\s+([A-Za-z_]\w*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_]\w*)\s*=>/,
   ];
   const syms = [];
-  lines.forEach((ln, i) => {
+  text.split("\n").forEach((ln, i) => {
     for (const re of res) {
       const m = ln.match(re);
       if (m) { syms.push({ name: m[1], line: i + 1 }); break; }
     }
   });
+  return syms;
+}
+
+$("toolOutline").onclick = () => {
+  hideTools();
+  if (!currentFile) { alert("Open a file first."); return; }
+  const syms = extractSymbols(view.state.doc.toString());
   $("todoTitle").textContent = "Outline: " + currentFile;
   const box = $("todoResults");
   box.innerHTML = "";
@@ -1409,6 +1543,18 @@ $("setTrim").checked = !!settings.trimOnSave;
 $("setTrim").onchange = (e) => {
   settings.trimOnSave = e.target.checked;
   saveSettings();
+};
+$("setIndent").value = String(settings.indent || 2);
+$("setIndent").onchange = (e) => {
+  settings.indent = parseInt(e.target.value, 10) || 2;
+  saveSettings();
+  view.dispatch({ effects: indentComp.reconfigure(indentExt()) });
+};
+$("setWs").checked = !!settings.whitespace;
+$("setWs").onchange = (e) => {
+  settings.whitespace = e.target.checked;
+  saveSettings();
+  view.dispatch({ effects: wsComp.reconfigure(wsExt()) });
 };
 
 /* ---------------- Tools pack ---------------- */
@@ -1929,6 +2075,19 @@ async function runProblems() {
     (d.message || "syntax error");
   row.onclick = () => { if (d.line) jumpToLine(d.line); };
   box.appendChild(row);
+  const fix = document.createElement("div");
+  fix.className = "findRow";
+  fix.textContent = "✨ Fix with AI";
+  fix.onclick = () => {
+    if (!modelUp) { alert("Start the model first."); return; }
+    $("todoPanel").classList.add("hidden");
+    inlineTarget = { from: 0, to: view.state.doc.length };
+    $("inlineAiInput").value = "Fix this problem: " +
+      (d.message || "syntax error") +
+      (d.line ? " (line " + d.line + ")" : "");
+    runInlineAi();
+  };
+  box.appendChild(fix);
   if (d.output) {
     const pre = document.createElement("pre");
     pre.className = "dim";
@@ -2070,6 +2229,9 @@ const COMMANDS = [
   { title: "Find in project", run: () => $("findBtn").click() },
   { title: "Go to line", run: () => $("toolGoto").click() },
   { title: "Outline (functions and classes)", run: () => $("toolOutline").click() },
+  { title: "Go to symbol…", run: () => openSymbols() },
+  { title: "Bookmarks", run: () => { hideTools(); renderBookmarks(); } },
+  { title: "Toggle focus mode (hide side panels)", run: () => toggleZen() },
   { title: "TODO / FIXME scan", run: () => $("toolTodos").click() },
   { title: "Project stats", run: () => $("toolStats").click() },
   { title: "Terminal", run: () => $("toolTerminal").click() },
@@ -2093,6 +2255,121 @@ const COMMANDS = [
 ];
 $("toolPalette").onclick = () => { hideTools(); openQuick("command"); };
 refreshTodoChip();
+
+/* ---------------- Phase 9: tree, symbols, mentions, zen,
+   bookmarks, quiet problems ---------------- */
+function toggleZen() {
+  document.body.classList.toggle("zen");
+}
+$("zenBtn").onclick = toggleZen;
+
+function openSymbols() {
+  hideTools();
+  if (!currentFile) { alert("Open a file first."); return; }
+  quickMode = "symbol";
+  quickSymbols = extractSymbols(view.state.doc.toString());
+  $("quickInput").placeholder =
+    "Go to symbol in " + currentFile + "… (Esc closes)";
+  $("quickInput").value = "";
+  renderQuick("");
+  $("quickPanel").classList.remove("hidden");
+  $("quickInput").focus();
+}
+$("toolSymbols").onclick = openSymbols;
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey &&
+      e.key.toLowerCase() === "o") {
+    e.preventDefault();
+    if ($("quickPanel").classList.contains("hidden")) openSymbols();
+    else closeQuick();
+  }
+});
+$("mentionBtn").onclick = () => openQuick("mention");
+
+/* Bookmarks: per-file line numbers in localStorage. */
+function loadBookmarks() {
+  try {
+    return JSON.parse(
+      localStorage.getItem("ghostide-bookmarks") || "{}");
+  } catch (e) { return {}; }
+}
+function saveBookmarks(b) {
+  try {
+    localStorage.setItem("ghostide-bookmarks", JSON.stringify(b));
+  } catch (e) { /* best-effort */ }
+}
+function renderBookmarks() {
+  $("todoTitle").textContent = "Bookmarks";
+  const box = $("todoResults");
+  box.innerHTML = "";
+  $("todoPanel").classList.remove("hidden");
+  if (currentFile) {
+    const ln = view.state.doc.lineAt(
+      view.state.selection.main.head).number;
+    const has = (loadBookmarks()[currentFile] || []).includes(ln);
+    const t = document.createElement("div");
+    t.className = "findRow";
+    t.textContent = (has ? "✕ Remove bookmark at" : "🔖 Bookmark") +
+      " — " + currentFile + " line " + ln;
+    t.onclick = () => {
+      const bb = loadBookmarks();
+      const arr = bb[currentFile] || [];
+      const i = arr.indexOf(ln);
+      if (i >= 0) arr.splice(i, 1);
+      else arr.push(ln);
+      arr.sort((a, b) => a - b);
+      if (arr.length) bb[currentFile] = arr;
+      else delete bb[currentFile];
+      saveBookmarks(bb);
+      renderBookmarks();
+    };
+    box.appendChild(t);
+  }
+  const b = loadBookmarks();
+  let any = false;
+  for (const path of Object.keys(b).sort()) {
+    for (const line of b[path]) {
+      any = true;
+      const row = document.createElement("div");
+      row.className = "findRow";
+      row.textContent = "🔖 " + path + " · line " + line;
+      row.onclick = async () => {
+        $("todoPanel").classList.add("hidden");
+        await openFile(path);
+        jumpToLine(line);
+      };
+      box.appendChild(row);
+    }
+  }
+  if (!any)
+    box.insertAdjacentHTML("beforeend",
+      '<div class="dim">No bookmarks yet - open a file and '
+      + 'bookmark the current line from here.</div>');
+}
+$("toolBookmarks").onclick = () => { hideTools(); renderBookmarks(); };
+
+/* Quiet problems check after save (desktop checkers only; the
+   phone's stub answers ok:null and the chip stays hidden). */
+async function checkQuiet() {
+  const chip = $("probChip");
+  if (!currentFile || !/\.(py|js|mjs|json)$/i.test(currentFile)) {
+    chip.classList.add("hidden");
+    return;
+  }
+  try {
+    const d = await postJson("/api/check", { path: currentFile });
+    if (d && d.ok === false) {
+      chip.textContent = "⚠ problem" +
+        (d.line ? " · line " + d.line : "");
+      chip.classList.remove("hidden");
+      chip.onclick = () => runProblems();
+    } else {
+      chip.classList.add("hidden");
+    }
+  } catch (e) {
+    chip.classList.add("hidden");
+  }
+}
 
 /* ---------------- boot ---------------- */
 loadFiles();
