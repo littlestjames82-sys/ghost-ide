@@ -2008,32 +2008,77 @@ $("toolSlice").onclick = async () => {
     " tokens, " + d.files + " files).");
 };
 
-/* Terminal (desktop shell in the workspace). */
+/* Terminal (persistent desktop shell) + Python REPL (G10).
+   Both keep server-side sessions: shell cwd/vars and REPL
+   variables persist between commands. */
 const termHistory = [];
 let termIdx = -1;
-$("toolTerminal").onclick = () => {
+let termMode = "shell";
+function openTermPane(mode) {
   hideTools();
+  termMode = mode;
   $("termPane").classList.remove("hidden");
+  if (mode === "repl") {
+    $("termTitle").textContent =
+      "Python REPL · session stays alive between lines";
+    $("termCwd").textContent = "";
+    $("termPrompt").textContent = ">>>";
+    $("termCmd").placeholder =
+      "python line, Enter to run (blank line ends a block)";
+    postJson("/api/repl", { input: "" }).then((d) => {
+      if (d.output) {
+        const out = $("termOut");
+        out.textContent += d.output;
+        out.scrollTop = out.scrollHeight;
+      }
+    });
+  } else {
+    $("termTitle").textContent =
+      "Terminal · workspace folder · local shell (unsandboxed)";
+    $("termPrompt").textContent = "$";
+    $("termCmd").placeholder =
+      "type a command, Enter to run (↑/↓ for history)";
+  }
   $("termCmd").focus();
-};
+}
+$("toolTerminal").onclick = () => openTermPane("shell");
+$("toolRepl").onclick = () => openTermPane("repl");
 $("termClose").onclick = () => $("termPane").classList.add("hidden");
+$("termReset").onclick = async () => {
+  await postJson(termMode === "repl"
+    ? "/api/repl/reset" : "/api/terminal/reset", {});
+  const out = $("termOut");
+  out.textContent += "(session reset)\n";
+  if (termMode === "repl") openTermPane("repl");
+};
 async function runTerm() {
   const input = $("termCmd");
-  const cmd = input.value.trim();
-  if (!cmd) return;
+  const cmd = input.value;
+  const out = $("termOut");
+  if (termMode === "repl") {
+    input.value = "";
+    if (cmd.trim()) termHistory.unshift(cmd);
+    termIdx = -1;
+    out.textContent += cmd + "\n";
+    const d = await postJson("/api/repl", { input: cmd });
+    if (d.error) out.textContent += d.error + "\n";
+    else out.textContent += (d.output || "");
+    out.scrollTop = out.scrollHeight;
+    return;
+  }
+  if (!cmd.trim()) return;
   termHistory.unshift(cmd);
   termIdx = -1;
   input.value = "";
-  const out = $("termOut");
   out.textContent += "$ " + cmd + "\n";
   out.scrollTop = out.scrollHeight;
   const d = await postJson("/api/terminal", { command: cmd });
   if (d.error) {
-    out.textContent += d.error +
-      "\n(The terminal runs on the desktop build.)\n";
+    out.textContent += d.error + "\n";
   } else {
     out.textContent += (d.stdout || "") + (d.stderr || "") +
       "[exit " + d.code + " · " + d.ms + " ms]\n";
+    if (d.cwd) $("termCwd").textContent = "· " + d.cwd;
   }
   out.scrollTop = out.scrollHeight;
 }
@@ -2414,6 +2459,7 @@ const COMMANDS = [
   { title: "TODO / FIXME scan", run: () => $("toolTodos").click() },
   { title: "Project stats", run: () => $("toolStats").click() },
   { title: "Terminal", run: () => $("toolTerminal").click() },
+  { title: "Python REPL", run: () => $("toolRepl").click() },
   { title: "Snippets", run: () => $("toolSnippets").click() },
   { title: "Regenerate chat answer", run: () => $("toolRegen").click() },
   { title: "Export chat as file", run: () => $("toolExportChat").click() },

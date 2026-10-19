@@ -203,6 +203,9 @@ Self-fixing test loop: agent repairs against the suite, 3 rounds, revert-on-wors
 ## Phase 19 - Roadmap G9 - BUILT Oct 19, 2026 (phone v1.19.0), device proof pending
 On-device Python run + real Python check. Next: G10 terminal.
 
+## Phase 20 - Roadmap G10 - SHIPPED Oct 19, 2026 (phone v1.20.0 + desktop)
+Persistent terminal sessions + Python REPL pane. Next: G11 full git on phone.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

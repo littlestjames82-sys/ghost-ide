@@ -1082,6 +1082,193 @@ def _dbg_cmd(sid, cmd):
     return ev
 
 
+# ---------------- Terminal + REPL sessions (Roadmap G10) --------
+# One persistent bash for the terminal pane: cwd, env and
+# variables survive across commands. A sentinel line printed
+# after each command carries its exit code and cwd. A command
+# that outlives the timeout costs the session (killed and
+# restarted) rather than desyncing the stream.
+_TERM = {}
+_TERM_LOCK = _threading.Lock()
+_TERM_SEQ = [0]
+
+
+def _term_spawn():
+    proc = subprocess.Popen(
+        ["bash", "--norc"], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, cwd=str(WORKSPACE), bufsize=1)
+    q = _queue.Queue()
+
+    def reader():
+        try:
+            for line in proc.stdout:
+                q.put(line)
+        except Exception:
+            pass
+        q.put(None)
+
+    _threading.Thread(target=reader, daemon=True).start()
+    _TERM["proc"] = proc
+    _TERM["queue"] = q
+    _TERM["pending"] = ""
+
+
+def _term_kill():
+    proc = _TERM.pop("proc", None)
+    _TERM.pop("queue", None)
+    _TERM["pending"] = ""
+    if proc:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _term_run(cmd, timeout=30):
+    with _TERM_LOCK:
+        proc = _TERM.get("proc")
+        if proc is None or proc.poll() is not None:
+            _term_spawn()
+            proc = _TERM["proc"]
+        q = _TERM["queue"]
+        _TERM_SEQ[0] += 1
+        marker = "__GHOST_TERM_%d__" % _TERM_SEQ[0]
+        try:
+            proc.stdin.write(cmd + "\n")
+            proc.stdin.write(
+                "printf '\\n%s rc=%s cwd=%s\\n' '" + marker
+                + "' \"$?\" \"$(pwd)\"\n")
+            proc.stdin.flush()
+        except Exception:
+            _term_kill()
+            return {"stdout": "", "stderr": "terminal session "
+                    "died; it restarts with your next command",
+                    "code": -1, "cwd": str(WORKSPACE)}
+        buf = _TERM.get("pending", "")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                chunk = q.get(timeout=max(
+                    0.05, deadline - time.time()))
+            except _queue.Empty:
+                break
+            if chunk is None:
+                _term_kill()
+                return {"stdout": buf, "stderr": "(shell exited; "
+                        "a fresh one starts with your next "
+                        "command)", "code": -1,
+                        "cwd": str(WORKSPACE)}
+            buf += chunk
+            idx = buf.find("\n" + marker + " ")
+            if idx >= 0:
+                end = buf.find("\n", idx + 1)
+                line = buf[idx + 1:end if end >= 0 else len(buf)]
+                m = _re_mod.search(r"rc=(-?\d+) cwd=(.*)$", line)
+                _TERM["pending"] = buf[end + 1:] if end >= 0 else ""
+                return {"stdout": buf[:idx] + (
+                        "\n" if idx > 0 and
+                        not buf[:idx].endswith("\n") else ""),
+                        "stderr": "",
+                        "code": int(m.group(1)) if m else 0,
+                        "cwd": m.group(2) if m else str(WORKSPACE)}
+        _term_kill()
+        return {"stdout": buf, "stderr": "(timed out after %ds; "
+                "the terminal session was restarted)" % timeout,
+                "code": -1, "cwd": str(WORKSPACE)}
+
+
+# One persistent CPython REPL (python3 -u -i). Output arrives
+# in raw chunks (prompts have no newline), collected with a
+# settle window: quiet for `settle` seconds after data means
+# the turn is done.
+_REPL = {}
+_REPL_LOCK = _threading.Lock()
+
+
+def _repl_spawn():
+    proc = subprocess.Popen(
+        [sys.executable, "-u", "-i"], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        cwd=str(WORKSPACE))
+    q = _queue.Queue()
+    fd = proc.stdout.fileno()
+
+    def reader():
+        try:
+            while True:
+                data = os.read(fd, 4096)
+                if not data:
+                    break
+                q.put(data.decode("utf-8", "replace"))
+        except Exception:
+            pass
+        q.put(None)
+
+    _threading.Thread(target=reader, daemon=True).start()
+    _REPL["proc"] = proc
+    _REPL["queue"] = q
+    _REPL["dead"] = False
+
+
+def _repl_kill():
+    proc = _REPL.pop("proc", None)
+    _REPL.pop("queue", None)
+    if proc:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _repl_drain(settle=0.35, maxwait=6.0):
+    q = _REPL["queue"]
+    out = []
+    deadline = time.time() + maxwait
+    last_data = time.time()
+    got_any = False
+    while time.time() < deadline:
+        try:
+            chunk = q.get(timeout=0.1)
+        except _queue.Empty:
+            if got_any and time.time() - last_data > settle:
+                break
+            continue
+        if chunk is None:
+            _REPL["dead"] = True
+            break
+        out.append(chunk)
+        got_any = True
+        last_data = time.time()
+    return "".join(out)
+
+
+def _repl_send(text):
+    with _REPL_LOCK:
+        proc = _REPL.get("proc")
+        if proc is None or proc.poll() is not None \
+                or _REPL.get("dead"):
+            _repl_spawn()
+            banner = _repl_drain(settle=0.5, maxwait=6.0)
+            if not text:
+                return banner
+            prefix = banner
+        else:
+            prefix = ""
+        try:
+            _REPL["proc"].stdin.write(
+                (text + "\n").encode("utf-8"))
+            _REPL["proc"].stdin.flush()
+        except Exception:
+            _repl_kill()
+            return prefix + "(python exited)"
+        out = _repl_drain()
+        if _REPL.get("dead"):
+            out += "\n(python exited)"
+            _repl_kill()
+        return prefix + out
+
+
 def git_out(args, timeout=30):
     if not shutil.which("git"):
         raise ValueError("git is not installed")
@@ -1509,6 +1696,8 @@ class Handler(SimpleHTTPRequestHandler):
                 if not p.is_dir():
                     raise ValueError("not a folder: " + data["path"])
                 WORKSPACE = p
+                _term_kill()
+                _repl_kill()
                 return self.send_json({"ok": True, "workspace": str(p)})
             if parsed.path == "/api/context":
                 data = self.read_json()
@@ -1784,29 +1973,36 @@ class Handler(SimpleHTTPRequestHandler):
                                      "formatter failed")
                 return self.send_json({"formatted": True,
                                        "tool": tool[0]})
+            if parsed.path == "/api/terminal/reset":
+                _term_kill()
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/repl/reset":
+                _repl_kill()
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/repl":
+                # Roadmap G10: persistent Python REPL session.
+                data = self.read_json()
+                out = _repl_send(data.get("input", ""))
+                return self.send_json({"output": out})
             if parsed.path == "/api/terminal":
-                # Tools pack: a real shell in the workspace. Local and
-                # UNSANDBOXED by design (same trust as the run panel):
-                # your machine, your commands.
+                # Roadmap G10: a persistent shell session in the
+                # workspace (was one-shot in the Tools pack). Local
+                # and UNSANDBOXED by design: your machine, your
+                # commands. cwd/env/variables persist; a timeout
+                # restarts the session (see _term_run).
                 data = self.read_json()
                 cmd = data.get("command", "").strip()
                 if not cmd:
                     raise ValueError("empty command")
                 t0 = time.time()
-                try:
-                    p = subprocess.run(
-                        cmd, shell=True, cwd=str(WORKSPACE),
-                        capture_output=True, text=True, timeout=30)
-                    rc, out, err = (p.returncode, p.stdout, p.stderr)
-                except subprocess.TimeoutExpired as e:
-                    rc = -1
-                    out = (e.stdout or "") if isinstance(
-                        e.stdout, str) else ""
-                    err = "(timed out after 30 s)"
+                r = _term_run(cmd)
                 return self.send_json({
-                    "ok": True, "code": rc,
-                    "stdout": out[-64000:], "stderr": err[-64000:],
-                    "ms": int((time.time() - t0) * 1000), "cmd": cmd})
+                    "ok": True, "code": r["code"],
+                    "stdout": r["stdout"][-64000:],
+                    "stderr": r["stderr"][-64000:],
+                    "cwd": r["cwd"],
+                    "ms": int((time.time() - t0) * 1000),
+                    "cmd": cmd})
             if parsed.path == "/api/check":
                 # Tools pack: syntax check with the system tools.
                 # Python via ast.parse (no __pycache__ artifacts),
