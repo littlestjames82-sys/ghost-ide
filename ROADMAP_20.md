@@ -113,7 +113,7 @@ the phone, fully offline.
 
 ## Arc D — Platform (other people could use this)
 
-**G14. Project templates.** New-project wizard: Python
+**G14. Project templates.** ✅ CLOSED Oct 19, 2026 (v1.24.0) — six templates created through the real file API on desktop and run/test-verified; phone uses the identical path. New-project wizard: Python
 CLI, static web app, API server, tiny game, and a blank
 GhostIDE plugin — each scaffolded runnable, with a README
 that tells the truth about how to run it.

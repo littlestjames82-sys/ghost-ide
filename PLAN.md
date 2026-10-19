@@ -215,6 +215,9 @@ Model store: 0.5B/1.5B/3B/7B catalog. Next: G13 voice coding (Arc C close).
 ## Phase 23 - Roadmap G13 - BUILT Oct 19, 2026 (phone v1.23.0), device proof pending
 Voice coding via the system recognizer. Arc C complete pending device proofs. Next: Arc D, G14 project templates.
 
+## Phase 24 - Roadmap G14 - SHIPPED Oct 19, 2026 (phone v1.24.0 + desktop)
+Project templates on both builds. Next: G15 plugin system.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
