@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.34.0"
+APP_VERSION = "1.35.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -504,6 +504,166 @@ import builtins as _builtins
 import difflib as _difflib
 
 _IDENT_RE = _re_mod.compile(r"^[A-Za-z_$][A-Za-z0-9_$]*$")
+
+
+# ---- Roadmap G27: context lab (GhostSlice estimator port) ----
+# Constants and algorithm mirror ghostslice/src/ghostslice/
+# tokens.py + scanner.py (method v2). Keep in sync with the
+# Java port in IdeServer.java.
+_GS_TEXT_EXTS = {
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".md", ".markdown", ".txt", ".json", ".yaml", ".yml",
+    ".toml", ".cfg", ".ini", ".html", ".css", ".sh", ".rb",
+    ".go", ".rs", ".java", ".c", ".h", ".cpp", ".hpp", ".cc",
+    ".cxx", ".hh", ".cs", ".php", ".swift", ".kt", ".kts",
+    ".sql", ".xml", ".scala", ".sc", ".bash", ".zsh", ".ps1",
+    ".psm1", ".ipynb",
+}
+_GS_BINARY_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp",
+    ".svgz", ".pdf", ".zip", ".tar", ".gz", ".bz2", ".xz",
+    ".7z", ".rar", ".exe", ".dll", ".so", ".dylib", ".o",
+    ".a", ".class", ".wasm", ".mp3", ".mp4", ".mov", ".avi",
+    ".woff", ".woff2", ".ttf", ".eot", ".pyc", ".pyo", ".db",
+    ".sqlite", ".sqlite3",
+}
+_GS_LANG_BY_EXT = {
+    ".py": "python", ".ts": "typescript", ".tsx": "typescript",
+    ".js": "javascript", ".jsx": "javascript",
+    ".mjs": "javascript", ".cjs": "javascript",
+    ".md": "markdown", ".markdown": "markdown", ".txt": "text",
+    ".json": "json", ".go": "go", ".rs": "rust",
+    ".java": "java", ".cs": "csharp", ".php": "php",
+    ".rb": "ruby", ".kt": "kotlin", ".kts": "kotlin",
+    ".swift": "swift", ".c": "c", ".h": "c", ".cpp": "cpp",
+    ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp",
+    ".scala": "scala", ".sc": "scala", ".yaml": "yaml",
+    ".yml": "yaml", ".toml": "toml", ".sql": "sql",
+    ".sh": "shell", ".bash": "shell", ".zsh": "shell",
+    ".ps1": "powershell", ".psm1": "powershell",
+    ".ipynb": "notebook",
+}
+_GS_FAMILY = {
+    "python": "python", "notebook": "python",
+    "typescript": "ts-js", "javascript": "ts-js", "go": "go",
+    "rust": "rust", "c": "c-family", "cpp": "c-family",
+    "java": "c-family", "csharp": "c-family", "scala": "c-family",
+    "kotlin": "c-family", "swift": "c-family", "php": "c-family",
+    "ruby": "c-family", "markdown": "prose", "json": "json-data",
+    "yaml": "json-data", "toml": "json-data",
+}
+_GS_FACTORS = {
+    "prose": 0.85, "python": 0.86, "ts-js": 0.75, "go": 0.73,
+    "rust": 0.89, "c-family": 0.87, "json-data": 0.95,
+    "minified-js": 0.65, "other": 1.00,
+}
+_GS_SKIP_DIRS = {
+    ".git", ".hg", ".svn", "node_modules", "dist", "build",
+    "out", "__pycache__", ".venv", "venv", "env", ".tox",
+    ".mypy_cache",
+}
+_GS_LOCKFILES = {
+    "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    "poetry.lock", "Pipfile.lock", "Cargo.lock",
+    "composer.lock", "Gemfile.lock", "go.sum", "uv.lock",
+}
+
+
+def _gs_raw_tokens(text):
+    # Replicates re.findall(r"[A-Za-z0-9_]+|[^\w\s]") counting:
+    # word runs cost 1 (len <= 4) or ceil(len/4); each non-word
+    # non-space char costs 1.
+    total = 0
+    run = 0
+    for ch in text:
+        if ch == "_" or ch.isalnum():
+            run += 1
+            continue
+        if run:
+            total += 1 if run <= 4 else (run + 3) // 4
+            run = 0
+        if not ch.isspace():
+            total += 1
+    if run:
+        total += 1 if run <= 4 else (run + 3) // 4
+    return total
+
+
+def _gs_looks_minified(text):
+    if len(text) < 400:
+        return False
+    lines = text.splitlines()
+    if not lines:
+        return False
+    longest = max(len(ln) for ln in lines)
+    return longest >= 300 and len(text) / len(lines) >= 200
+
+
+def _gs_estimate(text, language):
+    raw = _gs_raw_tokens(text)
+    if raw == 0:
+        return 0
+    fam = _GS_FAMILY.get(language or "", "other")
+    if fam == "ts-js" and _gs_looks_minified(text):
+        fam = "minified-js"
+    factor = _GS_FACTORS[fam]
+    if factor == 1.0:
+        return raw
+    return int(raw * factor + 0.5)
+
+
+def _context_stats():
+    files = []
+    total_tokens = 0
+    total_bytes = 0
+    for dirpath, dirnames, filenames in os.walk(WORKSPACE):
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in _GS_SKIP_DIRS and not d.startswith("."))
+        for name in sorted(filenames):
+            p = Path(dirpath) / name
+            rel = str(p.relative_to(WORKSPACE))
+            ext = p.suffix.lower()
+            if ext in _GS_BINARY_EXTS:
+                continue
+            if ext and ext not in _GS_TEXT_EXTS:
+                continue
+            try:
+                size = p.stat().st_size
+            except OSError:
+                continue
+            if size > 5_000_000:
+                files.append({"path": rel, "bytes": size,
+                              "tokens": None})
+                total_bytes += size
+                continue
+            try:
+                text = p.read_bytes().decode("utf-8", "ignore")
+            except OSError:
+                continue
+            # GhostSlice sniffs extensionless files; a NUL byte
+            # means binary in practice - skip those.
+            if not ext and "\x00" in text:
+                continue
+            tokens = _gs_estimate(
+                text, _GS_LANG_BY_EXT.get(ext))
+            entry = {"path": rel, "bytes": size,
+                     "tokens": tokens}
+            if name in _GS_LOCKFILES:
+                entry["lock"] = True
+            files.append(entry)
+            total_tokens += tokens
+            total_bytes += size
+            if len(files) >= 5000:
+                break
+    files.sort(key=lambda f: -(f["tokens"] or 0))
+    return {
+        "files": files, "totalTokens": total_tokens,
+        "totalBytes": total_bytes, "fileCount": len(files),
+        "method": "GhostSlice estimates (BPE-like split v2, "
+                  "per-language calibrated, not exact "
+                  "tokenizer counts)",
+    }
 
 
 def _refactor_diff(changes):
@@ -1725,6 +1885,17 @@ class Handler(SimpleHTTPRequestHandler):
                     "references": all_refs[:300],
                     "total": len(all_refs),
                     "truncated": len(all_refs) > 300})
+            if parsed.path == "/api/context/stats":
+                # Roadmap G27: the context lab. The estimator
+                # is a faithful port of GhostSlice's tokens.py
+                # (method v2, per-language calibrated), so the
+                # lab's numbers match `ghostslice scan` on the
+                # same tree. Walk rules mirror its scanner:
+                # fixed skip dirs, binary exts out, lockfiles
+                # counted and flagged, text exts +
+                # extensionless files in, 5 MB per-file cap
+                # (bytes reported, tokens null past the cap).
+                return self.send_json(_context_stats())
             if parsed.path == "/api/repomap":
                 qs = urllib.parse.parse_qs(parsed.query)
                 try:

@@ -254,6 +254,9 @@ Asset tools built; Arc F complete. Next: Arc G, G26 pre-commit AI review.
 ## Phase 36 - Roadmap G26 - SHIPPED v1.34.0 Oct 19, 2026
 Pre-commit AI review built. Next: G27 context lab.
 
+## Phase 37 - Roadmap G27 - SHIPPED v1.35.0 Oct 19, 2026
+Context lab built and proven against GhostSlice. Next: G28 offline reference docs.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

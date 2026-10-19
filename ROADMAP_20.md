@@ -224,7 +224,7 @@ Done when: the reviewer catches a planted secret and a
 planted bug in a fixture diff, and stays quiet on a
 clean one.
 
-**G27. Context lab.** See what Ghost sees: a token
+**G27. Context lab.** ✅ DONE Oct 19, 2026 (v1.35.0) — endpoint numbers match GhostSlice's own scan exactly on two trees (705 and 2360 total tokens, per-file equal). See what Ghost sees: a token
 heatmap over the workspace, per-file cost, and a
 what-if comparison of slice settings before you ask.
 Done when: the lab's numbers match GhostSlice's own
