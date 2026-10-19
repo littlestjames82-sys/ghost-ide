@@ -78,7 +78,7 @@ Explicitly NOT in Phase 1: bigger model (needs Gate 0 RAM/heat
 data first), Play Store anything, accounts, sync.
 
 ## Phase 2 - Desktop IDE hardening - SHIPPED Oct 19, 2026 (desktop v0.2 + phone v1.2.0)
-Status per item: 2.1 DONE (workspace switcher + recents; ghostslice's 418 files browsed live). 2.2 DONE (GhostSlice export as chat context; ghostslice repo 569,792 tok -> 5,939 signatures in 2.5 s; live meter + over-budget hard-stop). 2.3 DONE (run panel .py/.js/.sh, 20 s timeout, unsandboxed note in UI). 2.4 DONE (status/stage/diff/commit; real commit made through the API in tests). 2.5 PARTIAL: tabs + project find/replace DONE; split view DEFERRED (single-view state refactor - revisit if wanted). 2.6 PARTIAL: format-on-save hook DONE (black/ruff/prettier if installed; honest no-formatter reply otherwise); no minimap exists in the app, bracket matching ships with the editor core.
+Status per item: 2.1 DONE (workspace switcher + recents; ghostslice's 418 files browsed live). 2.2 DONE (GhostSlice export as chat context; ghostslice repo 569,792 tok -> 5,939 signatures in 2.5 s; live meter + over-budget hard-stop). 2.3 DONE (run panel .py/.js/.sh, 20 s timeout, unsandboxed note in UI). 2.4 DONE (status/stage/diff/commit; real commit made through the API in tests). 2.5 DONE (tabs + find/replace in Phase 2; split view shipped in Phase 6 / v1.5.0 - split pane is a plain editor, autocomplete stays in the main pane, undo resets when a file changes panes). 2.6 PARTIAL: format-on-save hook DONE (black/ruff/prettier if installed; honest no-formatter reply otherwise); no minimap exists in the app, bracket matching ships with the editor core.
 *Entry: none (can run parallel to Phase 1 if desktop-first).
 Exit: a real studio task gets done start-to-finish in GhostIDE.*
 
@@ -160,6 +160,9 @@ Play Store dev fee, Phase 4, Ryan's call).
 
 ## Phase 5 - Tools pack - SHIPPED Oct 19, 2026 (phone v1.4.0 + desktop)
 Added at Ryan's "load up this ide with tools": 🧰 Tools panel (AI quick actions: Explain / Fix / Tests / Docstrings over selection or file), Preview (markdown + images), syntax Check, Duplicate file, Snippets, TODO/FIXME scanner, Project stats, Save-slice-as-file, and a desktop Terminal pane. Native on Android where possible (todos/stats/raw); terminal + syntax check are desktop features and say so on the phone. All desktop endpoints live-tested.
+
+## Phase 6 - Roadmap round - SHIPPED Oct 19, 2026 (phone v1.5.0 + desktop)
+Split view (2.5 completed), Quick Open (Ctrl+K), Outline, Go to line, chat Stop + Clear, settings for wrap / text size / short-answers (battery) / autocomplete pause, status bar doc stats, 200 KB big-file warning, file menu Copy path / Download / Open in split. Frontend-only round: no new endpoints.
 
 ## Risk register
 | Risk | Likelihood | Mitigation |
