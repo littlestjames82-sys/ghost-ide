@@ -3075,6 +3075,8 @@ const COMMANDS = [
   { title: "Verify pipeline", run: () => $("toolVerify").click() },
   { title: "Big-screen mode", run: () => $("toolBigscreen").click() },
   { title: "Keyboard shortcuts", run: () => $("toolKeys").click() },
+  { title: "Export app state", run: () => $("toolStateExport").click() },
+  { title: "Import app state", run: () => $("toolStateImport").click() },
   { title: "Add cursor on selected lines", run: () => cursorsOnSelectedLines(view) },
   { title: "Select all occurrences", run: () => selectAllOccurrences(view) },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
@@ -5484,6 +5486,120 @@ document.addEventListener("keydown", (e) => {
 $("kbChip").onclick = () => {
   $("kbChip").classList.add("hidden");
   $("keysPanel").classList.remove("hidden");
+};
+
+/* ---------------- Roadmap G34: app-state carry -------- */
+/*@@STATE@@*/
+/* Everything that is yours in the app lives in localStorage
+   under the ghostide- prefix: settings, snippets, bookmarks,
+   breakpoints, macros, error memory, API history, pair
+   identity, pane layout and the open-tabs session. Chat
+   transcripts are not stored anywhere (they end with the
+   session) and file-history snapshots live with the project,
+   so neither is in the carry file. Enumeration is by prefix,
+   so state added later carries automatically. */
+function stateCollect(storage) {
+  const entries = {};
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k && k.startsWith("ghostide-"))
+      entries[k] = storage.getItem(k);
+  }
+  return {
+    app: "ghostide", kind: "app-state", version: 1,
+    exportedAt: new Date().toISOString(), entries,
+  };
+}
+function stateValidate(obj) {
+  if (!obj || typeof obj !== "object")
+    return "not a state file (no JSON object)";
+  if (obj.app !== "ghostide" || obj.kind !== "app-state")
+    return "not a GhostIDE app-state file";
+  if (!obj.entries || typeof obj.entries !== "object")
+    return "state file has no entries";
+  const keys = Object.keys(obj.entries);
+  if (!keys.length) return "state file is empty";
+  for (const k of keys) {
+    if (!k.startsWith("ghostide-"))
+      return "entry key outside the app namespace: " + k;
+    if (typeof obj.entries[k] !== "string")
+      return "entry is not a string: " + k;
+  }
+  return null;
+}
+function stateApply(storage, obj) {
+  let n = 0;
+  for (const k of Object.keys(obj.entries)) {
+    storage.setItem(k, obj.entries[k]);
+    n++;
+  }
+  return n;
+}
+try {
+  window.__ghostState = { stateCollect, stateValidate,
+    stateApply };
+} catch (e) {}
+/*@@STATE-END@@*/
+
+$("toolStateExport").onclick = async () => {
+  hideTools();
+  const data = stateCollect(localStorage);
+  const text = JSON.stringify(data, null, 1);
+  const r = await postJson("/api/file", {
+    path: "ghostide-state.json", content: text });
+  $("runPane").classList.remove("hidden");
+  if (r.error) {
+    $("runTitle").textContent = "Export failed";
+    $("runOut").textContent = r.error;
+    return;
+  }
+  const n = Object.keys(data.entries).length;
+  $("runTitle").textContent = "App state exported";
+  $("runOut").textContent =
+    "Wrote ghostide-state.json (" + n + " entries, " +
+    text.length + " bytes) to the workspace root.\n" +
+    "Carry it to the new device, put it in that workspace, " +
+    "then Tools -> Import app state. It restores settings, " +
+    "snippets, bookmarks, breakpoints, macros, error " +
+    "memory, API history, pairing and layout.";
+  loadFiles();
+};
+$("toolStateImport").onclick = async () => {
+  hideTools();
+  const d = await getJson("/api/file?path=" +
+    encodeURIComponent("ghostide-state.json"));
+  $("runPane").classList.remove("hidden");
+  if (d.error) {
+    $("runTitle").textContent = "No state file found";
+    $("runOut").textContent =
+      "Put ghostide-state.json in this workspace first " +
+      "(export it from the old device). " + d.error;
+    return;
+  }
+  let obj;
+  try { obj = JSON.parse(d.content); }
+  catch (e) {
+    $("runTitle").textContent = "State file unreadable";
+    $("runOut").textContent = "ghostide-state.json is not JSON.";
+    return;
+  }
+  const bad = stateValidate(obj);
+  if (bad) {
+    $("runTitle").textContent = "Import refused";
+    $("runOut").textContent = bad;
+    return;
+  }
+  const n = Object.keys(obj.entries).length;
+  if (!confirm("Restore " + n + " app-state entries from " +
+      (obj.exportedAt || "an unknown date") +
+      "? This replaces those settings on this device, " +
+      "then the app reloads."))
+    return;
+  const applied = stateApply(localStorage, obj);
+  $("runTitle").textContent = "State restored";
+  $("runOut").textContent = applied +
+    " entries restored. Reloading…";
+  setTimeout(() => location.reload(), 700);
 };
 
 /* ---------------- Roadmap G25: asset tools ----------------

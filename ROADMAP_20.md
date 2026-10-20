@@ -273,7 +273,7 @@ when a keyboard pairs.
 Done when: the layout holds up on a tablet emulator
 profile and a folded/unfolded phone.
 
-**G34. App-state carry.** Export/import everything that
+**G34. App-state carry.** ✅ DONE Oct 19, 2026 (v1.42.0) — every ghostide-* entry exports to one file and restores field-by-field after a wipe (10/10 harness); chat transcripts are not stored anywhere and are the stated exclusion. Export/import everything that
 is yours in the app — settings, snippets, bookmarks,
 chat histories, local-history — as one file, so a new
 phone becomes your phone in a minute.

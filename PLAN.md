@@ -275,6 +275,9 @@ Verify pipeline built and proven. Next: G33 big-screen mode.
 ## Phase 43 - Roadmap G33 - BUILT v1.41.0 Oct 19, 2026
 Big-screen mode shipped (frontend). Device proof pending. Next: G34 app-state carry.
 
+## Phase 44 - Roadmap G34 - SHIPPED v1.42.0 Oct 19, 2026
+App-state carry built and proven. Next: G35 companion touches (closes Arc H).
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
