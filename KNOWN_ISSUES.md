@@ -3,6 +3,21 @@
 GhostIDE is a small, local, single-user tool. These are the limits
 we know about, stated plainly - most are trade-offs, not surprises.
 
+## Startup crash budget (Roadmap G40, audited at v1.48.0)
+- Budget: zero known startup crashers. Status: met.
+  The two historical startup killers (a const used in
+  its temporal dead zone during editor construction,
+  v1.5.0/v1.6.0, and the missing WebView dialog bridge)
+  are fixed, and every build now passes an execution
+  gate that runs the real bundle in a DOM stub and
+  requires it to get past editor construction before
+  the APK ships. An in-page error banner also surfaces
+  any boot failure instead of a silent dead screen.
+- Cold start: the bundle parses and reaches editor
+  construction in about 0.42 s in the harness, and the
+  desktop server answers health in about 0.19 s. The
+  remaining on-device WebView cost is the phone's own.
+
 ## Model strength
 - The phone models (1.5B / 3B) are small. They write good small
   functions and decent autocomplete; multi-step reasoning is where

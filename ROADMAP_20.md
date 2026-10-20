@@ -317,7 +317,7 @@ Done when: a tester who has never seen GhostIDE
 completes the tour unaided and can repeat the four
 moves an hour later.
 
-**G40. 1.0 hardening.** The boring excellence goal:
+**G40. 1.0 hardening.** 🔶 BUILT Oct 19, 2026 (v1.48.0) — crash budget met (zero known startup crashers, full sweep green), cold start ~0.42 s to editor in-harness, thermal guard live, in-app changelog, quiet update pill. On-device thermal behavior is Ryan's check. ROADMAP_20 COMPLETE (G1-G40). The boring excellence goal:
 crash budget (zero known startup crashers), cold start
 under a second to editor, generation thermal guard,
 in-app changelog, and an update check that informs

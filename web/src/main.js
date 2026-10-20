@@ -1097,7 +1097,15 @@ async function sendChat() {
   const chatT0 = Date.now();
   const body = addMsg("GHOST", "");
   let full = "";
+  thermalWarned = false;
+  let thermalStopped = false;
   chatAbort = new AbortController();
+  const thermTimer = setInterval(() => {
+    if (thermalWatchdog() === "stop") {
+      thermalStopped = true;
+      if (chatAbort) chatAbort.abort();
+    }
+  }, 8000);
   const sendBtn = $("chatSend");
   sendBtn.textContent = "■ Stop";
   sendBtn.onclick = () => { if (chatAbort) chatAbort.abort(); };
@@ -1141,6 +1149,11 @@ async function sendChat() {
       full = full || ("(error talking to the model: " + e + ")");
     }
   }
+  clearInterval(thermTimer);
+  if (thermalStopped)
+    addMsg("SYSTEM", "🌡 Generation stopped: the device " +
+      "reached severe heat. Let it cool, then ask again. " +
+      "(Thermal guard, Roadmap G40.)");
   chatAbort = null;
   sendBtn.textContent = "Send";
   sendBtn.onclick = sendChat;
@@ -1958,6 +1971,7 @@ const I18N = {
   toolRegistry: { en: "Registry", es: "Registro" },
   toolClassroom: { en: "Classroom view", es: "Vista de aula" },
   toolTour: { en: "Take the tour", es: "Hacer el recorrido" },
+  toolChangelog: { en: "What's new", es: "Novedades" },
   handRun: { en: "▶ Run", es: "▶ Ejecutar" },
   handSave: { en: "Save", es: "Guardar" },
   handSend: { en: "Send", es: "Enviar" },
@@ -3231,6 +3245,7 @@ const COMMANDS = [
   { title: "Registry", run: () => $("toolRegistry").click() },
   { title: "Classroom view", run: () => $("toolClassroom").click() },
   { title: "Take the tour", run: () => $("toolTour").click() },
+  { title: "What's new", run: () => $("toolChangelog").click() },
   { title: "Add cursor on selected lines", run: () => cursorsOnSelectedLines(view) },
   { title: "Select all occurrences", run: () => selectAllOccurrences(view) },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
@@ -4073,6 +4088,11 @@ async function runAgent(task) {
   let summary = "";
   let nudges = 0;
   for (let step = 1; step <= AGENT_MAX_STEPS; step++) {
+    if (thermalWatchdog() === "stop") {
+      addMsg("SYSTEM", "🌡 Agent stopped: the device " +
+        "reached severe heat. (Thermal guard.)");
+      agentStop = true;
+    }
     if (agentStop) { outcome = "stopped"; break; }
     addMsg("SYSTEM", "🤖 step " + step + "/" + AGENT_MAX_STEPS);
     let reply = "";
@@ -4503,6 +4523,11 @@ async function runFixLoop() {
   let prevFailed = res.failed;
   const touched = new Set();
   for (let round = 1; round <= FIX_MAX_ROUNDS; round++) {
+    if (thermalWatchdog() === "stop") {
+      note("🌡 Stopped: the device reached severe heat. " +
+        "(Thermal guard.)");
+      agentStop = true;
+    }
     if (agentStop) { outcome = "stopped"; break; }
     const failures = res.results.filter(
       (r) => r.status === "fail");
@@ -6440,6 +6465,99 @@ try {
     $("tourChip").classList.remove("hidden");
   }
 } catch (e) {}
+
+/* ---------------- Roadmap G40: 1.0 hardening ---------- */
+/*@@THERMAL@@*/
+/* Generation thermal guard. Android reports a thermal
+   status (0 none .. 6 shutdown) through the GhostNative
+   bridge; at LIGHT (3) Ghost warns once per generation,
+   at SEVERE (4) it stops the generation to protect the
+   device. No bridge (desktop) means no reading and the
+   guard stays off, honestly. */
+function thermalAction(status) {
+  if (typeof status !== "number" || status < 0) return "ok";
+  if (status >= 4) return "stop";
+  if (status >= 3) return "warn";
+  return "ok";
+}
+function thermalStatus() {
+  try {
+    if (window.GhostNative &&
+        window.GhostNative.thermalStatus)
+      return window.GhostNative.thermalStatus();
+  } catch (e) {}
+  return -1;
+}
+try { window.__ghostThermal = { thermalAction }; }
+catch (e) {}
+/*@@THERMAL-END@@*/
+
+let thermalWarned = false;
+function thermalWatchdog() {
+  const act = thermalAction(thermalStatus());
+  if (act === "warn" && !thermalWarned) {
+    thermalWarned = true;
+    addMsg("SYSTEM", "🌡 The device is getting warm. " +
+      "If it reaches severe heat, Ghost will pause " +
+      "generation to protect the battery.");
+  }
+  return act;
+}
+
+/* In-app changelog (generated from BUILD_NOTES by
+   tools/gen_changelog.py). */
+$("toolChangelog").onclick = async () => {
+  hideTools();
+  $("todoTitle").textContent = "📋 What's new";
+  const box = $("todoResults");
+  box.innerHTML = '<div class="dim">Loading…</div>';
+  $("todoPanel").classList.remove("hidden");
+  try {
+    const r = await fetch("changelog.json");
+    const d = await r.json();
+    box.textContent = "";
+    for (const e of d.entries || []) {
+      const row = document.createElement("div");
+      row.className = "findRow";
+      row.textContent = "v" + e.version + " · " + e.date +
+        " · " + e.goal + " - " + e.summary;
+      box.appendChild(row);
+    }
+    if (!box.children.length)
+      box.textContent = "No changelog entries yet.";
+  } catch (e) {
+    box.textContent = "Changelog unavailable here.";
+  }
+};
+
+/* Update check that informs without nagging: at most one
+   quiet check a day, a small header pill when a newer
+   version exists, dismissible per version, and it never
+   downloads or installs anything. */
+async function quietUpdateCheck() {
+  try {
+    const last = Number(localStorage.getItem(
+      "ghostide-update-check") || 0);
+    if (Date.now() - last < 24 * 3600 * 1000) return;
+    localStorage.setItem("ghostide-update-check",
+      String(Date.now()));
+    const r = await fetch("/api/update/check");
+    const d = await r.json();
+    if (!d.ok || !d.updateAvailable) return;
+    if (localStorage.getItem("ghostide-update-dismissed")
+        === d.latest) return;
+    const pill = $("updatePill");
+    pill.textContent = "⬆ v" + d.latest + " available";
+    pill.classList.remove("hidden");
+    pill.onclick = () => {
+      if (d.url) window.open(d.url, "_blank", "noopener");
+      localStorage.setItem("ghostide-update-dismissed",
+        d.latest);
+      pill.classList.add("hidden");
+    };
+  } catch (e) { /* offline or unsupported: stay silent */ }
+}
+setTimeout(quietUpdateCheck, 5000);
 
 /* ---------------- Roadmap G25: asset tools ----------------
    Asset browser: every image in the workspace with a
