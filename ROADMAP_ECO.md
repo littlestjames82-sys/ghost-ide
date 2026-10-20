@@ -1,4 +1,4 @@
-# GhostIDE x Ghost Ecosystem - Integration Roadmap (E1-E20)
+# GhostIDE x Ghost Ecosystem - Integration Roadmap (E1-E21)
 
 Drafted Oct 20, 2026 at Ryan's request: bring the Ghost
 ecosystem's tools into GhostIDE, the studio's editor.
@@ -207,6 +207,27 @@ the log panel shows the entry. (Seatbelt's own
 Phase 3-5 gates stay separate and Ryan's; this
 goal uses the released 0.3.2 core only.)
 
+**E21. GhostBus link (added Oct 20, 2026 at Ryan's
+direction).**
+A Bus panel in the IDE: post a task, watch claims,
+read proof trails. Agent mode can hand a subtask
+to another GhostIDE (desktop <-> phone) and take
+the result back into the session. Local-first: the
+bus runs between Ryan's own devices on the LAN or
+on one device; the hosted relay is a later upgrade
+behind the existing pilot gate (Ryan's Hetzner
+signup; the ~$5/mo budget approved Oct 11, 2026
+stands, no spend without his go). Bus traffic
+obeys the same rules as everything else here:
+handoffs with consequences pass the E10 approve
+queue and the E20 Seatbelt policy, and GhostShard's
+rule stands - planning may ride the bus, nothing
+dispatches itself.
+Done when: a task posted from one GhostIDE is
+claimed by the other, executed, and its proof
+trail reads back in the posting IDE, entirely on
+local transport.
+
 ## Deliberately not in this roadmap
 
 - GhostProxy: a live-traffic proxy breaks the
@@ -220,7 +241,9 @@ goal uses the released 0.3.2 core only.)
 - GhostShard: its planning already informs agent
   mode's design; dispatch stays forbidden by its
   own rule, so there is nothing to integrate.
-- GhostBus, GhostDeploy, Ghost Bridge, GhostLang,
-  GhostCut, GhostChat, GhostOS: separate products
-  with their own surfaces and gates, not IDE
-  features.
+- GhostDeploy, Ghost Bridge, GhostLang, GhostCut,
+  GhostChat, GhostOS: separate products with their
+  own surfaces and gates, not IDE features.
+  (GhostBus was on this list in the first draft;
+  Ryan directed it in as E21 - the IDE's agent is a
+  natural bus citizen, local-first.)
