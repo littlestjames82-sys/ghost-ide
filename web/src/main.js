@@ -2026,6 +2026,60 @@ $("setFont").onchange = (e) => {
     "--ghost-font", settings.fontSize);
 };
 /* ---------------- Roadmap G36: language + access ------ */
+/* ---------------- Roadmap ECO E1: ecosystem tools ----------
+   The panel lists the Ghost ecosystem catalog with each tool's
+   state. Runnable tools execute on the server (the tool itself,
+   never a reimplementation) and their own report renders here. */
+async function openEco() {
+  closeOverlays();
+  $("todoTitle").textContent = "Ecosystem tools";
+  $("todoResults").textContent = "Loading the catalog…";
+  $("todoPanel").classList.remove("hidden");
+  let r;
+  try { r = await (await fetch("/api/eco/tools")).json(); }
+  catch (e) { $("todoResults").textContent = "Could not load the catalog."; return; }
+  const tools = r.tools || [];
+  $("todoResults").textContent = "";
+  const ecoHead = document.createElement("div");
+  ecoHead.className = "dim";
+  ecoHead.textContent = tools.length + " tools in the catalog. " +
+    "Ready tools run here against this workspace; the rest land " +
+    "with their roadmap goals.";
+  $("todoResults").appendChild(ecoHead);
+  for (const t of tools) {
+    const row = document.createElement("div");
+    row.className = "todorow";
+    const label = document.createElement("span");
+    label.textContent = t.name + " — " + t.blurb;
+    row.appendChild(label);
+    const chip = document.createElement("span");
+    chip.className = "symkind";
+    chip.textContent = t.state === "ready" ? "ready" :
+      t.state === "bundled" ? "on-device" :
+      t.state === "native" ? "built in" :
+      t.state === "absent" ? "not found" : t.goal;
+    row.appendChild(chip);
+    if (t.state === "ready" || t.state === "bundled") {
+      const b = document.createElement("button");
+      b.className = "ghostbtn";
+      b.textContent = "Run";
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = "Running…";
+        try {
+          const rr = await (await fetch("/api/eco/run", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tool: t.id }) })).json();
+          $("todoResults").textContent = rr.error ||
+            (t.name + " report:\n\n" + (rr.output || "(no output)"));
+        } catch (e) { $("todoResults").textContent = "The run failed to reach the server."; }
+        b.disabled = false; b.textContent = "Run";
+      };
+      row.appendChild(b);
+    }
+    $("todoResults").appendChild(row);
+  }
+}
+
 /*@@I18N@@*/
 /* The translatable chrome, keyed by element id. Stateful
    labels (the completion-ping toggle, plugin counts, the
@@ -6640,6 +6694,8 @@ function thermalWatchdog() {
   }
   return act;
 }
+
+$("toolEco").onclick = () => { hideTools(); openEco(); };
 
 /* In-app changelog (generated from BUILD_NOTES by
    tools/gen_changelog.py). */

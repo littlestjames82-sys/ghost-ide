@@ -302,6 +302,17 @@ Post-roadmap UI polish from a design critique Ryan approved: compact model chip,
 ## Phase 52 - The unified design - BUILT v1.50.0 Oct 20, 2026
 All three approved concept directions unified: shared rounded-card skin; phone portrait gets the Focus Sheet body (Files drawer, 3-stop chat sheet) plus the Tab Studio bottom view bar.
 
+- Phase 53 (Roadmap ECO E1, v1.51.0): the ecosystem
+  runner. Tools panel lists the full 34-tool Ghost
+  catalog with states; /api/eco/run executes the tool
+  itself against the workspace (GhostIndex + GhostDeps
+  wired; desktop finds sources via GHOSTIDE_ECO_HOME /
+  ~/ghost-ecosystem / ~/workspace; the phone bundles
+  the pair in eco.zip under its own Python). Parity
+  proven on desktop: the in-IDE GhostIndex stats block
+  equals the CLI's own output on the same db (eco-
+  harness 13/13).
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

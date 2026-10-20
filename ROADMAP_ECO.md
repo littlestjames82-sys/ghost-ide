@@ -43,7 +43,9 @@ stdlib-only Python, all with their own test suites).
 
 ## Arc 1 - The runner (foundation)
 
-**E1. Ecosystem panel + tool runner.**
+**E1. Ecosystem panel + tool runner.** BUILT
+v1.51.0 (desktop proven 13/13 incl. CLI parity;
+phone bundled, device proof Ryan's).
 A Tools panel listing the ecosystem tools with
 their state (bundled / found on desktop / absent),
 and /api/eco/run to execute one against the current

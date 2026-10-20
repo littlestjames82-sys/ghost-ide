@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.50.0"
+APP_VERSION = "1.51.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2110,6 +2110,128 @@ def _dl_worker(mid):
         DL_STATE.update({"state": "error", "error": str(e)})
 
 
+# ---------------- Roadmap ECO E1: ecosystem tool runner -------
+# The Ghost ecosystem companions are zero-dependency Python.
+# The IDE runs the tools themselves (never a reimplementation)
+# against the current workspace and renders their own reports.
+# A tool is "ready" when its source tree is found: $GHOSTIDE_
+# ECO_HOME/<id>/src, ~/ghost-ecosystem/<id>/src, or (dev)
+# ~/workspace/<id>/src. Tools without a runner yet are listed
+# with the roadmap goal that wires them.
+ECO_CATALOG = [
+    ("ghostslice", "GhostSlice", "E-adjacent (native)",
+     "Context slicing - already native in GhostIDE"),
+    ("ghostindex", "GhostIndex", "E1", "Offline FTS5 index of this workspace"),
+    ("ghostdeps", "GhostDeps", "E1",
+     "Declared vs imported dependencies, evidence only"),
+    ("ghostrecall", "GhostRecall", "E5", "Recall of prior slices and sessions"),
+    ("ghostatlas", "GhostAtlas", "E5", "Project map"),
+    ("ghostprimer", "GhostPrimer", "E4", "First-session starter bundle"),
+    ("ghosthandoff", "GhostHandoff", "E4", "Session handoff pack, propose-only"),
+    ("ghostconvert", "GhostConvert", "E6", "Slice bundles to other formats"),
+    ("ghostverify", "GhostVerify", "E7", "Evidence contract for executed work"),
+    ("ghostbench", "GhostBench", "E7", "Opt-in live benchmark runs"),
+    ("ghostreview", "GhostReview", "E8", "Plain-English verdict over a diff"),
+    ("ghostscope", "GhostScope", "E9", "What a change touches"),
+    ("ghostexposure", "GhostExposure", "E9", "Exposure evidence, no verdicts"),
+    ("ghostapprove", "GhostApprove", "E10", "Approval queue, never executes"),
+    ("ghostenv", "GhostEnv", "E11", ".env audit - names only, never values"),
+    ("ghostlogs", "GhostLogs", "E13", "Log slicer: error windows, deduped"),
+    ("ghostdata", "GhostData", "E14", "Structured data slicer, redacted"),
+    ("ghostschema", "GhostSchema", "E14", "OpenAPI / JSON Schema slicer"),
+    ("ghostworktree", "GhostWorktree", "E15", "Git worktree manager"),
+    ("ghostwatch", "GhostWatch", "E16", "Freshness watcher"),
+    ("ghostreplay", "GhostReplay", "E16", "Session replay"),
+    ("ghostconsole", "GhostConsole", "E17", "Read-only ecosystem board"),
+    ("ghostledger", "GhostLedger", "E17", "Session token ledger"),
+    ("ghostmcpdoctor", "GhostMCP Doctor", "E17", "Read-only MCP diagnostics"),
+    ("ghostrecipes", "GhostRecipes", "E18", "Data-only project recipes"),
+    ("ghostleads", "GhostLeads", "E19", "Offline lead drafts, drafts only"),
+    ("quoteshot", "QuoteShot", "E19", "Offline quotes from a price book"),
+    ("ghostlift", "GhostLift", "listed", "Context lift"),
+    ("ghostshard", "GhostShard", "listed", "Planner only - dispatch: false"),
+    ("ghostpacks", "GhostPacks", "listed", "Pack builder"),
+    ("ghostfixture", "GhostFixture", "listed", "Minimal repro projects"),
+    ("ghostdocs", "GhostDocs", "listed", "Docs slicer (native docs mode)"),
+    ("ghostport", "GhostPort", "listed", "Migration CLI - stays a CLI"),
+    ("ghostproxy", "GhostProxy", "listed",
+     "Live-traffic proxy - out of scope for an offline IDE"),
+]
+ECO_RUNNABLE = {"ghostindex", "ghostdeps"}
+
+
+def eco_src_dir(tool_id):
+    roots = []
+    env_home = os.environ.get("GHOSTIDE_ECO_HOME")
+    if env_home:
+        roots.append(Path(env_home))
+    roots.append(Path.home() / "ghost-ecosystem")
+    roots.append(Path.home() / "workspace")
+    for root in roots:
+        cand = root / tool_id / "src"
+        if (cand / tool_id / "__main__.py").is_file():
+            return cand
+    return None
+
+
+def eco_tools_state():
+    out = []
+    for tid, name, goal, blurb in ECO_CATALOG:
+        if tid in ECO_RUNNABLE:
+            src = eco_src_dir(tid)
+            state = "ready" if src else "absent"
+        elif goal == "E-adjacent (native)":
+            state = "native"
+        else:
+            state = "listed"
+        out.append({"id": tid, "name": name, "goal": goal,
+                    "blurb": blurb, "state": state})
+    return out
+
+
+def eco_run(tool_id, ws):
+    """Run one ecosystem tool against the workspace and return
+    its own report text. Raises ValueError with a plain message
+    for anything not runnable."""
+    if tool_id not in ECO_RUNNABLE:
+        raise ValueError("that tool has no in-IDE runner yet - "
+                         "it lands with its roadmap goal")
+    src = eco_src_dir(tool_id)
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(src)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    cmds = []
+    if tool_id == "ghostindex":
+        db = ws / ".ghostide" / "ghostindex.db"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        env["GHOSTINDEX_DB"] = str(db)
+        cmds = [["index", str(ws)], ["stats"]]
+    elif tool_id == "ghostdeps":
+        cmds = [["pack", str(ws)]]
+    parts = []
+    for args in cmds:
+        try:
+            r = subprocess.run(
+                [sys.executable, "-m", tool_id] + args,
+                cwd=str(ws), env=env, capture_output=True,
+                text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise ValueError("the tool ran past 120 seconds and "
+                             "was stopped")
+        text = (r.stdout or "") + (r.stderr or "")
+        # Both tools use exit 2 for "could not run"; exit 1 is
+        # a normal result for ghostdeps (findings present).
+        if r.returncode == 2 or r.returncode < 0:
+            raise ValueError("the tool could not run: "
+                             + text.strip()[:300])
+        parts.append(text.rstrip())
+    return "\n".join(parts)[:60000]
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -2166,6 +2288,8 @@ class Handler(SimpleHTTPRequestHandler):
                     {"model": "up" if llama_health() else "down",
                      "modelName": MODEL_NAME, "version": APP_VERSION,
                      "workspace": str(WORKSPACE)})
+            if parsed.path == "/api/eco/tools":
+                return self.send_json({"tools": eco_tools_state()})
             if parsed.path == "/api/files":
                 out = []
                 for p in sorted(WORKSPACE.rglob("*")):
@@ -2836,6 +2960,15 @@ class Handler(SimpleHTTPRequestHandler):
                         break
                 return self.send_json({"matches": matches,
                                        "truncated": len(matches) >= 200})
+            if parsed.path == "/api/eco/run":
+                data = self.read_json()
+                try:
+                    out = eco_run(str(data.get("tool") or ""),
+                                  WORKSPACE)
+                    return self.send_json({"ok": True,
+                                           "output": out})
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/classroom/start":
                 # Roadmap G38: open the classroom.
                 return self.send_json(_classroom_start())
