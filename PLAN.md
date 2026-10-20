@@ -269,6 +269,9 @@ Error memory built; Arc G complete. Next: Arc H, G31 macros and multi-cursor pac
 ## Phase 41 - Roadmap G31 - SHIPPED v1.39.0 Oct 19, 2026
 Macros and multi-cursor pack built. Next: G32 verify pipeline.
 
+## Phase 42 - Roadmap G32 - SHIPPED v1.40.0 Oct 19, 2026
+Verify pipeline built and proven. Next: G33 big-screen mode.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

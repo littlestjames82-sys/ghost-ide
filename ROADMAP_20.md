@@ -259,7 +259,7 @@ selection and add-cursor shortcuts to match.
 Done when: a recorded cleanup macro runs across a
 fixture folder and every file checks clean after.
 
-**G32. Verify pipeline.** One tap runs the project's
+**G32. Verify pipeline.** ✅ DONE Oct 19, 2026 (v1.40.0) — pipeline numbers equal the individual tools' on the fixture (15/15), evidence L2 with a planted error, L3 after the fix. One tap runs the project's
 whole health pass — syntax check-all, tests, slice
 report, evidence level — and produces a shareable
 report file (GhostConsole, inside the IDE).

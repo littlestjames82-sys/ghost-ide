@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.39.0"
+APP_VERSION = "1.40.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -663,6 +663,129 @@ def _context_stats():
         "method": "GhostSlice estimates (BPE-like split v2, "
                   "per-language calibrated, not exact "
                   "tokenizer counts)",
+    }
+
+
+# ---- Roadmap G32: verify pipeline ----
+def _check_all():
+    results = []
+    checked = 0
+    for rel, p in iter_text_files():
+        ext = p.suffix.lower()
+        if ext == ".py":
+            argv = [py_cmd()[0], "-c",
+                    "import ast,sys; "
+                    "ast.parse(open(sys.argv[1], "
+                    "encoding='utf-8').read())", str(p)]
+        elif ext in (".js", ".mjs"):
+            argv = ["node", "--check", str(p)]
+        elif ext == ".json":
+            argv = [py_cmd()[0], "-c",
+                    "import json,sys; "
+                    "json.load(open(sys.argv[1]))", str(p)]
+        else:
+            continue
+        checked += 1
+        if checked > 100:
+            break
+        rc, out, err, ms = run_cmd(argv, cwd=str(WORKSPACE))
+        if rc != 0:
+            output = (out + err).strip()
+            ln, msg = check_output_info(output)
+            results.append({"path": str(rel), "line": ln,
+                            "message": msg})
+    return {"problems": results, "checked": checked}
+
+
+def _verify_run():
+    """One health pass: check-all + tests + slice report,
+    composed from the same helpers the individual tools use,
+    plus an evidence level with printed criteria. Writes
+    VERIFY_REPORT.md into the workspace."""
+    checks = _check_all()
+    targets = [f["path"] for f in discover_tests()]
+    test_results = []
+    for rel in targets:
+        test_results.extend(run_test_file(rel))
+    t_passed = sum(1 for r in test_results
+                   if r["status"] == "pass")
+    t_failed = len(test_results) - t_passed
+    stats = _context_stats()
+    problems = checks["problems"]
+    if test_results and not problems and t_failed == 0:
+        level, label = "L3", "Green: checks and tests executed, all passing"
+    elif test_results:
+        level, label = "L2", "Tested: checks and tests executed (failures present)"
+    elif not problems:
+        level, label = "L1", "Checked: syntax green; no tests exist to run"
+    else:
+        level, label = "L1", "Checked: syntax problems present; no tests ran"
+    import datetime as _dt
+    stamp = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    lines = []
+    lines.append("# Verify report")
+    lines.append("")
+    lines.append("Project health pass by GhostIDE "
+                 "(verify pipeline, Roadmap G32).")
+    lines.append("When: " + stamp)
+    lines.append("")
+    lines.append("## Evidence level: " + level)
+    lines.append(label + ".")
+    lines.append("Levels: L1 = syntax checks executed; "
+                 "L2 = checks and tests executed; "
+                 "L3 = executed and all green, with at "
+                 "least one real test.")
+    lines.append("")
+    lines.append("## Syntax checks")
+    lines.append("Files checked: " + str(checks["checked"]) +
+                 ". Problems: " + str(len(problems)) + ".")
+    for pr in problems:
+        lines.append("- " + pr["path"] + ":" +
+                     str(pr["line"]) + " " + pr["message"])
+    lines.append("")
+    lines.append("## Tests")
+    if targets:
+        lines.append("Test files: " + str(len(targets)) +
+                     " (" + ", ".join(targets) + ").")
+        lines.append("Tests run: " + str(len(test_results)) +
+                     ". Passed: " + str(t_passed) +
+                     ". Failed: " + str(t_failed) + ".")
+        for r in test_results:
+            if r["status"] != "pass":
+                lines.append("- FAIL " + r.get("file", "") +
+                             " " + r.get("name", "") + ": " +
+                             str(r.get("message", ""))[:200])
+    else:
+        lines.append("No test files discovered "
+                     "(test_*.py, *_test.py, *.test.js).")
+    lines.append("")
+    lines.append("## Slice report (context cost)")
+    lines.append("Text files: " + str(stats["fileCount"]) +
+                 ". Bytes: " + str(stats["totalBytes"]) +
+                 ". Estimated tokens if Ghost read "
+                 "everything: " + str(stats["totalTokens"]) + ".")
+    for f in stats["files"][:5]:
+        lines.append("- " + f["path"] + ": " +
+                     str(f["tokens"]) + " tokens")
+    lines.append("")
+    lines.append("Method: " + stats["method"])
+    report = "\n".join(lines) + "\n"
+    (WORKSPACE / "VERIFY_REPORT.md").write_text(
+        report, encoding="utf-8")
+    return {
+        "checks": checks,
+        "tests": {"files": targets,
+                  "total": len(test_results),
+                  "passed": t_passed, "failed": t_failed,
+                  "failures": [r for r in test_results
+                               if r["status"] != "pass"][:20]},
+        "slice": {"fileCount": stats["fileCount"],
+                  "totalTokens": stats["totalTokens"],
+                  "totalBytes": stats["totalBytes"],
+                  "top": stats["files"][:5]},
+        "evidence": {"level": level, "label": label},
+        "reportPath": "VERIFY_REPORT.md",
+        "report": report,
     }
 
 
@@ -2082,36 +2205,9 @@ class Handler(SimpleHTTPRequestHandler):
                     "summary": summary})
             if parsed.path == "/api/check-all":
                 # Project-wide Problems (desktop checkers).
-                results = []
-                checked = 0
-                for rel, p in iter_text_files():
-                    ext = p.suffix.lower()
-                    if ext == ".py":
-                        argv = [py_cmd()[0], "-c",
-                                "import ast,sys; "
-                                "ast.parse(open(sys.argv[1], "
-                                "encoding='utf-8').read())", str(p)]
-                    elif ext in (".js", ".mjs"):
-                        argv = ["node", "--check", str(p)]
-                    elif ext == ".json":
-                        argv = [py_cmd()[0], "-c",
-                                "import json,sys; "
-                                "json.load(open(sys.argv[1]))", str(p)]
-                    else:
-                        continue
-                    checked += 1
-                    if checked > 100:
-                        break
-                    rc, out, err, ms = run_cmd(
-                        argv, cwd=str(WORKSPACE))
-                    if rc != 0:
-                        output = (out + err).strip()
-                        ln, msg = check_output_info(output)
-                        results.append({
-                            "path": str(rel), "line": ln,
-                            "message": msg})
-                return self.send_json({
-                    "problems": results, "checked": checked})
+                # Roadmap G32: the logic lives in _check_all
+                # so the verify pipeline runs the SAME code.
+                return self.send_json(_check_all())
             if parsed.path == "/api/tests/discover":
                 return self.send_json({"files": discover_tests()})
             if parsed.path == "/api/symbols":
@@ -2680,6 +2776,9 @@ class Handler(SimpleHTTPRequestHandler):
                         break
                 return self.send_json({"matches": matches,
                                        "truncated": len(matches) >= 200})
+            if parsed.path == "/api/verify/run":
+                # Roadmap G32: the one-tap health pass.
+                return self.send_json(_verify_run())
             if parsed.path == "/api/semsearch":
                 # Roadmap G29: meaning search over the symbol
                 # index. Chunks are functions/classes; ranking

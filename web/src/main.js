@@ -3072,6 +3072,7 @@ const COMMANDS = [
   { title: "Context lab", run: () => $("toolContext").click() },
   { title: "Reference docs", run: () => $("toolRefdocs").click() },
   { title: "Macros", run: () => $("toolMacros").click() },
+  { title: "Verify pipeline", run: () => $("toolVerify").click() },
   { title: "Add cursor on selected lines", run: () => cursorsOnSelectedLines(view) },
   { title: "Select all occurrences", run: () => selectAllOccurrences(view) },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
@@ -5382,6 +5383,27 @@ $("macroRun").onclick = async () => {
       paths.length + " file(s)? This edits them on disk."))
     return;
   macroRunOnFiles(name, paths);
+};
+
+/* ---------------- Roadmap G32: verify pipeline ---------- */
+$("toolVerify").onclick = async () => {
+  hideTools();
+  $("runPane").classList.remove("hidden");
+  $("runTitle").textContent = "Verifying project…";
+  $("runOut").textContent =
+    "Running syntax checks, tests and the slice report…";
+  const d = await postJson("/api/verify/run", {});
+  if (d.error) {
+    $("runTitle").textContent = "Verify unavailable";
+    $("runOut").textContent = d.error;
+    return;
+  }
+  $("runTitle").textContent = "Verify: " + d.evidence.level +
+    " · " + d.checks.checked + " checked, " +
+    d.checks.problems.length + " problem(s) · tests " +
+    d.tests.passed + "/" + d.tests.total + " passed";
+  $("runOut").textContent = d.report;
+  loadFiles();
 };
 
 /* ---------------- Roadmap G25: asset tools ----------------
