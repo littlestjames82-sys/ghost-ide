@@ -281,6 +281,9 @@ App-state carry built and proven. Next: G35 companion touches (closes Arc H).
 ## Phase 45 - Roadmap G35 - BUILT v1.43.0 Oct 19, 2026 - Arc H complete
 Companion touches shipped. Next: Arc I - G36 language and access pass.
 
+## Phase 46 - Roadmap G36 - BUILT v1.44.0 Oct 19, 2026
+Language/access pass shipped. TalkBack proof pending. Next: G37 registry.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

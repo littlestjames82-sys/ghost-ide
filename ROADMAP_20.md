@@ -289,7 +289,7 @@ another app in two taps.
 
 ## Arc I — Reach
 
-**G36. Language and access pass.** The UI translated
+**G36. Language and access pass.** 🔶 BUILT Oct 19, 2026 (v1.44.0) — Spanish for the main chrome (dictionary proven 7/7 against the shipped HTML), screen-reader pass (landmarks, live chat, labelled icons), larger-text + one-handed settings; the TalkBack walkthrough is Ryan's device pass. The UI translated
 (Spanish first), full screen-reader pass, larger-text
 and one-handed modes as real settings, not afterthoughts.
 Done when: the whole IDE is usable with TalkBack on and

@@ -83,7 +83,8 @@ const settings = Object.assign(
     shortAnswers: false, fontSize: "14px", infillDelay: 750,
     repoMap: false, testOnSave: false,
     autosave: "off", trimOnSave: false, indent: 2,
-    whitespace: false },
+    whitespace: false, lang: "en", textSize: "normal",
+    oneHand: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
 function saveSettings() {
   localStorage.setItem("ghostide-settings", JSON.stringify(settings));
@@ -435,6 +436,8 @@ async function loadFiles() {
     menu.className = "fileMenuBtn";
     menu.textContent = "⋯";
     menu.title = "Rename or delete";
+    menu.setAttribute("aria-label",
+      "File options for " + f.path);
     menu.onclick = (e) => { e.stopPropagation(); showFileMenu(f, e); };
     row.appendChild(el);
     row.appendChild(menu);
@@ -1870,6 +1873,144 @@ $("setFont").onchange = (e) => {
   document.documentElement.style.setProperty(
     "--ghost-font", settings.fontSize);
 };
+/* ---------------- Roadmap G36: language + access ------ */
+/*@@I18N@@*/
+/* The translatable chrome, keyed by element id. Stateful
+   labels (the completion-ping toggle, plugin counts, the
+   model pill) manage their own text and are not in here.
+   Spanish covers the main surface in this pass; deeper
+   panels join the same table as they are translated. */
+const I18N = {
+  brandTag: { en: "offline AI editor", es: "editor de IA sin conexión" },
+  saveBtn: { en: "Save", es: "Guardar" },
+  startModelBtn: { en: "Start model", es: "Iniciar modelo" },
+  runBtn: { en: "▶ Run", es: "▶ Ejecutar" },
+  splitBtn: { en: "◫ Split", es: "◫ Dividir" },
+  filesHeadTxt: { en: "FILES", es: "ARCHIVOS" },
+  gitHeadTxt: { en: "GIT", es: "GIT" },
+  chatHeadTxt: { en: "GHOST CHAT", es: "CHAT DE GHOST" },
+  toolsTitle: { en: "🧰 Tools", es: "🧰 Herramientas" },
+  findTitle: { en: "Find in project", es: "Buscar en el proyecto" },
+  newFileBtn: { en: "+ New", es: "+ Nuevo" },
+  mentionBtn: { en: "@ File", es: "@ Archivo" },
+  clearChatBtn: { en: "Clear chat", es: "Borrar chat" },
+  findGo: { en: "Find", es: "Buscar" },
+  findSemantic: { en: "🧠 Meaning", es: "🧠 Significado" },
+  findReplace: { en: "Replace all", es: "Reemplazar todo" },
+  findClose: { en: "Close", es: "Cerrar" },
+  settingsClose: { en: "Close", es: "Cerrar" },
+  toolPreview: { en: "Preview", es: "Vista previa" },
+  toolCheck: { en: "Check syntax", es: "Revisar sintaxis" },
+  toolDup: { en: "Duplicate file", es: "Duplicar archivo" },
+  toolSnippets: { en: "Snippets", es: "Fragmentos" },
+  toolFindFile: { en: "Find in file", es: "Buscar en el archivo" },
+  toolFold: { en: "Fold all", es: "Plegar todo" },
+  toolUnfold: { en: "Unfold all", es: "Desplegar todo" },
+  toolDef: { en: "Go to definition", es: "Ir a la definición" },
+  toolRefs: { en: "Find all references", es: "Buscar referencias" },
+  toolExtractFn: { en: "Extract function…", es: "Extraer función…" },
+  toolExtractVar: { en: "Extract variable…", es: "Extraer variable…" },
+  toolInline: { en: "Inline variable", es: "Incrustar variable" },
+  toolRename: { en: "Rename symbol…", es: "Renombrar símbolo…" },
+  toolSort: { en: "Sort lines", es: "Ordenar líneas" },
+  toolDedupe: { en: "Remove duplicate lines", es: "Quitar líneas duplicadas" },
+  toolTrim: { en: "Trim trailing spaces", es: "Quitar espacios finales" },
+  toolCase: { en: "Toggle case (selection)", es: "Cambiar mayúsculas (selección)" },
+  toolRegen: { en: "Regenerate answer", es: "Regenerar respuesta" },
+  toolExportChat: { en: "Export chat as file", es: "Exportar chat como archivo" },
+  toolQuick: { en: "Quick open (Ctrl+K)", es: "Apertura rápida (Ctrl+K)" },
+  toolPalette: { en: "Command palette (Ctrl+Shift+P)", es: "Paleta de comandos (Ctrl+Shift+P)" },
+  toolOutline: { en: "Outline", es: "Esquema" },
+  toolSymbols: { en: "Go to symbol (Ctrl+Shift+O)", es: "Ir al símbolo (Ctrl+Shift+O)" },
+  toolBookmarks: { en: "Bookmarks", es: "Marcadores" },
+  toolGoto: { en: "Go to line", es: "Ir a la línea" },
+  toolTodos: { en: "TODO / FIXME scan", es: "Escanear TODO / FIXME" },
+  toolStats: { en: "Project stats", es: "Estadísticas del proyecto" },
+  toolSlice: { en: "Save slice as file", es: "Guardar recorte como archivo" },
+  toolHistory: { en: "Local history", es: "Historial local" },
+  toolRepoMap: { en: "Repo map", es: "Mapa del repositorio" },
+  toolTests: { en: "Test runner", es: "Ejecutar pruebas" },
+  toolDebug: { en: "Debug this file", es: "Depurar este archivo" },
+  toolFix: { en: "Fix my tests (AI)", es: "Reparar mis pruebas (IA)" },
+  toolTemplates: { en: "New project from template", es: "Nuevo proyecto desde plantilla" },
+  toolPair: { en: "Pair mode", es: "Modo en pareja" },
+  toolBackup: { en: "Encrypted backup", es: "Copia de seguridad cifrada" },
+  toolApi: { en: "API client", es: "Cliente API" },
+  toolDocs: { en: "Export docs site", es: "Exportar sitio de documentación" },
+  toolAssets: { en: "Asset browser", es: "Explorador de recursos" },
+  toolContext: { en: "Context lab", es: "Laboratorio de contexto" },
+  toolRefdocs: { en: "Reference docs", es: "Documentación de referencia" },
+  toolErrorMem: { en: "Error memory", es: "Memoria de errores" },
+  toolMacros: { en: "Macros", es: "Macros" },
+  toolVerify: { en: "Verify pipeline", es: "Verificación completa" },
+  toolBigscreen: { en: "Big-screen mode", es: "Modo pantalla grande" },
+  toolKeys: { en: "Keyboard shortcuts", es: "Atajos de teclado" },
+  toolStateExport: { en: "Export app state", es: "Exportar estado de la app" },
+  toolStateImport: { en: "Import app state", es: "Importar estado de la app" },
+  toolCheckAll: { en: "Check whole project", es: "Revisar todo el proyecto" },
+  toolTerminal: { en: "Terminal", es: "Terminal" },
+  toolRepl: { en: "Python REPL", es: "REPL de Python" },
+  toolZip: { en: "Download workspace (.zip)", es: "Descargar proyecto (.zip)" },
+  toolPluginsManage: { en: "Manage plugins…", es: "Gestionar plugins…" },
+  handRun: { en: "▶ Run", es: "▶ Ejecutar" },
+  handSave: { en: "Save", es: "Guardar" },
+  handSend: { en: "Send", es: "Enviar" },
+};
+const I18N_PH = {
+  chatText: { en: "Ask about your code… (Enter to send, Shift+Enter for newline)", es: "Pregunta sobre tu código… (Enter para enviar, Mayús+Enter para una línea nueva)" },
+  quickInput: { en: "Open file by name… (Enter opens, Esc closes)", es: "Abrir archivo por nombre… (Enter abre, Esc cierra)" },
+  findQuery: { en: "Search for…", es: "Buscar…" },
+  findReplacement: { en: "Replace with… (for Replace all)", es: "Reemplazar con… (para Reemplazar todo)" },
+};
+try { window.__ghostI18n = { I18N, I18N_PH }; } catch (e) {}
+/*@@I18N-END@@*/
+
+function applyLang() {
+  const lang = settings.lang === "es" ? "es" : "en";
+  document.documentElement.lang = lang;
+  for (const id of Object.keys(I18N)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = I18N[id][lang];
+  }
+  for (const id of Object.keys(I18N_PH)) {
+    const el = document.getElementById(id);
+    if (el) el.placeholder = I18N_PH[id][lang];
+  }
+}
+function applyAccess() {
+  document.body.classList.toggle("text-lg",
+    settings.textSize === "large");
+  document.body.classList.toggle("text-xl",
+    settings.textSize === "xl");
+  document.body.classList.toggle("onehand", !!settings.oneHand);
+  $("handBar").classList.toggle("hidden", !settings.oneHand);
+}
+$("setLang").value = settings.lang;
+$("setLang").onchange = (e) => {
+  settings.lang = e.target.value;
+  saveSettings();
+  applyLang();
+};
+$("setTextSize").value = settings.textSize;
+$("setTextSize").onchange = (e) => {
+  settings.textSize = e.target.value;
+  saveSettings();
+  applyAccess();
+};
+$("setOneHand").checked = !!settings.oneHand;
+$("setOneHand").onchange = (e) => {
+  settings.oneHand = e.target.checked;
+  saveSettings();
+  applyAccess();
+};
+$("handRun").onclick = () => $("runBtn").click();
+$("handSave").onclick = () => $("saveBtn").click();
+$("handSend").onclick = () => $("chatSend").click();
+$("handFind").onclick = () => $("findBtn").click();
+$("handTools").onclick = () => $("toolsBtn").click();
+applyLang();
+applyAccess();
+
 $("setDelay").value = settings.infillDelay;
 $("setDelay").onchange = (e) => {
   const n = parseInt(e.target.value, 10);
