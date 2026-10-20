@@ -284,6 +284,9 @@ Companion touches shipped. Next: Arc I - G36 language and access pass.
 ## Phase 46 - Roadmap G36 - BUILT v1.44.0 Oct 19, 2026
 Language/access pass shipped. TalkBack proof pending. Next: G37 registry.
 
+## Phase 47 - Roadmap G37 - BUILT v1.45.0 Oct 19, 2026
+Registry shipped. Next: G38 classroom view.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

@@ -1,0 +1,7 @@
+{
+ "type": "plugin",
+ "id": "json-toolbox",
+ "name": "JSON Toolbox",
+ "version": "1.0.0",
+ "description": "Format, minify and validate JSON in the current file or selection."
+}

@@ -1,0 +1,31 @@
+{
+ "app": "ghostide",
+ "kind": "registry",
+ "shelf": "Ghost Developer Studio",
+ "packs": [
+  {
+   "pack": "json-toolbox.ghostpack.json",
+   "type": "plugin",
+   "id": "json-toolbox",
+   "name": "JSON Toolbox",
+   "version": "1.0.0",
+   "description": "Format, minify and validate JSON in the current file or selection."
+  },
+  {
+   "pack": "python-cli.ghostpack.json",
+   "type": "template",
+   "id": "python-cli",
+   "name": "Python CLI",
+   "version": "1.0.0",
+   "description": "argparse skeleton that runs today"
+  },
+  {
+   "pack": "word-count-pro.ghostpack.json",
+   "type": "plugin",
+   "id": "word-count-pro",
+   "name": "Word Count Pro",
+   "version": "1.0.0",
+   "description": "Word, character and line counts with top words and reading time, for the current file or selection."
+  }
+ ]
+}

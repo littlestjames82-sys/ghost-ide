@@ -295,7 +295,7 @@ and one-handed modes as real settings, not afterthoughts.
 Done when: the whole IDE is usable with TalkBack on and
 the primary flows complete in Spanish.
 
-**G37. Registry.** Templates and plugins (G14/G15) get a
+**G37. Registry.** 🔶 BUILT Oct 19, 2026 (v1.45.0) — signed .ghostpack format (Ed25519, three-implementation cross-proof 10/10), curated studio shelf bundled (2 plugins + 1 template), one-tap install/uninstall; on-phone install is Ryan's tap-through. Templates and plugins (G14/G15) get a
 browse-and-install registry with signed packages and
 one-tap uninstall; Ghost Developer Studio curates the
 first shelf.

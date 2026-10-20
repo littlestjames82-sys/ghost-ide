@@ -1,0 +1,15 @@
+{
+ "app": "ghostide",
+ "kind": "ghostpack",
+ "type": "plugin",
+ "id": "json-toolbox",
+ "name": "JSON Toolbox",
+ "version": "1.0.0",
+ "description": "Format, minify and validate JSON in the current file or selection.",
+ "author": "Ghost Developer Studio",
+ "files": {
+  "plugin.json": "{\"actions\":[{\"id\":\"format\",\"title\":\"JSON: format\"},{\"id\":\"minify\",\"title\":\"JSON: minify\"},{\"id\":\"validate\",\"title\":\"JSON: validate\"}],\"description\":\"Format, minify and validate JSON in the current file or selection.\",\"id\":\"json-toolbox\",\"name\":\"JSON Toolbox\",\"version\":\"1.0.0\"}",
+  "plugin.js": "// JSON Toolbox - a GhostIDE sample plugin.\n// Format, minify and validate the current selection,\n// or the whole open file.\nfunction esc(s) {\n  return String(s).replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\");\n}\n\nasync function target() {\n  var sel = await ghost.editor.selection();\n  var cur = await ghost.editor.current();\n  if (!cur) {\n    await ghost.ui.notify(\"Open a JSON file first.\");\n    return null;\n  }\n  var usingSel = !!(sel && sel.trim());\n  return {\n    cur: cur,\n    usingSel: usingSel,\n    text: usingSel ? sel : cur.content,\n  };\n}\n\nasync function apply(t, newText) {\n  if (t.usingSel) {\n    await ghost.editor.insert(newText);\n  } else {\n    await ghost.files.write(t.cur.path, newText);\n  }\n}\n\nghost.onAction(\"format\", async function () {\n  var t = await target();\n  if (!t) return;\n  try {\n    var v = JSON.parse(t.text);\n    await apply(t, JSON.stringify(v, null, 2));\n    await ghost.ui.notify(\"JSON formatted.\");\n  } catch (e) {\n    await ghost.ui.notify(\"Invalid JSON: \" + e.message);\n  }\n});\n\nghost.onAction(\"minify\", async function () {\n  var t = await target();\n  if (!t) return;\n  try {\n    var v = JSON.parse(t.text);\n    await apply(t, JSON.stringify(v));\n    await ghost.ui.notify(\"JSON minified.\");\n  } catch (e) {\n    await ghost.ui.notify(\"Invalid JSON: \" + e.message);\n  }\n});\n\nghost.onAction(\"validate\", async function () {\n  var t = await target();\n  if (!t) return;\n  try {\n    JSON.parse(t.text);\n    document.body.innerHTML =\n      \"<h3>JSON Toolbox</h3><p>Valid JSON \u2713</p>\"\n      + \"<p class='dim'>\" + esc(t.cur.path) + \"</p>\";\n  } catch (e) {\n    document.body.innerHTML =\n      \"<h3>JSON Toolbox</h3><p>Invalid JSON:</p>\"\n      + \"<pre>\" + esc(e.message) + \"</pre>\"\n      + \"<p class='dim'>\" + esc(t.cur.path) + \"</p>\";\n  }\n  await ghost.ui.show();\n});\n"
+ },
+ "signature": "aff3f977b7f9dd9a940c97c5af915525399a62e3d512a3958be1261ae04efb45d5af94eb9f9320f68b2052d0cc6d265cddb6f30d0fd0edbaf32eb656aa3df109"
+}

@@ -1,0 +1,1 @@
+{"actions":[{"id":"format","title":"JSON: format"},{"id":"minify","title":"JSON: minify"},{"id":"validate","title":"JSON: validate"}],"description":"Format, minify and validate JSON in the current file or selection.","id":"json-toolbox","name":"JSON Toolbox","version":"1.0.0"}

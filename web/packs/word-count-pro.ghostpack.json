@@ -1,0 +1,15 @@
+{
+ "app": "ghostide",
+ "kind": "ghostpack",
+ "type": "plugin",
+ "id": "word-count-pro",
+ "name": "Word Count Pro",
+ "version": "1.0.0",
+ "description": "Word, character and line counts with top words and reading time, for the current file or selection.",
+ "author": "Ghost Developer Studio",
+ "files": {
+  "plugin.json": "{\"actions\":[{\"id\":\"count\",\"title\":\"Word count (pro)\"}],\"description\":\"Word, character and line counts with top words and reading time, for the current file or selection.\",\"id\":\"word-count-pro\",\"name\":\"Word Count Pro\",\"version\":\"1.0.0\"}",
+  "plugin.js": "// Word Count Pro - a GhostIDE sample plugin.\n// Counts the current selection, or the whole open file,\n// and shows a small report in the plugin panel.\nfunction esc(s) {\n  return String(s).replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\");\n}\n\nghost.onAction(\"count\", async function () {\n  var sel = await ghost.editor.selection();\n  var cur = await ghost.editor.current();\n  if (!cur) {\n    await ghost.ui.notify(\"Open a file first.\");\n    return;\n  }\n  var usingSel = !!(sel && sel.trim());\n  var text = usingSel ? sel : cur.content;\n  var label = (usingSel ? \"selection in \" : \"\") + cur.path;\n  var words = text.toLowerCase().match(/[a-z0-9']+/g) || [];\n  var freq = {};\n  words.forEach(function (w) { freq[w] = (freq[w] || 0) + 1; });\n  var top = Object.keys(freq)\n    .sort(function (a, b) { return freq[b] - freq[a]; })\n    .slice(0, 5);\n  var lines = text ? text.split(\"\\n\").length : 0;\n  var minutes = Math.max(1, Math.round(words.length / 200));\n  var topRows = top.map(function (w) {\n    return \"<tr><td>\" + esc(w) + \"</td><td>\" + freq[w]\n      + \"</td></tr>\";\n  }).join(\"\");\n  document.body.innerHTML =\n    \"<h3>Word Count Pro</h3>\"\n    + \"<p class='dim'>\" + esc(label) + \"</p>\"\n    + \"<table>\"\n    + \"<tr><td>Words</td><td><b>\" + words.length\n    + \"</b></td></tr>\"\n    + \"<tr><td>Characters</td><td><b>\" + text.length\n    + \"</b></td></tr>\"\n    + \"<tr><td>Lines</td><td><b>\" + lines + \"</b></td></tr>\"\n    + \"<tr><td>Reading time</td><td><b>~\" + minutes\n    + \" min</b></td></tr>\"\n    + \"</table>\"\n    + \"<h4>Top words</h4><table>\" + topRows + \"</table>\";\n  await ghost.ui.show();\n});\n"
+ },
+ "signature": "70334af206028629ac95c95564eb460126cc1d36b8251f81ef2dbc160f64336481f32449c82160e5903f0aa0f8c2368d34c4059c0aaa8d6b68a102481eecab04"
+}

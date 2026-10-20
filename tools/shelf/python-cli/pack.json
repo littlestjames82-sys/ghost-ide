@@ -1,0 +1,7 @@
+{"type": "template", "id": "python-cli", "name": "Python CLI",
+ "version": "1.0.0",
+ "description": "argparse skeleton that runs today",
+ "template": {"label": "Python CLI",
+   "blurb": "argparse skeleton that runs today",
+   "main": "main.py",
+   "starter": "This is {{name}}, a new Python CLI. Read main.py, then suggest the first real feature to build and start on it."}}

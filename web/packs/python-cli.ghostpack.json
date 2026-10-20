@@ -1,0 +1,21 @@
+{
+ "app": "ghostide",
+ "kind": "ghostpack",
+ "type": "template",
+ "id": "python-cli",
+ "name": "Python CLI",
+ "version": "1.0.0",
+ "description": "argparse skeleton that runs today",
+ "author": "Ghost Developer Studio",
+ "files": {
+  "main.py": "#!/usr/bin/env python3\n\"\"\"{{name}} - a command-line tool.\n\nRun: python3 main.py --help\n\"\"\"\nimport argparse\n\n\ndef main():\n    ap = argparse.ArgumentParser(prog=\"{{name}}\")\n    ap.add_argument(\"--shout\", action=\"store_true\",\n                    help=\"uppercase the greeting\")\n    args = ap.parse_args()\n    msg = \"hello from {{name}}\"\n    print(msg.upper() if args.shout else msg)\n\n\nif __name__ == \"__main__\":\n    main()\n",
+  "README.md": "# {{name}}\n\nA new Python CLI. Run it:\n\n    python3 main.py --help\n"
+ },
+ "template": {
+  "label": "Python CLI",
+  "blurb": "argparse skeleton that runs today",
+  "main": "main.py",
+  "starter": "This is {{name}}, a new Python CLI. Read main.py, then suggest the first real feature to build and start on it."
+ },
+ "signature": "231dc3ac6015e5250ba8af04c12ed2094f48c5970c36cfe52fd70678ce30ff3be6e6f9857542fdc1661a935332b54a705724911c6d19247be777bd3e8ddef105"
+}
