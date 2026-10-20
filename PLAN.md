@@ -299,6 +299,9 @@ First-run tour shipped. Next: G40 1.0 hardening (closes ROADMAP_20).
 ## Phase 51 - Mobile polish pass - BUILT v1.49.0 Oct 20, 2026
 Post-roadmap UI polish from a design critique Ryan approved: compact model chip, collapsible phone chat, trimmed phone toolbar, tonal color hierarchy, folded chat options.
 
+## Phase 52 - The unified design - BUILT v1.50.0 Oct 20, 2026
+All three approved concept directions unified: shared rounded-card skin; phone portrait gets the Focus Sheet body (Files drawer, 3-stop chat sheet) plus the Tab Studio bottom view bar.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

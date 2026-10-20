@@ -603,6 +603,7 @@ function closeTab(p) {
 }
 
 async function openFile(path, skipGuard) {
+  if (window.innerWidth <= 900) setDrawer(false);
   if (/\.(db|sqlite3?)$/i.test(path)) { openDbStudio(path); return; }
   if (path === currentFile) return;
   if (path === splitFile) {
@@ -913,30 +914,124 @@ $("startModelBtn").onclick = async () => {
 setInterval(pollHealth, 4000);
 pollHealth();
 
-/* v1.49 polish: chat collapse (phone) + options fold.
-   The collapse defaults ON at phone widths on first run
-   and remembers the user's choice after that. */
-function syncChatToggle() {
-  const min = document.body.classList.contains("chat-min");
-  $("chatToggle").textContent = min ? "▸" : "▾";
-  $("chatToggle").setAttribute("aria-label",
-    min ? "Expand chat" : "Collapse chat");
-}
-$("chatToggle").onclick = () => {
-  const min = document.body.classList.toggle("chat-min");
-  try { localStorage.setItem("ghostide-chat-min",
-    min ? "1" : "0"); } catch (e) {}
-  syncChatToggle();
-};
-try {
-  const chatPref = localStorage.getItem("ghostide-chat-min");
-  if (chatPref === "1" ||
-      (chatPref === null && window.innerWidth <= 900))
-    document.body.classList.add("chat-min");
-} catch (e) {}
-syncChatToggle();
+/* v1.49 polish: chat options fold. */
 $("chatOptsBtn").onclick = () =>
   $("chatOpts").classList.toggle("hidden");
+
+/* v1.50 unified design: on phone widths the chat is a
+   bottom sheet with three stops (min = slim bar, mid,
+   full), Files is a slide-over drawer, and a bottom
+   view bar switches between them. The state lives in
+   body classes; CSS scopes the effects to <=900px, so
+   wide screens simply keep the classic layout. */
+/*@@SHEET@@*/
+const SHEET_STOPS = ["min", "mid", "full"];
+function cycleSheetStop(stop) {
+  const i = SHEET_STOPS.indexOf(stop);
+  return SHEET_STOPS[(i + 1) % SHEET_STOPS.length];
+}
+/* dir > 0 moves toward "full" (a drag up), dir < 0
+   toward "min" (a drag down); clamped at the ends. */
+function nextSheetStop(stop, dir) {
+  const i = SHEET_STOPS.indexOf(stop);
+  const j = Math.min(SHEET_STOPS.length - 1,
+    Math.max(0, i + (dir > 0 ? 1 : -1)));
+  return SHEET_STOPS[j];
+}
+try {
+  window.__ghostSheet = { SHEET_STOPS, cycleSheetStop,
+    nextSheetStop };
+} catch (e) {}
+/*@@SHEET-END@@*/
+
+let drawerMode = "files";
+function currentSheetStop() {
+  if (document.body.classList.contains("chat-min"))
+    return "min";
+  if (document.body.classList.contains("sheet-full"))
+    return "full";
+  return "mid";
+}
+function setSheet(stop) {
+  document.body.classList.toggle("chat-min",
+    stop === "min");
+  document.body.classList.toggle("sheet-full",
+    stop === "full");
+  try { localStorage.setItem("ghostide-sheet", stop); }
+  catch (e) {}
+  syncChatToggle();
+  syncViewBar();
+}
+function syncChatToggle() {
+  const stop = currentSheetStop();
+  $("chatToggle").textContent = stop === "min" ? "▸" : "▾";
+  $("chatToggle").setAttribute("aria-label",
+    stop === "min" ? "Expand chat" :
+    stop === "mid" ? "Expand chat fully" :
+      "Collapse chat");
+}
+$("chatToggle").onclick = () =>
+  setSheet(cycleSheetStop(currentSheetStop()));
+let gripY = null;
+$("sheetGrip").addEventListener("pointerdown", (e) => {
+  gripY = e.clientY;
+});
+window.addEventListener("pointerup", (e) => {
+  if (gripY === null) return;
+  const dy = e.clientY - gripY;
+  gripY = null;
+  if (Math.abs(dy) < 36) return;
+  setSheet(nextSheetStop(currentSheetStop(),
+    dy < 0 ? 1 : -1));
+});
+function setDrawer(open, mode) {
+  if (mode) drawerMode = mode;
+  document.body.classList.toggle("drawer-open", open);
+  syncViewBar();
+}
+function syncViewBar() {
+  const drawer =
+    document.body.classList.contains("drawer-open");
+  const stop = currentSheetStop();
+  $("viewFiles").classList.toggle("active",
+    drawer && drawerMode === "files");
+  $("viewGit").classList.toggle("active",
+    drawer && drawerMode === "git");
+  $("viewChat").classList.toggle("active",
+    stop !== "min");
+  $("viewCode").classList.toggle("active",
+    !drawer && stop === "min");
+}
+$("viewFiles").onclick = () => setDrawer(
+  !(document.body.classList.contains("drawer-open") &&
+    drawerMode === "files"), "files");
+$("viewGit").onclick = () => {
+  const wasGit =
+    document.body.classList.contains("drawer-open") &&
+    drawerMode === "git";
+  setDrawer(!wasGit, "git");
+  if (!wasGit) setTimeout(() => {
+    const g = $("gitPanel");
+    if (g) g.scrollIntoView({ block: "start" });
+  }, 90);
+};
+$("viewCode").onclick = () => {
+  setDrawer(false);
+  setSheet("min");
+};
+$("viewChat").onclick = () => setSheet(
+  currentSheetStop() === "min" ? "mid" : "min");
+try {
+  let stop = localStorage.getItem("ghostide-sheet");
+  if (!stop) {
+    const legacy =
+      localStorage.getItem("ghostide-chat-min");
+    stop = legacy === "1" ? "min" :
+      legacy === "0" ? "mid" :
+      (window.innerWidth <= 900 ? "min" : "mid");
+  }
+  setSheet(stop);
+} catch (e) { syncChatToggle(); syncViewBar(); }
 
 /* ---------------- chat ---------------- */
 const history = [];

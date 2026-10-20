@@ -325,4 +325,4 @@ without nagging.
 Done when: a week of Ryan's real use logs no crash and
 the budgets above hold on his phone.
 
-Post-roadmap addition (Oct 20, 2026): v1.49.0 mobile polish pass, built from a design critique Ryan approved (compact model chip, collapsible phone chat, trimmed toolbar, tonal hierarchy, folded chat options).
+Post-roadmap additions (Oct 20, 2026): v1.50.0 the unified design (all three concept directions in one build), and before it v1.49.0 mobile polish pass, built from a design critique Ryan approved (compact model chip, collapsible phone chat, trimmed toolbar, tonal hierarchy, folded chat options).
