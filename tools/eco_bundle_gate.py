@@ -12,10 +12,14 @@ Bundle rules (audit, Oct 20 2026): pure stdlib, filesystem
 only - no network, no subprocess/host binaries, not
 long-running. Tools that shell out to git or execute commands
 join via their own roadmap goals, which wire the phone's git
-path. GhostSlice is bundled as the shared library several
-tools import. Held out: ghostproxy (network by design),
-ghostport (stays a CLI), ghostpacks (one known pre-existing
-failing test, GhostSlice-side).
+path: GhostHandoff joined with E4 (its IdeServer branch puts
+the bundled git on PATH), GhostRecall + GhostAtlas with E5
+(their endpoints bridge git the same way; both tools also
+degrade gracefully when no git is reachable). GhostSlice is
+bundled as the shared library several tools import. Held
+out: ghostproxy (network by design), ghostport (stays a
+CLI), ghostpacks (one known pre-existing failing test,
+GhostSlice-side).
 """
 import json
 import os
@@ -32,7 +36,8 @@ BUNDLED = [
     "ghostfixture", "ghostdocs", "ghostschema", "ghostlogs",
     "ghostdata", "ghostapprove", "ghostledger", "ghostrecipes",
     "ghostenv", "ghostmcpdoctor", "ghostleads", "quoteshot",
-    "ghostreplay", "ghostconsole",
+    "ghostreplay", "ghostconsole", "ghosthandoff",
+    "ghostrecall", "ghostatlas",
 ]
 LIBRARY = ["ghostslice"]
 SCRATCH = HOME / "test-fixtures" / "eco-vendored"

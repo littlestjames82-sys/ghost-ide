@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.54.0"
+APP_VERSION = "1.55.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2380,6 +2380,132 @@ def eco_handoff(ws):
             "pack": ".ghostide/handoff"}
 
 
+def eco_atlas(ws):
+    """Roadmap ECO E5: the Atlas view of the repo map. Runs
+    the GhostAtlas tool itself (`scan`, which prints the
+    atlas data as JSON and writes no artifacts) and returns
+    its JSON untouched, so the map the IDE draws is the
+    tool's map. Atlas is built on GhostSlice data, so the
+    GhostSlice package rides on PYTHONPATH next to it. Exit
+    0 = ok, 1 = runtime failure, 2 = usage error; anything
+    nonzero is "could not run" here."""
+    src = eco_src_dir("ghostatlas")
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    env = dict(os.environ)
+    paths = [str(src)]
+    slice_src = eco_src_dir("ghostslice")
+    if slice_src is not None:
+        paths.append(str(slice_src))
+    env["PYTHONPATH"] = os.pathsep.join(paths)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    r = _eco_tool_run("ghostatlas", ["scan", str(ws)],
+                      ws, env, (0,))
+    if r.returncode != 0:
+        text = (r.stdout or "") + (r.stderr or "")
+        raise ValueError("the tool could not run: "
+                         + text.strip()[:300])
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        raise ValueError("the tool's scan output could not "
+                         "be read")
+    out["ok"] = True
+    return out
+
+
+def eco_recall(ws, task="", budget=6000, want_context=False):
+    """Roadmap ECO E5: chat Recall of the project's memory.
+    Runs the GhostRecall tool itself, never a
+    reimplementation. Three shapes:
+    - task given: `recall --json` - the tool's ranked
+      selection (TF-IDF, pinned rules first), returned
+      untouched: items, order, scores and the tool's own
+      estimated token costs are the CLI's.
+    - no task: `scan --json` - every memory item by
+      estimated token cost, wrapped as {"items": [...]}.
+    - want_context: `bundle --task <task> --fit <budget>`
+      into .ghostide/recall, and PROMPT.md (the tool's own
+      merged export of the selected memory) comes back as
+      the context text, so what rides into chat is exactly
+      what the tool exported under the budget. Token counts
+      are the tool's estimates everywhere.
+    The bundle run also appends the tool's own history
+    ledger line inside the project (.ghostrecall-history
+    .jsonl) - that is the tool's standing behavior, on the
+    CLI exactly as here."""
+    src = eco_src_dir("ghostrecall")
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    task = (task or "").strip()
+    try:
+        budget = max(200, min(int(budget or 6000), 50000))
+    except (TypeError, ValueError):
+        budget = 6000
+    env = _eco_tool_env(src)
+    if want_context:
+        out_dir = ws / ".ghostide" / "recall"
+        out_dir.parent.mkdir(parents=True, exist_ok=True)
+        r = _eco_tool_run("ghostrecall",
+                          ["bundle", str(ws), "--task", task,
+                           "--fit", str(budget), "-o",
+                           str(out_dir)],
+                          ws, env, (0,))
+        if r.returncode != 0:
+            text = (r.stdout or "") + (r.stderr or "")
+            raise ValueError("the tool could not run: "
+                             + text.strip()[:300])
+        prompt = out_dir / "PROMPT.md"
+        if not prompt.is_file():
+            raise ValueError("the bundle was built but its "
+                             "PROMPT.md could not be read")
+        totals = None
+        mf = out_dir / "manifest.json"
+        if mf.is_file():
+            try:
+                totals = json.loads(
+                    mf.read_text(errors="replace")).get("totals")
+            except ValueError:
+                totals = None
+        return {"ok": True, "mode": "context",
+                "context": prompt.read_text(errors="replace"),
+                "totals": totals, "bundle": ".ghostide/recall"}
+    if task:
+        r = _eco_tool_run("ghostrecall",
+                          ["recall", str(ws), "--task", task,
+                           "--json"],
+                          ws, env, (0,))
+        if r.returncode != 0:
+            text = (r.stdout or "") + (r.stderr or "")
+            raise ValueError("the tool could not run: "
+                             + text.strip()[:300])
+        try:
+            out = json.loads(r.stdout)
+        except ValueError:
+            raise ValueError("the tool's recall output could "
+                             "not be read")
+        out["ok"] = True
+        out["mode"] = "recall"
+        out["task"] = task
+        return out
+    r = _eco_tool_run("ghostrecall",
+                      ["scan", str(ws), "--json"], ws, env, (0,))
+    if r.returncode != 0:
+        text = (r.stdout or "") + (r.stderr or "")
+        raise ValueError("the tool could not run: "
+                         + text.strip()[:300])
+    try:
+        items = json.loads(r.stdout)
+    except ValueError:
+        raise ValueError("the tool's scan output could not "
+                         "be read")
+    return {"ok": True, "mode": "scan", "items": items}
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -3143,6 +3269,27 @@ class Handler(SimpleHTTPRequestHandler):
                 self.read_json()
                 try:
                     return self.send_json(eco_handoff(WORKSPACE))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/atlas":
+                # Roadmap ECO E5: GhostAtlas repo-map view
+                # (see eco_atlas).
+                self.read_json()
+                try:
+                    return self.send_json(eco_atlas(WORKSPACE))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/recall":
+                # Roadmap ECO E5: GhostRecall chat action
+                # (see eco_recall).
+                data = self.read_json()
+                try:
+                    out = eco_recall(
+                        WORKSPACE,
+                        str(data.get("task") or ""),
+                        data.get("budget"),
+                        bool(data.get("context")))
+                    return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/classroom/start":

@@ -91,7 +91,16 @@ Done when: a primer bundle made in the IDE passes
 the real ghostslice check and opens a new chat as
 its first context.
 
-**E5. GhostRecall + GhostAtlas.**
+**E5. GhostRecall + GhostAtlas.** BUILT v1.55.0
+(POST /api/eco/atlas + /api/eco/recall run the
+tools themselves; E5 harness 21/21 incl. atlas
+JSON deep-equal vs the CLI's scan and recall/scan
+deep-equal vs the CLI's --json on a fixture git
+project; the bundle gate grows to 25 packages,
+2,642 tests green - recall 68, atlas 47, and
+handoff 58, whose package the E4 build had left
+out of eco.zip; phone bundled, device proof
+Ryan's).
 Repo map gains the Atlas view; chat context gains
 Recall of prior slices and sessions for this
 project, token-budgeted like everything else.

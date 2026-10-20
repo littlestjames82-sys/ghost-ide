@@ -153,6 +153,27 @@
    "src_bytes": 89232,
    "tests_passed": 103,
    "tests_failed": 0
+  },
+  "ghosthandoff": {
+   "version": "0.1.0",
+   "files": 8,
+   "src_bytes": 72199,
+   "tests_passed": 58,
+   "tests_failed": 0
+  },
+  "ghostrecall": {
+   "version": "0.1.0",
+   "files": 15,
+   "src_bytes": 75903,
+   "tests_passed": 68,
+   "tests_failed": 0
+  },
+  "ghostatlas": {
+   "version": "0.1.0",
+   "files": 9,
+   "src_bytes": 89268,
+   "tests_passed": 47,
+   "tests_failed": 0
   }
  },
  "bundled": [
@@ -176,7 +197,10 @@
   "ghostleads",
   "quoteshot",
   "ghostreplay",
-  "ghostconsole"
+  "ghostconsole",
+  "ghosthandoff",
+  "ghostrecall",
+  "ghostatlas"
  ],
  "library": [
   "ghostslice"

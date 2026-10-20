@@ -1043,6 +1043,15 @@ const history = [];
    a reload starts unprimed, like a fresh session. */
 let primerContext = null;
 
+/* Roadmap ECO E5: recalled project memory - the
+   GhostRecall bundle export (PROMPT.md) for a task, attached
+   from the Recall action's results. Rides in the system
+   message behind the primer until the chat is cleared or
+   another recall replaces it. Session-scoped, like the
+   primer. */
+let recallContext = null;
+let recallTaskLabel = "";
+
 /* Session continuity (Phase 3.4): chat history is saved per project
    (keyed by workspace path; the phone's scope is "on-device") and
    restored when you come back to that project. */
@@ -1185,6 +1194,17 @@ async function sendChat() {
     sysContent += "\n\nProject primer (GhostPrimer starter " +
       "bundle for this project, built in this IDE and " +
       "verified by the tool's own check):\n" + primerContext;
+  }
+
+  /* Roadmap ECO E5: recalled project memory rides behind
+     the primer (see the Recall action). */
+  if (recallContext) {
+    sysContent += "\n\nProject memory (GhostRecall selection" +
+      (recallTaskLabel
+        ? " for the task \"" + recallTaskLabel + "\"" : "") +
+      ", exported by the tool itself under the context " +
+      "budget; token counts in it are the tool's " +
+      "estimates):\n" + recallContext;
   }
 
   /* @file mentions + selection attach (Phase 9, Cursor-style):
@@ -2056,6 +2076,8 @@ $("clearChatBtn").onclick = () => {
   if (!confirm("Clear this project's chat history?")) return;
   history.length = 0;
   primerContext = null;
+  recallContext = null;
+  recallTaskLabel = "";
   saveHistory();
   $("chatLog").innerHTML = "";
   addMsg("GHOST", GREETING);
@@ -2142,6 +2164,214 @@ $("handoffBtn").onclick = async () => {
     renderRich(addMsg("GHOST", ""), md);
   } catch (e) {
     addMsg("SYSTEM", "Handoff failed to reach the server.");
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+/*@@E5@@*/
+/* Roadmap ECO E5: the pure state steps behind the Atlas
+   view and the Recall chat action, kept free of DOM access
+   so the headless harness can drive them. An atlas response
+   is usable when it carries the tool's files array; the
+   total is the sum of the tool's own per-file token
+   estimates. A recall response is usable in "recall" mode
+   (the tool's ranked selection) or "scan" mode (every item
+   by estimated cost); both normalize to one row shape
+   carrying the tool's provenance and estimated costs. */
+function atlasState(resp) {
+  if (!resp || resp.error || !Array.isArray(resp.files))
+    return null;
+  let totalTokens = 0;
+  for (const f of resp.files) totalTokens += f.tokens || 0;
+  return {
+    title: resp.title || "",
+    files: resp.files,
+    totalTokens: totalTokens,
+    packages: Array.isArray(resp.packages) ? resp.packages : [],
+    dead: Array.isArray(resp.dead_candidates)
+      ? resp.dead_candidates : [],
+    git: resp.git || null,
+  };
+}
+function recallRows(resp) {
+  if (!resp || resp.error) return null;
+  if (resp.mode === "recall") {
+    const rows = (resp.selected || []).map((e) => {
+      const p = e.provenance || {};
+      return {
+        id: e.id, title: e.title,
+        tokens: e.tokens_estimate || 0,
+        score: typeof e.score === "number" ? e.score : null,
+        pinned: !!e.pinned,
+        path: p.path || "", line: p.line || null,
+        date: p.date || null, commit: p.commit || null,
+        sourceType: "", status: "", blocked: false,
+      };
+    });
+    return {
+      mode: "recall", task: resp.task || "", rows: rows,
+      notSelected: resp.not_selected || [],
+      conflicts: resp.conflicts || [],
+    };
+  }
+  if (resp.mode === "scan") {
+    const rows = (resp.items || []).map((e) => ({
+      id: e.id, title: e.title,
+      tokens: e.tokens_estimate || 0,
+      score: null, pinned: false,
+      path: e.path || "", line: e.line || null,
+      date: e.date || null, commit: null,
+      sourceType: e.source_type || "",
+      status: e.status || "", blocked: !!e.blocked,
+    }));
+    return { mode: "scan", task: "", rows: rows,
+             notSelected: [], conflicts: [] };
+  }
+  return null;
+}
+/* A context response is usable exactly when it carries the
+   bundle's merged PROMPT.md text. */
+function recallContextState(resp) {
+  if (!resp || resp.error || !resp.context) return null;
+  return { context: resp.context, totals: resp.totals || null };
+}
+/*@@E5-END@@*/
+
+/* ---------------- Roadmap ECO E5: recall action --------
+   Runs the GhostRecall tool itself on the server; this
+   side renders its ranked output and, on request, carries
+   the tool's own bundle export as chat context (the same
+   system-message carriage as the E4 primer). */
+async function addRecallToContext(task) {
+  try {
+    const d = await postJson("/api/eco/recall", {
+      task: task || "",
+      budget: BEHAVIOR.context.sliceBudget, context: true });
+    const st = recallContextState(d);
+    if (!st) {
+      addMsg("SYSTEM", "Recall could not build its bundle: " +
+        (d.error || "the tool could not run."));
+      return;
+    }
+    recallContext = st.context;
+    recallTaskLabel = task || "";
+    const t = st.totals || {};
+    $("ctxMeter").textContent = "context: recall memory · " +
+      (t.memory_items != null
+        ? t.memory_items + " items · " : "") +
+      "~" + (t.prompt_tokens_estimate != null
+        ? t.prompt_tokens_estimate : "?") +
+      " est tok (GhostRecall estimates)";
+    addMsg("SYSTEM", "📚 Recalled memory is attached to " +
+      "this chat's context" +
+      (task ? " for: " + task : "") +
+      ". The bundle is saved in the project at " +
+      ".ghostide/recall/; clear the chat to drop it.");
+  } catch (e) {
+    addMsg("SYSTEM", "Recall failed to reach the server.");
+  }
+}
+function renderRecallResults(st) {
+  const body = addMsg("GHOST", "");
+  const head = document.createElement("div");
+  head.textContent = st.mode === "recall"
+    ? "📚 GhostRecall ranked this project's memory for: "
+      + st.task
+    : "📚 GhostRecall found this project's memory:";
+  body.appendChild(head);
+  if (!st.rows.length) {
+    const none = document.createElement("div");
+    none.className = "dim";
+    none.textContent = "No memory items were selected. " +
+      "Recall reads DECISIONS.md, notes, docs, changelogs " +
+      "and git history inside the project.";
+    body.appendChild(none);
+  }
+  for (const r of st.rows) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    const main = document.createElement("span");
+    main.textContent = (r.pinned ? "📌 " : "") + r.title;
+    row.appendChild(main);
+    const meta = document.createElement("span");
+    meta.className = "dim";
+    let prov = r.commit
+      ? "git " + String(r.commit).slice(0, 10)
+      : r.path + (r.line ? ":" + r.line : "");
+    meta.textContent = " · ~" + r.tokens + " est tok · " +
+      prov +
+      (r.date ? " · " + r.date : "") +
+      (r.score != null
+        ? " · score " + r.score.toFixed(3) : "") +
+      (r.sourceType ? " · " + r.sourceType : "") +
+      (r.status && r.status !== "active"
+        ? " · " + r.status : "") +
+      (r.blocked ? " · blocked (secret findings)" : "");
+    row.appendChild(meta);
+    if (r.path && !r.commit) {
+      row.onclick = () => {
+        openFile(r.path).then(() => {
+          if (r.line) jumpToLine(r.line);
+        }).catch(() => {});
+      };
+    }
+    body.appendChild(row);
+  }
+  for (const c of st.conflicts) {
+    const row = document.createElement("div");
+    row.className = "dim";
+    row.textContent = "⚠ conflict (" + (c.type || "") +
+      "): " + (c.note || "");
+    body.appendChild(row);
+  }
+  if (st.notSelected.length) {
+    const ns = document.createElement("div");
+    ns.className = "dim";
+    const reasons = [...new Set(
+      st.notSelected.map((e) => e.reason))].join(", ");
+    ns.textContent = "Not selected: " +
+      st.notSelected.length + " item(s) (" + reasons + ").";
+    body.appendChild(ns);
+  }
+  if (st.rows.length) {
+    const add = document.createElement("button");
+    add.className = "ghostbtn";
+    add.textContent =
+      "➕ Add the selected memory to chat context";
+    add.onclick = async () => {
+      add.disabled = true;
+      add.textContent = "Adding…";
+      await addRecallToContext(st.task);
+      add.textContent =
+        "✓ Added - it rides with your next messages";
+    };
+    body.appendChild(add);
+  }
+  const note = document.createElement("div");
+  note.className = "dim";
+  note.textContent = "Token counts are GhostRecall " +
+    "estimates, not exact tokenizer counts.";
+  body.appendChild(note);
+}
+$("recallBtn").onclick = async () => {
+  const btn = $("recallBtn");
+  btn.disabled = true;
+  const task = $("chatText").value.trim();
+  addMsg("SYSTEM", task
+    ? "📚 Recalling project memory for: " + task + "…"
+    : "📚 Listing this project's memory with GhostRecall…");
+  try {
+    const d = await postJson("/api/eco/recall", { task: task });
+    const st = recallRows(d);
+    if (!st) {
+      addMsg("SYSTEM", "Recall failed: " +
+        (d.error || "the tool could not run."));
+      return;
+    }
+    renderRecallResults(st);
+  } catch (e) {
+    addMsg("SYSTEM", "Recall failed to reach the server.");
   } finally {
     btn.disabled = false;
   }
@@ -2258,6 +2488,7 @@ const I18N = {
   clearChatBtn: { en: "Clear chat", es: "Borrar chat" },
   primeBtn: { en: "🧭 Prime this project", es: "🧭 Preparar este proyecto" },
   handoffBtn: { en: "📦 Draft handoff", es: "📦 Borrador de traspaso" },
+  recallBtn: { en: "📚 Recall memory", es: "📚 Recuperar memoria" },
   findGo: { en: "Find", es: "Buscar" },
   findSemantic: { en: "🧠 Meaning", es: "🧠 Significado" },
   findIndexed: { en: "🔎 Indexed", es: "🔎 Indexado" },
@@ -4186,38 +4417,152 @@ async function getRepoMap() {
   return repoMapCache.text;
 }
 
+/* Roadmap ECO E5: the Atlas half of the repo map panel -
+   renders the GhostAtlas tool's own scan data. Every number
+   on it is the tool's (token counts are its estimates). */
+function renderAtlas(box, st) {
+  box.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "dim";
+  head.textContent = "🗺 " + (st.title || "project") + " - " +
+    st.files.length + " files · ~" + st.totalTokens +
+    " est tokens (GhostAtlas, built on GhostSlice data; " +
+    "counts are estimates)";
+  box.appendChild(head);
+  if (st.git) {
+    const g = document.createElement("div");
+    g.className = "dim";
+    g.textContent = st.git.available
+      ? "git: " + st.git.total_commits + " commits (" +
+        (st.git.window || "recent window") + ")"
+      : "git: not available for this project";
+    box.appendChild(g);
+  }
+  for (const p of st.packages) {
+    const row = document.createElement("div");
+    row.className = "todorow";
+    const label = document.createElement("span");
+    label.textContent = "📦 " + (p.label || p.path || "(root)") +
+      " - " + p.files + " files";
+    row.appendChild(label);
+    const chip = document.createElement("span");
+    chip.className = "symkind";
+    chip.textContent = "~" + (p.tokens || 0) + " tok" +
+      (p.share != null ? " · " + p.share + "%" : "");
+    row.appendChild(chip);
+    box.appendChild(row);
+  }
+  for (const f of st.files) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    const main = document.createElement("span");
+    main.textContent = f.path;
+    row.appendChild(main);
+    const meta = document.createElement("span");
+    meta.className = "dim";
+    meta.textContent = " · ~" + (f.tokens || 0) + " tok" +
+      (f.symbols && f.symbols.length
+        ? " · " + f.symbols.length + " symbols" : "") +
+      (f.importer_count
+        ? " · " + f.importer_count + " importers" : "");
+    row.appendChild(meta);
+    row.onclick = () => { openFile(f.path); };
+    box.appendChild(row);
+  }
+  if (st.dead.length) {
+    const dh = document.createElement("div");
+    dh.className = "dim";
+    dh.textContent = "Dead-code candidates (the tool's list):";
+    box.appendChild(dh);
+    for (const d of st.dead) {
+      const row = document.createElement("div");
+      row.className = "findRow";
+      row.textContent = d.path + " - " + (d.reason || "");
+      row.onclick = () => { openFile(d.path); };
+      box.appendChild(row);
+    }
+  }
+}
+
 $("toolRepoMap").onclick = async () => {
   hideTools();
   $("todoTitle").textContent = "Repo map";
   const box = $("todoResults");
-  box.innerHTML = '<div class="dim">Building the map…</div>';
+  box.innerHTML = "";
   $("todoPanel").classList.remove("hidden");
-  try {
-    const mapText = await getRepoMap();
-    box.innerHTML = "";
-    const arm = document.createElement("div");
-    arm.className = "findRow";
-    arm.textContent = settings.repoMap
-      ? "✓ The map rides along with every chat message "
-        + "(Settings → repo map is on)"
-      : "➕ Attach this map to my next chat message";
-    arm.onclick = () => {
-      repoMapOnce = true;
-      arm.textContent = "✓ Armed - it will ride along with "
-        + "your next chat message";
-    };
-    box.appendChild(arm);
-    const pre = document.createElement("div");
-    pre.className = "mapText";
-    pre.textContent = mapText || "(no symbols yet)";
-    box.appendChild(pre);
-  } catch (e) {
-    box.innerHTML = "";
-    const el = document.createElement("div");
-    el.className = "dim";
-    el.textContent = "Repo map unavailable: " + e.message;
-    box.appendChild(el);
-  }
+  /* Roadmap ECO E5: two views of the project - the native
+     ranked map, and the Atlas view fed by the GhostAtlas
+     tool itself (/api/eco/atlas). */
+  const tabs = document.createElement("div");
+  tabs.className = "findRow";
+  const tabMap = document.createElement("button");
+  tabMap.className = "ghostbtn";
+  tabMap.textContent = "Repo map";
+  const tabAtlas = document.createElement("button");
+  tabAtlas.className = "ghostbtn";
+  tabAtlas.textContent = "🗺 Atlas";
+  tabs.appendChild(tabMap);
+  tabs.appendChild(tabAtlas);
+  box.appendChild(tabs);
+  const viewBox = document.createElement("div");
+  box.appendChild(viewBox);
+  let atlasCache = null;
+  const showMap = async () => {
+    tabMap.disabled = true;
+    tabAtlas.disabled = false;
+    viewBox.innerHTML =
+      '<div class="dim">Building the map…</div>';
+    try {
+      const mapText = await getRepoMap();
+      viewBox.innerHTML = "";
+      const arm = document.createElement("div");
+      arm.className = "findRow";
+      arm.textContent = settings.repoMap
+        ? "✓ The map rides along with every chat message "
+          + "(Settings → repo map is on)"
+        : "➕ Attach this map to my next chat message";
+      arm.onclick = () => {
+        repoMapOnce = true;
+        arm.textContent = "✓ Armed - it will ride along with "
+          + "your next chat message";
+      };
+      viewBox.appendChild(arm);
+      const pre = document.createElement("div");
+      pre.className = "mapText";
+      pre.textContent = mapText || "(no symbols yet)";
+      viewBox.appendChild(pre);
+    } catch (e) {
+      viewBox.innerHTML = "";
+      const el = document.createElement("div");
+      el.className = "dim";
+      el.textContent = "Repo map unavailable: " + e.message;
+      viewBox.appendChild(el);
+    }
+  };
+  const showAtlas = async () => {
+    tabAtlas.disabled = true;
+    tabMap.disabled = false;
+    viewBox.innerHTML = '<div class="dim">Building the ' +
+      'atlas with GhostAtlas…</div>';
+    try {
+      if (!atlasCache) {
+        const d = await postJson("/api/eco/atlas", {});
+        atlasCache = atlasState(d);
+        if (!atlasCache)
+          throw new Error(d.error || "the tool could not run");
+      }
+      renderAtlas(viewBox, atlasCache);
+    } catch (e) {
+      viewBox.innerHTML = "";
+      const el = document.createElement("div");
+      el.className = "dim";
+      el.textContent = "Atlas unavailable: " + e.message;
+      viewBox.appendChild(el);
+    }
+  };
+  tabMap.onclick = showMap;
+  tabAtlas.onclick = showAtlas;
+  showMap();
 };
 
 /* ---------------- Roadmap G3: refactoring UI ---------------- */
