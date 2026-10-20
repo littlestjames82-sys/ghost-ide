@@ -272,6 +272,9 @@ Macros and multi-cursor pack built. Next: G32 verify pipeline.
 ## Phase 42 - Roadmap G32 - SHIPPED v1.40.0 Oct 19, 2026
 Verify pipeline built and proven. Next: G33 big-screen mode.
 
+## Phase 43 - Roadmap G33 - BUILT v1.41.0 Oct 19, 2026
+Big-screen mode shipped (frontend). Device proof pending. Next: G34 app-state carry.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

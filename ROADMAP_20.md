@@ -266,7 +266,7 @@ report file (GhostConsole, inside the IDE).
 Done when: the pipeline's report on a fixture project
 matches what the individual tools say, run separately.
 
-**G33. Big-screen mode.** Tablet and desktop-class
+**G33. Big-screen mode.** 🔶 BUILT Oct 19, 2026 (v1.41.0) — drag-resize panes with persisted widths, big-screen class auto on wide screens, shortcut map + keyboard chip; tablet/fold/DeX proof is Ryan-side. Tablet and desktop-class
 layout: three panes, drag-resize, second-screen/DeX
 friendly, hardware-keyboard shortcut map on screen
 when a keyboard pairs.
