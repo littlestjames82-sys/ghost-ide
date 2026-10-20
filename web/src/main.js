@@ -872,6 +872,21 @@ $("setModelDlBtn").onclick = async () => {
 };
 
 /* ---------------- model status ---------------- */
+/*@@CHIP@@*/
+/* v1.49 polish: the header chip shows the short label
+   ("1.5B · on-device") instead of the full model name;
+   the full name still lives in Settings. */
+function shortModelLabel(modelName) {
+  const name = String(modelName || "");
+  const m = name.match(/(\d+(?:\.\d+)?)\s*B\b/i);
+  if (m) return m[1] + "B · on-device";
+  if (!name) return "model";
+  return name.length > 20 ? name.slice(0, 19) + "…" : name;
+}
+try { window.__ghostChip = { shortModelLabel }; }
+catch (e) {}
+/*@@CHIP-END@@*/
+
 async function pollHealth() {
   try {
     const r = await fetch("/api/health");
@@ -882,19 +897,46 @@ async function pollHealth() {
     $("modelInfo").textContent =
       "Model: " + d.modelName + " · status: " + d.model;
     const pill = $("modelPill");
-    pill.textContent = "model: " + (modelUp ? "up · " + d.modelName : "down");
+    pill.textContent = modelUp
+      ? shortModelLabel(d.modelName) : "model: down";
+    pill.title = d.modelName || "";
     pill.className = "pill " + (modelUp ? "up" : "down");
     $("startModelBtn").classList.toggle("hidden", modelUp);
   } catch (e) { /* backend hiccup; next poll retries */ }
 }
 $("startModelBtn").onclick = async () => {
-  $("modelPill").textContent = "model: starting… (about a minute)";
+  $("modelPill").textContent = "model: starting…";
   $("modelPill").className = "pill loading";
   $("startModelBtn").classList.add("hidden");
   await fetch("/api/model/start", { method: "POST" });
 };
 setInterval(pollHealth, 4000);
 pollHealth();
+
+/* v1.49 polish: chat collapse (phone) + options fold.
+   The collapse defaults ON at phone widths on first run
+   and remembers the user's choice after that. */
+function syncChatToggle() {
+  const min = document.body.classList.contains("chat-min");
+  $("chatToggle").textContent = min ? "▸" : "▾";
+  $("chatToggle").setAttribute("aria-label",
+    min ? "Expand chat" : "Collapse chat");
+}
+$("chatToggle").onclick = () => {
+  const min = document.body.classList.toggle("chat-min");
+  try { localStorage.setItem("ghostide-chat-min",
+    min ? "1" : "0"); } catch (e) {}
+  syncChatToggle();
+};
+try {
+  const chatPref = localStorage.getItem("ghostide-chat-min");
+  if (chatPref === "1" ||
+      (chatPref === null && window.innerWidth <= 900))
+    document.body.classList.add("chat-min");
+} catch (e) {}
+syncChatToggle();
+$("chatOptsBtn").onclick = () =>
+  $("chatOpts").classList.toggle("hidden");
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -903,10 +945,9 @@ const history = [];
    (keyed by workspace path; the phone's scope is "on-device") and
    restored when you come back to that project. */
 const GREETING =
-  "Hey - I'm your offline coding partner, running on the local " +
-  "Qwen2.5-Coder. Open a file, ask me anything about it, and pause " +
-  "while typing to get inline suggestions (tap the suggestion or " +
-  "press Tab to accept). Nothing leaves this device.";
+  "Hey - I'm Ghost, your offline coding partner. Open a " +
+  "file and ask about it, or pause while typing for " +
+  "inline suggestions. Nothing leaves this device.";
 let historyScope = null;
 function historyKey() { return "ghostide-history:" + historyScope; }
 function saveHistory() {
@@ -1972,6 +2013,7 @@ const I18N = {
   toolClassroom: { en: "Classroom view", es: "Vista de aula" },
   toolTour: { en: "Take the tour", es: "Hacer el recorrido" },
   toolChangelog: { en: "What's new", es: "Novedades" },
+  chatOptsBtn: { en: "⚙ Chat options", es: "⚙ Opciones del chat" },
   handRun: { en: "▶ Run", es: "▶ Ejecutar" },
   handSave: { en: "Save", es: "Guardar" },
   handSend: { en: "Send", es: "Enviar" },

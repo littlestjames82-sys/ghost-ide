@@ -296,6 +296,9 @@ First-run tour shipped. Next: G40 1.0 hardening (closes ROADMAP_20).
 ## Phase 50 - Roadmap G40 - BUILT v1.48.0 Oct 19, 2026
 1.0 hardening shipped. ROADMAP_20 COMPLETE: all forty goals built, each with its proof; device-side passes and Ryan-gated releases remain as listed.
 
+## Phase 51 - Mobile polish pass - BUILT v1.49.0 Oct 20, 2026
+Post-roadmap UI polish from a design critique Ryan approved: compact model chip, collapsible phone chat, trimmed phone toolbar, tonal color hierarchy, folded chat options.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

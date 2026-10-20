@@ -324,3 +324,5 @@ in-app changelog, and an update check that informs
 without nagging.
 Done when: a week of Ryan's real use logs no crash and
 the budgets above hold on his phone.
+
+Post-roadmap addition (Oct 20, 2026): v1.49.0 mobile polish pass, built from a design critique Ryan approved (compact model chip, collapsible phone chat, trimmed toolbar, tonal hierarchy, folded chat options).

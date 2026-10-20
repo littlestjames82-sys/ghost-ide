@@ -15,7 +15,7 @@ OUT = os.path.join(ROOT, "web", "changelog.json")
 
 HEADER = re.compile(
     r"^## v(\d+\.\d+\.\d+) \(versionCode \d+\) - "
-    r"([A-Z][a-z]{2} \d+, \d{4}) - (Roadmap G\d+)\s*$",
+    r"([A-Z][a-z]{2} \d+, \d{4}) - (.+?)\s*$",
     re.M)
 
 
