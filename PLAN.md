@@ -266,6 +266,9 @@ Semantic code search built and proven. Next: G30 error memory (closes Arc G).
 ## Phase 40 - Roadmap G30 - SHIPPED v1.38.0 Oct 19, 2026
 Error memory built; Arc G complete. Next: Arc H, G31 macros and multi-cursor pack.
 
+## Phase 41 - Roadmap G31 - SHIPPED v1.39.0 Oct 19, 2026
+Macros and multi-cursor pack built. Next: G32 verify pipeline.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

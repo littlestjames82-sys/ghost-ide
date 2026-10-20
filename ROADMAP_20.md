@@ -253,7 +253,7 @@ old fix before any new guessing.
 
 ## Arc H — Craft
 
-**G31. Macros and multi-cursor pack.** Record a sequence
+**G31. Macros and multi-cursor pack.** ✅ DONE Oct 19, 2026 (v1.39.0) — cleanup macro transforms the fixture folder to goldens, all outputs compile (8/8). Record a sequence
 of edits and replay it on the next ten files; column
 selection and add-cursor shortcuts to match.
 Done when: a recorded cleanup macro runs across a
