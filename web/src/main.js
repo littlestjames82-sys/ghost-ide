@@ -2055,11 +2055,12 @@ async function openEco() {
     const chip = document.createElement("span");
     chip.className = "symkind";
     chip.textContent = t.state === "ready" ? "ready" :
-      t.state === "bundled" ? "on-device" :
+      t.state === "bundled" ? ("on-device" +
+        (t.tests ? " · " + t.tests + " tests" : "")) :
       t.state === "native" ? "built in" :
       t.state === "absent" ? "not found" : t.goal;
     row.appendChild(chip);
-    if (t.state === "ready" || t.state === "bundled") {
+    if (t.runnable) {
       const b = document.createElement("button");
       b.className = "ghostbtn";
       b.textContent = "Run";

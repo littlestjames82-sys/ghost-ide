@@ -313,6 +313,14 @@ All three approved concept directions unified: shared rounded-card skin; phone p
   equals the CLI's own output on the same db (eco-
   harness 13/13).
 
+- Phase 54 (Roadmap ECO E2, v1.52.0): the phone-safe
+  bundle. eco.zip now carries 21 tools + the
+  GhostSlice library (whole package trees incl.
+  in-package data files), each gated by its own
+  suite against the vendored copy: 2,469 tests
+  green, 0 failed (foreground-verified). Panel
+  shows on-device test counts from eco-manifest.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

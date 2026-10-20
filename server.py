@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.51.1"
+APP_VERSION = "1.52.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2185,7 +2185,8 @@ def eco_tools_state():
         else:
             state = "listed"
         out.append({"id": tid, "name": name, "goal": goal,
-                    "blurb": blurb, "state": state})
+                    "blurb": blurb, "state": state,
+                    "runnable": tid in ECO_RUNNABLE})
     return out
 
 

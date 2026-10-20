@@ -53,7 +53,9 @@ workspace, its report rendered in-panel.
 Done when: GhostIndex and GhostDeps run from the
 panel on desktop and phone and their reports render.
 
-**E2. The phone-safe bundle.**
+**E2. The phone-safe bundle.** BUILT v1.52.0
+(22 packages vendored, 2,469 tests green against
+the vendored copies, foreground-verified).
 Vendor the qualifying companions into the APK's
 Python assets with a size audit, each labelled with
 its own verified test count.

@@ -1,0 +1,184 @@
+{
+ "tools": {
+  "ghostslice": {
+   "version": "1.0.6",
+   "files": 37,
+   "src_bytes": 829208,
+   "tests_passed": 948,
+   "tests_failed": 0
+  },
+  "ghostindex": {
+   "version": "0.1.0",
+   "files": 8,
+   "src_bytes": 83371,
+   "tests_passed": 91,
+   "tests_failed": 0
+  },
+  "ghostdeps": {
+   "version": "0.1.0",
+   "files": 8,
+   "src_bytes": 92980,
+   "tests_passed": 51,
+   "tests_failed": 0
+  },
+  "ghostprimer": {
+   "version": "0.1.0",
+   "files": 13,
+   "src_bytes": 107881,
+   "tests_passed": 68,
+   "tests_failed": 0
+  },
+  "ghostlift": {
+   "version": "0.1.0",
+   "files": 9,
+   "src_bytes": 62117,
+   "tests_passed": 72,
+   "tests_failed": 0
+  },
+  "ghostshard": {
+   "version": "0.1.0",
+   "files": 9,
+   "src_bytes": 69475,
+   "tests_passed": 50,
+   "tests_failed": 0
+  },
+  "ghostexposure": {
+   "version": "0.1.0",
+   "files": 9,
+   "src_bytes": 78041,
+   "tests_passed": 74,
+   "tests_failed": 0
+  },
+  "ghostconvert": {
+   "version": "0.1.0",
+   "files": 6,
+   "src_bytes": 43321,
+   "tests_passed": 84,
+   "tests_failed": 0
+  },
+  "ghostfixture": {
+   "version": "0.1.0",
+   "files": 9,
+   "src_bytes": 76619,
+   "tests_passed": 69,
+   "tests_failed": 0
+  },
+  "ghostdocs": {
+   "version": "0.1.0",
+   "files": 12,
+   "src_bytes": 71252,
+   "tests_passed": 51,
+   "tests_failed": 0
+  },
+  "ghostschema": {
+   "version": "0.1.0",
+   "files": 11,
+   "src_bytes": 79851,
+   "tests_passed": 71,
+   "tests_failed": 0
+  },
+  "ghostlogs": {
+   "version": "0.1.0",
+   "files": 8,
+   "src_bytes": 79383,
+   "tests_passed": 59,
+   "tests_failed": 0
+  },
+  "ghostdata": {
+   "version": "0.1.0",
+   "files": 10,
+   "src_bytes": 91927,
+   "tests_passed": 95,
+   "tests_failed": 0
+  },
+  "ghostapprove": {
+   "version": "0.1.0",
+   "files": 5,
+   "src_bytes": 51666,
+   "tests_passed": 62,
+   "tests_failed": 0
+  },
+  "ghostledger": {
+   "version": "0.1.0",
+   "files": 9,
+   "src_bytes": 67364,
+   "tests_passed": 71,
+   "tests_failed": 0
+  },
+  "ghostrecipes": {
+   "version": "0.1.0",
+   "files": 7,
+   "src_bytes": 54976,
+   "tests_passed": 84,
+   "tests_failed": 0
+  },
+  "ghostenv": {
+   "version": "0.1.0",
+   "files": 8,
+   "src_bytes": 50327,
+   "tests_passed": 64,
+   "tests_failed": 0
+  },
+  "ghostmcpdoctor": {
+   "version": "0.1.0",
+   "files": 6,
+   "src_bytes": 45547,
+   "tests_passed": 74,
+   "tests_failed": 0
+  },
+  "ghostleads": {
+   "version": "0.1.0",
+   "files": 7,
+   "src_bytes": 50789,
+   "tests_passed": 68,
+   "tests_failed": 0
+  },
+  "quoteshot": {
+   "version": "0.1.0",
+   "files": 9,
+   "src_bytes": 89933,
+   "tests_passed": 120,
+   "tests_failed": 0
+  },
+  "ghostreplay": {
+   "version": "0.1.0",
+   "files": 12,
+   "src_bytes": 101972,
+   "tests_passed": 40,
+   "tests_failed": 0
+  },
+  "ghostconsole": {
+   "version": "0.1.0",
+   "files": 7,
+   "src_bytes": 89232,
+   "tests_passed": 103,
+   "tests_failed": 0
+  }
+ },
+ "bundled": [
+  "ghostindex",
+  "ghostdeps",
+  "ghostprimer",
+  "ghostlift",
+  "ghostshard",
+  "ghostexposure",
+  "ghostconvert",
+  "ghostfixture",
+  "ghostdocs",
+  "ghostschema",
+  "ghostlogs",
+  "ghostdata",
+  "ghostapprove",
+  "ghostledger",
+  "ghostrecipes",
+  "ghostenv",
+  "ghostmcpdoctor",
+  "ghostleads",
+  "quoteshot",
+  "ghostreplay",
+  "ghostconsole"
+ ],
+ "library": [
+  "ghostslice"
+ ]
+}
