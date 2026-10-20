@@ -65,7 +65,12 @@ panel lists the set as on-device.
 
 ## Arc 2 - Context crew
 
-**E3. GhostIndex search.**
+**E3. GhostIndex search.** BUILT v1.53.0
+(POST /api/eco/search runs the tool itself;
+parity harness 11/11 incl. deep-equal hits vs
+the CLI's --json on the same db; index+search
+0.67s on the fixture; phone bundled, device
+proof Ryan's).
 The search panel gains the real offline FTS5 index:
 whole-workspace search returning token-budgeted,
 sliced excerpts that open at the hit.

@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.52.0"
+APP_VERSION = "1.53.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2233,6 +2233,65 @@ def eco_run(tool_id, ws):
     return "\n".join(parts)[:60000]
 
 
+def eco_search(query, ws, limit=10, max_tokens=2000):
+    """Roadmap ECO E3: indexed search. (Re)builds the workspace
+    FTS5 index with the GhostIndex tool itself, then runs the
+    tool's own search and returns its JSON untouched, so the
+    panel's excerpts are the CLI's excerpts. Exit 1 from the
+    search is a normal "no matches" (its JSON still parses);
+    exit 2 is "could not run"."""
+    src = eco_src_dir("ghostindex")
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    query = (query or "").strip()
+    if not query:
+        raise ValueError("type something to search for")
+    try:
+        limit = max(1, min(int(limit or 10), 50))
+    except (TypeError, ValueError):
+        limit = 10
+    try:
+        max_tokens = max(200, min(int(max_tokens or 2000), 20000))
+    except (TypeError, ValueError):
+        max_tokens = 2000
+    db = ws / ".ghostide" / "ghostindex.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(src)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["GHOSTINDEX_DB"] = str(db)
+
+    def run(args, ok_codes):
+        try:
+            r = subprocess.run(
+                [sys.executable, "-m", "ghostindex"] + args,
+                cwd=str(ws), env=env, capture_output=True,
+                text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise ValueError("the tool ran past 120 seconds and "
+                             "was stopped")
+        if r.returncode not in ok_codes:
+            text = (r.stdout or "") + (r.stderr or "")
+            raise ValueError("the tool could not run: "
+                             + text.strip()[:300])
+        return r
+
+    run(["index", str(ws), "--db", str(db)], (0,))
+    r = run(["search", query, "--db", str(db), "--root", str(ws),
+             "--json", "--limit", str(limit),
+             "--max-tokens", str(max_tokens), "--context", "3"],
+            (0, 1))
+    try:
+        out = json.loads(r.stdout)
+    except ValueError:
+        raise ValueError("the tool's search output could not "
+                         "be read")
+    out["ok"] = True
+    return out
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -2968,6 +3027,18 @@ class Handler(SimpleHTTPRequestHandler):
                                   WORKSPACE)
                     return self.send_json({"ok": True,
                                            "output": out})
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/search":
+                # Roadmap ECO E3: GhostIndex search in the
+                # find panel (see eco_search).
+                data = self.read_json()
+                try:
+                    out = eco_search(str(data.get("query") or ""),
+                                     WORKSPACE,
+                                     data.get("limit"),
+                                     data.get("max_tokens"))
+                    return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/classroom/start":

@@ -1619,6 +1619,58 @@ $("findSemantic").onclick = async () => {
     "terms + related coding concepts. Not a neural embedding.";
   box.appendChild(n);
 };
+/* Roadmap ECO E3: indexed search. The server (re)builds the
+   workspace FTS5 index with the GhostIndex tool itself and
+   returns the tool's own JSON; the excerpts below are the
+   CLI's excerpts, rendered untouched, and open at the hit. */
+$("findIndexed").onclick = async () => {
+  const q = $("findQuery").value;
+  const box = $("findResults");
+  if (!q.trim()) return;
+  box.textContent = "indexing + searching…";
+  const d = await postJson("/api/eco/search", { query: q });
+  if (d.error) { box.textContent = d.error; return; }
+  box.innerHTML = "";
+  if (!d.hits || !d.hits.length) {
+    box.textContent = "No matches in the index.";
+    return;
+  }
+  for (const h of d.hits) {
+    const wins = h.windows || [];
+    const firstLine = (wins.length && wins[0].match_lines &&
+      wins[0].match_lines.length) ? wins[0].match_lines[0] : 1;
+    const head = document.createElement("div");
+    head.className = "findRow";
+    head.textContent = "🔎 " + h.rel + "  (~" +
+      (h.excerpt_tokens_est || 0) + " tok excerpt)";
+    head.onclick = async () => {
+      await openFile(h.rel);
+      jumpToLine(firstLine);
+    };
+    box.appendChild(head);
+    for (const w of wins) {
+      const pre = document.createElement("pre");
+      pre.className = "findExcerpt";
+      const wLines = (w.text || "").split("\n");
+      pre.textContent = wLines.map((t, i) =>
+        (w.start_line + i) + "  " + t).join("\n");
+      const target = (w.match_lines && w.match_lines.length)
+        ? w.match_lines[0] : w.start_line;
+      pre.onclick = async () => {
+        await openFile(h.rel);
+        jumpToLine(target);
+      };
+      box.appendChild(pre);
+    }
+  }
+  const n = document.createElement("div");
+  n.className = "dim";
+  n.textContent = "GhostIndex FTS5: " + d.shown + " of " +
+    d.total_matches + " file(s) shown, excerpts token-budgeted" +
+    (d.capped ? " (capped by " + (d.capped_by || []).join(", ") +
+      ")" : "") + ". Counts are the tool's estimates.";
+  box.appendChild(n);
+};
 $("findReplace").onclick = async () => {
   const q = $("findQuery").value;
   if (!q) return;
@@ -2103,6 +2155,7 @@ const I18N = {
   clearChatBtn: { en: "Clear chat", es: "Borrar chat" },
   findGo: { en: "Find", es: "Buscar" },
   findSemantic: { en: "🧠 Meaning", es: "🧠 Significado" },
+  findIndexed: { en: "🔎 Indexed", es: "🔎 Indexado" },
   findReplace: { en: "Replace all", es: "Reemplazar todo" },
   findClose: { en: "Close", es: "Cerrar" },
   settingsClose: { en: "Close", es: "Cerrar" },
