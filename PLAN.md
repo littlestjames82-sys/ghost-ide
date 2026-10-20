@@ -278,6 +278,9 @@ Big-screen mode shipped (frontend). Device proof pending. Next: G34 app-state ca
 ## Phase 44 - Roadmap G34 - SHIPPED v1.42.0 Oct 19, 2026
 App-state carry built and proven. Next: G35 companion touches (closes Arc H).
 
+## Phase 45 - Roadmap G35 - BUILT v1.43.0 Oct 19, 2026 - Arc H complete
+Companion touches shipped. Next: Arc I - G36 language and access pass.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

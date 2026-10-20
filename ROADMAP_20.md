@@ -280,7 +280,7 @@ phone becomes your phone in a minute.
 Done when: a wiped install restores its snippets and
 settings from the export, verified field by field.
 
-**G35. Companion touches.** Long AI jobs ping you when
+**G35. Companion touches.** 🔶 BUILT Oct 19, 2026 (v1.43.0) — completion pings for 20s+ AI jobs (native bridge / web notification / title flash; rule proven 6/6), share-sheet capture into captures.md; two-tap device proof is Ryan's. Arc H complete. Long AI jobs ping you when
 they finish (notification, not a dead screen), and the
 Android share sheet can send text or a link straight
 into a workspace file ("capture to project").

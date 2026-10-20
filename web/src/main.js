@@ -1091,6 +1091,7 @@ async function sendChat() {
   saveHistory();
   const messages = [{ role: "system", content: sysContent }, ...history];
 
+  const chatT0 = Date.now();
   const body = addMsg("GHOST", "");
   let full = "";
   chatAbort = new AbortController();
@@ -1143,6 +1144,8 @@ async function sendChat() {
   renderRich(body, full);
   history.push({ role: "assistant", content: full });
   saveHistory();
+  notifyDone("Ghost answered", "Your chat reply is ready.",
+    chatT0);
 }
 
 let chatAbort = null;
@@ -3077,6 +3080,7 @@ const COMMANDS = [
   { title: "Keyboard shortcuts", run: () => $("toolKeys").click() },
   { title: "Export app state", run: () => $("toolStateExport").click() },
   { title: "Import app state", run: () => $("toolStateImport").click() },
+  { title: "Toggle completion ping", run: () => $("toolNotify").click() },
   { title: "Add cursor on selected lines", run: () => cursorsOnSelectedLines(view) },
   { title: "Select all occurrences", run: () => selectAllOccurrences(view) },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
@@ -3888,6 +3892,7 @@ async function runAgent(task) {
   }
   agentRunning = true;
   agentStop = false;
+  const agentT0 = Date.now();
   addMsg("YOU", "🤖 " + task);
   const sendBtn = $("chatSend");
   const oldSend = sendBtn.onclick;
@@ -4001,6 +4006,8 @@ async function runAgent(task) {
   } else if (outcome === "done") {
     addMsg("GHOST", "🤖 Done: " + summary);
   }
+  notifyDone("Agent finished",
+    "The agent task ended (" + outcome + ").", agentT0);
 }
 
 async function openAgentReview(staged) {
@@ -4329,6 +4336,7 @@ async function runFixLoop() {
   }
   agentRunning = true;
   agentStop = false;
+  const fixT0 = Date.now();
   const sendBtn = $("chatSend");
   const oldSend = sendBtn.onclick;
   sendBtn.textContent = "■ Stop fixing";
@@ -4474,6 +4482,7 @@ async function runFixLoop() {
           + "The attempt log above shows every round.";
   addMsg("GHOST", "🛠 Fix-my-tests: " + verdict);
   openFixReport(log, verdict, backups, touched);
+  notifyDone("Fix-my-tests finished", verdict, fixT0);
 }
 
 function openFixReport(log, verdict, backups, touched) {
@@ -5600,6 +5609,79 @@ $("toolStateImport").onclick = async () => {
   $("runOut").textContent = applied +
     " entries restored. Reloading…";
   setTimeout(() => location.reload(), 700);
+};
+
+/* ---------------- Roadmap G35: companion touches ------ */
+/*@@PING@@*/
+/* Long AI jobs ping you when they finish instead of ending
+   on a dead screen: a native notification on the phone
+   (GhostNative bridge), a web Notification on desktop,
+   and a title flash when the page is in the background.
+   Only jobs that ran at least 20 seconds ping. */
+const PING_MIN_MS = 20000;
+function pingWorthIt(startedAt, now, enabled) {
+  return !!enabled && typeof startedAt === "number" &&
+    (now - startedAt) >= PING_MIN_MS;
+}
+try { window.__ghostPing = { pingWorthIt, PING_MIN_MS }; }
+catch (e) {}
+/*@@PING-END@@*/
+
+function notifyEnabled() {
+  try { return localStorage.getItem("ghostide-notify")
+    !== "0"; } catch (e) { return true; }
+}
+function flashTitle(text) {
+  const old = document.title;
+  document.title = "✓ " + text;
+  const clear = () => {
+    document.title = old;
+    window.removeEventListener("focus", clear);
+    document.removeEventListener("visibilitychange", clear);
+  };
+  window.addEventListener("focus", clear);
+  document.addEventListener("visibilitychange", clear);
+}
+function notifyDone(title, body, startedAt) {
+  if (!pingWorthIt(startedAt, Date.now(), notifyEnabled()))
+    return;
+  if (document.hidden) flashTitle(title);
+  try {
+    if (window.GhostNative) {
+      window.GhostNative.jobDone(title, body);
+      return;
+    }
+  } catch (e) {}
+  try {
+    if ("Notification" in window &&
+        Notification.permission === "granted")
+      new Notification(title, { body });
+  } catch (e) {}
+}
+function refreshNotifyBtn() {
+  $("toolNotify").textContent = "Completion ping: " +
+    (notifyEnabled() ? "on" : "off");
+}
+$("toolNotify").onclick = () => {
+  const on = !notifyEnabled();
+  try { localStorage.setItem("ghostide-notify",
+    on ? "1" : "0"); } catch (e) {}
+  if (on && "Notification" in window &&
+      Notification.permission === "default")
+    Notification.requestPermission().catch(() => {});
+  refreshNotifyBtn();
+};
+refreshNotifyBtn();
+
+/* A note shared into the app from another app (Android
+   share sheet) lands in captures.md; the native side calls
+   this so the file list and any open view refresh. */
+window.__ghostCaptured = () => {
+  loadFiles();
+  $("runPane").classList.remove("hidden");
+  $("runTitle").textContent = "Captured to project";
+  $("runOut").textContent =
+    "A shared note was added to captures.md in this workspace.";
 };
 
 /* ---------------- Roadmap G25: asset tools ----------------
