@@ -2031,7 +2031,7 @@ $("setFont").onchange = (e) => {
    state. Runnable tools execute on the server (the tool itself,
    never a reimplementation) and their own report renders here. */
 async function openEco() {
-  closeOverlays();
+  hideTools();
   $("todoTitle").textContent = "Ecosystem tools";
   $("todoResults").textContent = "Loading the catalog…";
   $("todoPanel").classList.remove("hidden");
