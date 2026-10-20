@@ -1953,6 +1953,7 @@ const I18N = {
   toolZip: { en: "Download workspace (.zip)", es: "Descargar proyecto (.zip)" },
   toolPluginsManage: { en: "Manage plugins…", es: "Gestionar plugins…" },
   toolRegistry: { en: "Registry", es: "Registro" },
+  toolClassroom: { en: "Classroom view", es: "Vista de aula" },
   handRun: { en: "▶ Run", es: "▶ Ejecutar" },
   handSave: { en: "Save", es: "Guardar" },
   handSend: { en: "Send", es: "Enviar" },
@@ -3224,6 +3225,7 @@ const COMMANDS = [
   { title: "Import app state", run: () => $("toolStateImport").click() },
   { title: "Toggle completion ping", run: () => $("toolNotify").click() },
   { title: "Registry", run: () => $("toolRegistry").click() },
+  { title: "Classroom view", run: () => $("toolClassroom").click() },
   { title: "Add cursor on selected lines", run: () => cursorsOnSelectedLines(view) },
   { title: "Select all occurrences", run: () => selectAllOccurrences(view) },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
@@ -6118,6 +6120,146 @@ async function openRegistry() {
   }
 }
 $("toolRegistry").onclick = openRegistry;
+
+/* ---------------- Roadmap G38: classroom view --------- */
+/*@@CLASS@@*/
+/* The host publishes snapshots of its session; viewers on
+   the LAN follow read-only and can annotate. The snapshot
+   is capped so a huge file or chat cannot flood viewers. */
+function buildSnapshot(file, content, historyArr) {
+  const who = { user: "YOU", assistant: "GHOST",
+    system: "SYSTEM" };
+  const chat = (historyArr || []).slice(-12).map((m) => ({
+    who: who[m.role] || "GHOST",
+    text: String(m.content || "").slice(0, 1500),
+  }));
+  return {
+    file: file || "",
+    content: String(content || "").slice(0, 200000),
+    chat,
+  };
+}
+try { window.__ghostClass = { buildSnapshot }; } catch (e) {}
+/*@@CLASS-END@@*/
+
+let classHost = null, classCode = null;
+let classTimer = null, classNoteTimer = null;
+let classNotesEl = null;
+
+async function publishClassroom() {
+  if (!classHost) return;
+  let content = "";
+  try { content = view.state.doc.toString(); } catch (e) {}
+  const snap = buildSnapshot(currentFile || "", content,
+    history);
+  postJson("/api/classroom/publish",
+    { host: classHost, state: snap });
+}
+
+async function refreshClassNotes() {
+  const el = classNotesEl;
+  if (!el || !classHost) return;
+  const d = await getJson("/api/classroom/annotations?host=" +
+    encodeURIComponent(classHost));
+  if (d.error) return;
+  el.textContent = "";
+  if (!d.annotations.length) {
+    el.textContent = "No annotations yet.";
+    return;
+  }
+  for (const a of d.annotations) {
+    const div = document.createElement("div");
+    div.className = "findRow";
+    div.textContent = "✎ " + a.name +
+      (a.line ? " · line " + a.line : "") + ": " + a.text;
+    el.appendChild(div);
+  }
+}
+
+function renderClassPanel(info) {
+  const box = $("todoResults");
+  box.textContent = "";
+  if (!classHost) {
+    const row = document.createElement("div");
+    row.className = "findRow";
+    row.textContent = "▶ Start sharing this session " +
+      "(read-only for viewers)";
+    row.onclick = async () => {
+      const d = await postJson("/api/classroom/start", {});
+      if (d.error) { alert(d.error); return; }
+      classHost = d.host;
+      classCode = d.code;
+      publishClassroom();
+      classTimer = setInterval(publishClassroom, 450);
+      classNoteTimer = setInterval(refreshClassNotes, 2000);
+      renderClassPanel(d.info);
+    };
+    box.appendChild(row);
+    const hint = document.createElement("div");
+    hint.className = "dim";
+    hint.textContent = "Viewers on the same Wi-Fi open " +
+      "the classroom page, type the class code, and follow " +
+      "your code and chat live. They cannot edit; they " +
+      "can send notes.";
+    box.appendChild(hint);
+    return;
+  }
+  const head = document.createElement("div");
+  head.className = "findRow";
+  const urls = (info && info.urls) || [];
+  head.textContent = "● Sharing - class code: " + classCode +
+    (urls.length ? " - viewers: " + urls.join(", ")
+      : " - viewers on this device: /classroom.html");
+  box.appendChild(head);
+  if (info && info.bound === "127.0.0.1") {
+    const warn = document.createElement("div");
+    warn.className = "dim";
+    warn.textContent = "This server is bound to this " +
+      "device only. Viewers on other devices need the " +
+      "desktop hosting in LAN mode (start-lan).";
+    box.appendChild(warn);
+  }
+  const notesTitle = document.createElement("div");
+  notesTitle.className = "dim";
+  notesTitle.textContent = "Annotations from viewers:";
+  box.appendChild(notesTitle);
+  const notes = document.createElement("div");
+  notes.textContent = "No annotations yet.";
+  box.appendChild(notes);
+  classNotesEl = notes;
+  const clear = document.createElement("div");
+  clear.className = "findRow";
+  clear.textContent = "🧹 Clear annotations";
+  clear.onclick = async () => {
+    await postJson("/api/classroom/clear", { host: classHost });
+    refreshClassNotes();
+  };
+  box.appendChild(clear);
+  const stop = document.createElement("div");
+  stop.className = "findRow";
+  stop.textContent = "⏹ Stop sharing";
+  stop.onclick = async () => {
+    await postJson("/api/classroom/stop", { host: classHost });
+    classHost = null;
+    classCode = null;
+    if (classTimer) clearInterval(classTimer);
+    if (classNoteTimer) clearInterval(classNoteTimer);
+    renderClassPanel(null);
+  };
+  box.appendChild(stop);
+  refreshClassNotes();
+}
+
+function openClassroom() {
+  hideTools();
+  $("todoTitle").textContent = "🎓 Classroom view";
+  $("todoPanel").classList.remove("hidden");
+  if (classHost) {
+    getJson("/api/classroom/info").then((info) =>
+      renderClassPanel(info));
+  } else renderClassPanel(null);
+}
+$("toolClassroom").onclick = openClassroom;
 
 /* ---------------- Roadmap G25: asset tools ----------------
    Asset browser: every image in the workspace with a

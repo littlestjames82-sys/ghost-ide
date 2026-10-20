@@ -287,6 +287,9 @@ Language/access pass shipped. TalkBack proof pending. Next: G37 registry.
 ## Phase 47 - Roadmap G37 - BUILT v1.45.0 Oct 19, 2026
 Registry shipped. Next: G38 classroom view.
 
+## Phase 48 - Roadmap G38 - BUILT v1.46.0 Oct 19, 2026
+Classroom view shipped. Next: G39 first-run tour.
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|

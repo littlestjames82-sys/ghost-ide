@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.45.0"
+APP_VERSION = "1.46.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -787,6 +787,44 @@ def _verify_run():
         "reportPath": "VERIFY_REPORT.md",
         "report": report,
     }
+
+
+# ---- Roadmap G38: classroom view ----
+# A read-only live window into the host's session. The host
+# IDE publishes snapshots (current file + live content +
+# chat tail); viewers open /classroom, enter the class
+# code, follow along, and can annotate. Viewers have no
+# write path to the workspace: their only endpoints are
+# state (read) and annotate (append to a capped list).
+_classroom = {"code": None, "host": None, "state": None,
+              "annotations": []}
+
+
+def _classroom_info():
+    import socket as _sock
+    urls = []
+    try:
+        s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and not ip.startswith("127."):
+            urls.append("http://" + ip + ":" + str(PORT)
+                        + "/classroom.html")
+    except Exception:
+        pass
+    return {"bound": HOST, "urls": urls, "port": PORT}
+
+
+def _classroom_start():
+    import secrets as _sec
+    _classroom["code"] = "%04d" % _sec.randbelow(10000)
+    _classroom["host"] = _sec.token_hex(8)
+    _classroom["state"] = None
+    _classroom["annotations"] = []
+    return {"code": _classroom["code"],
+            "host": _classroom["host"],
+            "info": _classroom_info()}
 
 
 # ---- Roadmap G29: semantic (meaning) code search ----
@@ -2231,6 +2269,28 @@ class Handler(SimpleHTTPRequestHandler):
                     "references": all_refs[:300],
                     "total": len(all_refs),
                     "truncated": len(all_refs) > 300})
+            if parsed.path == "/api/classroom/state":
+                qs = urllib.parse.parse_qs(parsed.query)
+                code = qs.get("code", [""])[0]
+                if not _classroom["code"] or \
+                        code != _classroom["code"]:
+                    return self.send_json(
+                        {"error": "no classroom with that code"},
+                        404)
+                return self.send_json({
+                    "state": _classroom["state"],
+                    "annotations":
+                        _classroom["annotations"][-20:]})
+            if parsed.path == "/api/classroom/annotations":
+                qs = urllib.parse.parse_qs(parsed.query)
+                if qs.get("host", [""])[0] != \
+                        (_classroom["host"] or "\x00"):
+                    return self.send_json(
+                        {"error": "not the classroom host"}, 403)
+                return self.send_json(
+                    {"annotations": _classroom["annotations"]})
+            if parsed.path == "/api/classroom/info":
+                return self.send_json(_classroom_info())
             if parsed.path == "/api/context/stats":
                 # Roadmap G27: the context lab. The estimator
                 # is a faithful port of GhostSlice's tokens.py
@@ -2776,6 +2836,53 @@ class Handler(SimpleHTTPRequestHandler):
                         break
                 return self.send_json({"matches": matches,
                                        "truncated": len(matches) >= 200})
+            if parsed.path == "/api/classroom/start":
+                # Roadmap G38: open the classroom.
+                return self.send_json(_classroom_start())
+            if parsed.path == "/api/classroom/publish":
+                data = self.read_json()
+                if not _classroom["host"] or \
+                        data.get("host") != _classroom["host"]:
+                    return self.send_json(
+                        {"error": "not the classroom host"},
+                        403)
+                st = data.get("state") or {}
+                st["ts"] = int(time.time() * 1000)
+                _classroom["state"] = st
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/classroom/stop":
+                data = self.read_json()
+                if data.get("host") == _classroom["host"]:
+                    _classroom["code"] = None
+                    _classroom["host"] = None
+                    _classroom["state"] = None
+                    _classroom["annotations"] = []
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/classroom/annotate":
+                data = self.read_json()
+                if not _classroom["code"] or \
+                        data.get("code") != _classroom["code"]:
+                    return self.send_json(
+                        {"error": "no classroom with that code"},
+                        404)
+                text = str(data.get("text") or "").strip()[:300]
+                if not text:
+                    raise ValueError("annotation text is empty")
+                name = str(data.get("name") or "viewer")[:40]
+                line = data.get("line")
+                if not isinstance(line, int):
+                    line = None
+                _classroom["annotations"].append(
+                    {"name": name, "line": line, "text": text,
+                     "ts": int(time.time() * 1000)})
+                _classroom["annotations"] = \
+                    _classroom["annotations"][-50:]
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/classroom/clear":
+                data = self.read_json()
+                if data.get("host") == _classroom["host"]:
+                    _classroom["annotations"] = []
+                return self.send_json({"ok": True})
             if parsed.path == "/api/verify/run":
                 # Roadmap G32: the one-tap health pass.
                 return self.send_json(_verify_run())

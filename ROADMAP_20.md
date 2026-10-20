@@ -303,7 +303,7 @@ Done when: a plugin published from the desktop installs
 on the phone from the registry and verifies its
 signature.
 
-**G38. Classroom view.** Share a read-only live view of
+**G38. Classroom view.** 🔶 BUILT Oct 19, 2026 (v1.46.0) — host publishes live snapshots every 450 ms, viewers join by code read-only and annotate; full loop proven 13/13; the two-device LAN follow is Ryan's check. Share a read-only live view of
 your session on the LAN — a student or a helper watches
 the code and the chat, can annotate, cannot edit.
 Done when: a second device follows a live edit session
