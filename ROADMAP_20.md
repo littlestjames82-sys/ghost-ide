@@ -309,7 +309,7 @@ the code and the chat, can annotate, cannot edit.
 Done when: a second device follows a live edit session
 with under a second of lag on local Wi-Fi.
 
-**G39. First-run that teaches.** A 3-minute interactive
+**G39. First-run that teaches.** 🔶 BUILT Oct 19, 2026 (v1.47.0) — 8-step tour teaching run/break/fix/restore, each step outcome-verified (16/16 scripted walk incl. no-credit cases); the unaided first-timer test is human. A 3-minute interactive
 tour inside a sample project that makes the user run,
 break, fix-with-Ghost, and restore from history — the
 IDE teaches itself by doing.

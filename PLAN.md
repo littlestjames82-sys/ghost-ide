@@ -290,6 +290,9 @@ Registry shipped. Next: G38 classroom view.
 ## Phase 48 - Roadmap G38 - BUILT v1.46.0 Oct 19, 2026
 Classroom view shipped. Next: G39 first-run tour.
 
+## Phase 49 - Roadmap G39 - BUILT v1.47.0 Oct 19, 2026
+First-run tour shipped. Next: G40 1.0 hardening (closes ROADMAP_20).
+
 ## Risk register
 | Risk | Likelihood | Mitigation |
 |---|---|---|
