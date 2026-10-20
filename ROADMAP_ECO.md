@@ -77,7 +77,13 @@ sliced excerpts that open at the hit.
 Done when: an index builds over a fixture tree in
 seconds and query results match the CLI's excerpts.
 
-**E4. GhostPrimer + GhostHandoff.**
+**E4. GhostPrimer + GhostHandoff.** BUILT v1.54.0
+(POST /api/eco/prime + /api/eco/handoff run the
+tools themselves; E4 harness 16/16 incl. an
+independent CLI check exit 0 on the IDE-built
+bundle, CLI-equal handoff pack, and byte-identical
+git state around the pack; phone bundled, device
+proof Ryan's).
 Chat actions: "Prime this project" builds a starter
 bundle for a fresh session; "Draft handoff" writes a
 propose-only handoff pack from repo facts.

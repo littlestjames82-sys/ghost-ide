@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.53.0"
+APP_VERSION = "1.54.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2292,6 +2292,94 @@ def eco_search(query, ws, limit=10, max_tokens=2000):
     return out
 
 
+def _eco_tool_env(src):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(src)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+def _eco_tool_run(tool_id, args, ws, env, ok_codes):
+    try:
+        return subprocess.run(
+            [sys.executable, "-m", tool_id] + args,
+            cwd=str(ws), env=env, capture_output=True,
+            text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise ValueError("the tool ran past 120 seconds and "
+                         "was stopped")
+
+
+def eco_prime(ws):
+    """Roadmap ECO E4: the "Prime this project" chat action.
+    Builds a starter bundle for the workspace with the
+    GhostPrimer tool itself, verifies it with the tool's
+    own check, and returns the check verdict plus PRIMER.md
+    so the frontend can open a new chat with the bundle as
+    its first context. Exit codes from check: 0 pass,
+    1 fail (a verdict, still returned), 2 could not check
+    (also a verdict in its JSON report); build exits 2
+    when it could not build at all."""
+    src = eco_src_dir("ghostprimer")
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    out_dir = ws / ".ghostide" / "primer"
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    env = _eco_tool_env(src)
+    r = _eco_tool_run("ghostprimer",
+                      ["build", str(ws), "-o", str(out_dir)],
+                      ws, env, (0,))
+    if r.returncode != 0:
+        text = (r.stdout or "") + (r.stderr or "")
+        raise ValueError("the tool could not run: "
+                         + text.strip()[:300])
+    rc = _eco_tool_run("ghostprimer", ["check", str(out_dir)],
+                       ws, env, (0, 1, 2))
+    try:
+        report = json.loads(rc.stdout)
+    except ValueError:
+        raise ValueError("the tool's check output could not "
+                         "be read")
+    primer_md = (out_dir / "PRIMER.md").read_text(
+        errors="replace")
+    return {"ok": True, "check": report,
+            "check_code": rc.returncode, "primer": primer_md,
+            "bundle": ".ghostide/primer"}
+
+
+def eco_handoff(ws):
+    """Roadmap ECO E4: the "Draft handoff" chat action.
+    Builds a handoff pack for the workspace with the
+    GhostHandoff tool itself and returns HANDOFF.md for
+    display. The tool is propose-only and read-only on the
+    project (never commits, pushes, sends, edits, or runs
+    project code); its pack lands in .ghostide/handoff and
+    goes nowhere else - the user reads the draft here.
+    --force lets a fresh draft replace the previous one in
+    that same output dir. Exit 2 = could not build."""
+    src = eco_src_dir("ghosthandoff")
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    out_dir = ws / ".ghostide" / "handoff"
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    env = _eco_tool_env(src)
+    r = _eco_tool_run("ghosthandoff",
+                      ["pack", str(ws), "-o", str(out_dir),
+                       "--force"],
+                      ws, env, (0,))
+    if r.returncode != 0:
+        text = (r.stdout or "") + (r.stderr or "")
+        raise ValueError("the tool could not run: "
+                         + text.strip()[:300])
+    md = (out_dir / "HANDOFF.md").read_text(errors="replace")
+    return {"ok": True, "handoff": md,
+            "pack": ".ghostide/handoff"}
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -3039,6 +3127,22 @@ class Handler(SimpleHTTPRequestHandler):
                                      data.get("limit"),
                                      data.get("max_tokens"))
                     return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/prime":
+                # Roadmap ECO E4: GhostPrimer chat action
+                # (see eco_prime).
+                self.read_json()
+                try:
+                    return self.send_json(eco_prime(WORKSPACE))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/handoff":
+                # Roadmap ECO E4: GhostHandoff chat action
+                # (see eco_handoff).
+                self.read_json()
+                try:
+                    return self.send_json(eco_handoff(WORKSPACE))
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/classroom/start":

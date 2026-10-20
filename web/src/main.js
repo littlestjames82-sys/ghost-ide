@@ -1036,6 +1036,13 @@ try {
 /* ---------------- chat ---------------- */
 const history = [];
 
+/* Roadmap ECO E4: when a chat is primed, its GhostPrimer
+   bundle (PRIMER.md) is the chat's first context and rides
+   in the system message on every send until the chat is
+   cleared or another prime replaces it. Session-scoped:
+   a reload starts unprimed, like a fresh session. */
+let primerContext = null;
+
 /* Session continuity (Phase 3.4): chat history is saved per project
    (keyed by workspace path; the phone's scope is "on-device") and
    restored when you come back to that project. */
@@ -1169,6 +1176,15 @@ async function sendChat() {
         }
       }
     }
+  }
+
+  /* Roadmap ECO E4: a primed chat's first context - the
+     GhostPrimer bundle rides in the system message ahead
+     of the per-message attachments. */
+  if (primerContext) {
+    sysContent += "\n\nProject primer (GhostPrimer starter " +
+      "bundle for this project, built in this IDE and " +
+      "verified by the tool's own check):\n" + primerContext;
   }
 
   /* @file mentions + selection attach (Phase 9, Cursor-style):
@@ -2039,9 +2055,96 @@ $("menuSplit").onclick = () => {
 $("clearChatBtn").onclick = () => {
   if (!confirm("Clear this project's chat history?")) return;
   history.length = 0;
+  primerContext = null;
   saveHistory();
   $("chatLog").innerHTML = "";
   addMsg("GHOST", GREETING);
+};
+
+/*@@E4@@*/
+/* Roadmap ECO E4: the pure state step behind the two chat
+   actions, kept free of DOM access so the headless harness
+   can drive it. A successful prime response starts a NEW
+   chat: the history is empty and the bundle (PRIMER.md)
+   becomes the chat's first context. The check verdict is
+   the tool's own (its report's ok flag + files checked).
+   Returns null when the response is not a usable prime. */
+function primerChatState(resp) {
+  if (!resp || resp.error || !resp.primer) return null;
+  const chk = resp.check || {};
+  return {
+    history: [],
+    primerContext: resp.primer,
+    passed: chk.ok === true,
+    filesChecked: chk.files_checked || 0,
+    errors: chk.errors || [],
+  };
+}
+/* A handoff response is usable exactly when it carries
+   the pack's HANDOFF.md text. */
+function handoffText(resp) {
+  if (!resp || resp.error || !resp.handoff) return null;
+  return resp.handoff;
+}
+/*@@E4-END@@*/
+
+/* ---------------- Roadmap ECO E4: prime + handoff -----
+   Both actions run the ecosystem tool itself on the
+   server; this side only starts a fresh chat around the
+   primer bundle or renders the handoff draft in place. */
+$("primeBtn").onclick = async () => {
+  const btn = $("primeBtn");
+  btn.disabled = true;
+  addMsg("SYSTEM", "🧭 Building a starter bundle for " +
+    "this project with GhostPrimer…");
+  try {
+    const d = await postJson("/api/eco/prime", {});
+    const st = primerChatState(d);
+    if (!st) {
+      addMsg("SYSTEM", "Primer failed: " +
+        (d.error || "the tool could not run."));
+      return;
+    }
+    history.length = 0;
+    primerContext = st.primerContext;
+    saveHistory();
+    $("chatLog").innerHTML = "";
+    addMsg("SYSTEM", "🧭 New chat, primed with this " +
+      "project. GhostPrimer check " +
+      (st.passed ? "passed" : "FAILED") + " (" +
+      st.filesChecked + " bundle file(s) verified). The " +
+      "bundle below is this chat's first context; it is " +
+      "saved in the project at .ghostide/primer/.");
+    renderRich(addMsg("GHOST", ""), st.primerContext);
+  } catch (e) {
+    addMsg("SYSTEM", "Primer failed to reach the server.");
+  } finally {
+    btn.disabled = false;
+  }
+};
+$("handoffBtn").onclick = async () => {
+  const btn = $("handoffBtn");
+  btn.disabled = true;
+  addMsg("SYSTEM", "📦 Drafting a handoff pack from " +
+    "repo facts with GhostHandoff (propose-only: nothing " +
+    "is committed, sent, or changed)…");
+  try {
+    const d = await postJson("/api/eco/handoff", {});
+    const md = handoffText(d);
+    if (!md) {
+      addMsg("SYSTEM", "Handoff failed: " +
+        (d.error || "the tool could not build a pack."));
+      return;
+    }
+    addMsg("SYSTEM", "📦 Handoff draft saved in the " +
+      "project at .ghostide/handoff/HANDOFF.md - a draft " +
+      "for you to read; nothing was sent anywhere.");
+    renderRich(addMsg("GHOST", ""), md);
+  } catch (e) {
+    addMsg("SYSTEM", "Handoff failed to reach the server.");
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 /* ---------------- Phase 6: settings additions ---------------- */
@@ -2153,6 +2256,8 @@ const I18N = {
   newFileBtn: { en: "+ New", es: "+ Nuevo" },
   mentionBtn: { en: "@ File", es: "@ Archivo" },
   clearChatBtn: { en: "Clear chat", es: "Borrar chat" },
+  primeBtn: { en: "🧭 Prime this project", es: "🧭 Preparar este proyecto" },
+  handoffBtn: { en: "📦 Draft handoff", es: "📦 Borrador de traspaso" },
   findGo: { en: "Find", es: "Buscar" },
   findSemantic: { en: "🧠 Meaning", es: "🧠 Significado" },
   findIndexed: { en: "🔎 Indexed", es: "🔎 Indexado" },
