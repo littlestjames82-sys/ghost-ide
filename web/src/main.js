@@ -93,7 +93,8 @@ const settings = Object.assign(
     ligatures: true, lineNumbers: true,
     activeLine: true, chatFs: "13",
     chatWidth: "360", bubbles: false,
-    roleLabels: true },
+    roleLabels: true, sliceBudget: 6000,
+    attachSelection: true, attachDiff: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
 function saveSettings() {
   localStorage.setItem("ghostide-settings", JSON.stringify(settings));
@@ -1390,6 +1391,30 @@ try { window.__ghostDisplay = { CHAT_FS, CHAT_WIDTHS,
   displayState }; } catch (e) {}
 /*@@DISPLAY-END@@*/
 
+/*@@CONTEXTCTL@@*/
+/* Context control pack (v1.66): how much project
+   context rides along with a message. The slice
+   budget replaces the fixed BEHAVIOR value at every
+   call site; the diff snippet is capped so a huge
+   work-in-progress cannot flood the model. */
+const SLICE_BUDGETS = [3000, 6000, 12000, 20000];
+function clampSliceBudget(v) {
+  const n = parseInt(v, 10);
+  return SLICE_BUDGETS.includes(n) ? n : 6000;
+}
+function sliceBudget() {
+  return clampSliceBudget(settings.sliceBudget);
+}
+const DIFF_CAP = 6000;
+function diffSnippet(diff) {
+  if (!diff || !diff.trim()) return "";
+  if (diff.length <= DIFF_CAP) return diff;
+  return diff.slice(0, DIFF_CAP) + "\n... (diff truncated)";
+}
+try { window.__ghostContextCtl = { SLICE_BUDGETS,
+  clampSliceBudget, diffSnippet }; } catch (e) {}
+/*@@CONTEXTCTL-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1552,7 +1577,7 @@ async function sendChat() {
         Math.round(body.length / 4) + " tok (rough estimate)";
     } else if (mode !== "file") {
       const d = await postJson("/api/context", {
-        mode, budget: BEHAVIOR.context.sliceBudget,
+        mode, budget: sliceBudget(),
         seed: currentFile || undefined });
       if (d.error) {
         addMsg("SYSTEM", "Project slice unavailable: " + d.error +
@@ -1560,14 +1585,14 @@ async function sendChat() {
         $("ctxMeter").textContent = "context: none (slice failed)";
       } else if (d.over) {
         addMsg("SYSTEM", "Project slice is ~" + d.tokens +
-          " tokens - over the " + BEHAVIOR.context.sliceBudget.toLocaleString() + " budget, so this message was NOT " +
+          " tokens - over the " + sliceBudget().toLocaleString() + " budget, so this message was NOT " +
           "sent. Switch context to current file, or shrink the project.");
         return;
       } else {
         sysContent = SYS + "\nProject context (" + d.mode +
           " slice, " + d.files + " files):\n" + d.text;
         $("ctxMeter").textContent = "context: " + d.mode + " slice · " +
-          d.tokens.toLocaleString() + " / " + BEHAVIOR.context.sliceBudget.toLocaleString() + " tok · " + d.files +
+          d.tokens.toLocaleString() + " / " + sliceBudget().toLocaleString() + " tok · " + d.files +
           " files (full project ~" +
           d.originalTokens.toLocaleString() + " tok)";
         if (d.mode === "smart" && d.included) {
@@ -1623,7 +1648,8 @@ async function sendChat() {
     } catch (e) { /* mentions are best-effort */ }
   }
   const selNow = view.state.selection.main;
-  if (!selNow.empty && currentFile) {
+  if (!selNow.empty && currentFile &&
+      settings.attachSelection !== false) {
     const selText = view.state.doc
       .sliceString(selNow.from, selNow.to).slice(0, 3000);
     if (selText.trim()) {
@@ -1675,6 +1701,15 @@ async function sendChat() {
   const sendBtn = $("chatSend");
   sendBtn.textContent = "■ Stop";
   sendBtn.onclick = () => { if (chatAbort) chatAbort.abort(); };
+  if (settings.attachDiff) {
+    try {
+      const dr = await fetch("/api/git/diff-all");
+      const dg = await dr.json();
+      const snip = diffSnippet(dg.diff || "");
+      if (snip) sysContent += "\nUncommitted changes " +
+        "(git diff vs HEAD):\n" + snip;
+    } catch (e) {}
+  }
   try {
     const r = await fetch("/api/chat", {
       method: "POST",
@@ -2648,7 +2683,7 @@ async function addRecallToContext(task) {
   try {
     const d = await postJson("/api/eco/recall", {
       task: task || "",
-      budget: BEHAVIOR.context.sliceBudget, context: true });
+      budget: sliceBudget(), context: true });
     const st = recallContextState(d);
     if (!st) {
       addMsg("SYSTEM", "Recall could not build its bundle: " +
@@ -2912,7 +2947,7 @@ $("ctxExportBtn").onclick = async () => {
   try {
     const d = await postJson("/api/eco/convert", {
       target, mode,
-      budget: BEHAVIOR.context.sliceBudget });
+      budget: sliceBudget() });
     const st = convertState(d);
     if (!st) {
       out.textContent = "Export failed: " +
@@ -3701,6 +3736,26 @@ $("setRoleLabels").onchange = (e) => {
 };
 applyChatLook();
 
+
+/* ---------------- Context control pack (v1.66) ---- */
+$("setSliceBudget").value =
+  String(clampSliceBudget(settings.sliceBudget));
+$("setSliceBudget").onchange = (e) => {
+  settings.sliceBudget = parseInt(e.target.value, 10);
+  saveSettings();
+};
+$("setAttachSelection").checked =
+  settings.attachSelection !== false;
+$("setAttachSelection").onchange = (e) => {
+  settings.attachSelection = e.target.checked;
+  saveSettings();
+};
+$("setAttachDiff").checked = settings.attachDiff === true;
+$("setAttachDiff").onchange = (e) => {
+  settings.attachDiff = e.target.checked;
+  saveSettings();
+};
+
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
 $("toolsClose").onclick = () => $("toolsPanel").classList.add("hidden");
@@ -4413,7 +4468,7 @@ $("toolSlice").onclick = async () => {
   const mode = $("ctxMode").value === "file"
     ? "signatures" : $("ctxMode").value;
   const d = await postJson("/api/context", {
-    mode, budget: BEHAVIOR.context.sliceBudget });
+    mode, budget: sliceBudget() });
   if (d.error) { alert(d.error); return; }
   if (d.over) {
     alert("Slice is ~" + d.tokens + " tokens - over budget, not saved.");
