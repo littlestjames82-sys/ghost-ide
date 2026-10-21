@@ -1689,6 +1689,34 @@ try { window.__ghostScroll = { isNearBottom,
   shouldChatScroll }; } catch (e) {}
 /*@@SCROLL-END@@*/
 
+/*@@INPUTHIST@@*/
+/* Input history (v1.78): shell-style recall for the
+   chat box. pushSent keeps the last 50 submissions,
+   de-duplicated; navSent walks them - index -1 means
+   "your current draft", stepping newer past the last
+   entry returns to it. */
+const SENT_CAP = 50;
+function pushSent(list, text) {
+  const t = String(text || "").trim();
+  const out = list.filter((x) => x !== t);
+  if (t) out.push(t);
+  return out.slice(-SENT_CAP);
+}
+function navSent(list, idx, dir) {
+  if (!list.length) return { idx: -1, text: null };
+  if (dir < 0) {
+    const n = idx === -1 ? list.length - 1 :
+      Math.max(0, idx - 1);
+    return { idx: n, text: list[n] };
+  }
+  if (idx === -1 || idx + 1 >= list.length)
+    return { idx: -1, text: null };
+  return { idx: idx + 1, text: list[idx + 1] };
+}
+try { window.__ghostInputHist = { SENT_CAP, pushSent,
+  navSent }; } catch (e) {}
+/*@@INPUTHIST-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1869,6 +1897,7 @@ async function sendChat() {
   const ta = $("chatText");
   const text = ta.value.trim();
   if (!text) return;
+  recordSent(text);
   const slash = parseSlash(text);
   if (slash) {
     ta.value = "";
@@ -4324,6 +4353,44 @@ $("setAutoScroll").onchange = (e) => {
   settings.autoScroll = e.target.checked;
   saveSettings();
 };
+
+
+/* ---------------- Input history (v1.78) ------------ */
+let sentList = [];
+try {
+  sentList = JSON.parse(
+    localStorage.getItem("ghostide-sent") || "[]");
+  if (!Array.isArray(sentList)) sentList = [];
+} catch (e) { sentList = []; }
+let sentIdx = -1;
+let sentDraft = "";
+function recordSent(text) {
+  sentList = pushSent(sentList, text);
+  sentIdx = -1;
+  try {
+    localStorage.setItem("ghostide-sent",
+      JSON.stringify(sentList));
+  } catch (e) {}
+}
+$("chatText").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  const ta = $("chatText");
+  const before = ta.value.slice(0, ta.selectionStart);
+  const after = ta.value.slice(ta.selectionEnd);
+  if (e.key === "ArrowUp" && before.includes("\n")) return;
+  if (e.key === "ArrowDown" && after.includes("\n")) return;
+  const step = navSent(sentList, sentIdx,
+    e.key === "ArrowUp" ? -1 : 1);
+  if (step.idx === sentIdx && step.text === null) return;
+  e.preventDefault();
+  if (sentIdx === -1 && step.idx !== -1)
+    sentDraft = ta.value;
+  sentIdx = step.idx;
+  ta.value = step.idx === -1 ? sentDraft : step.text;
+  growChatText();
+  updateChatCount();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+});
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
