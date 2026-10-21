@@ -1836,6 +1836,22 @@ try { window.__ghostLastRun = { lastRunText }; }
 catch (e) {}
 /*@@LASTRUN-END@@*/
 
+/*@@EXPORT2@@*/
+/* Export pack 2 (v1.86): every chat in the project
+   in one document. Each chat keeps the standard
+   export format, retitled with its session name. */
+function titledMarkdown(md, name) {
+  return md.replace("# GhostIDE chat export",
+    "# " + name);
+}
+function allChatsExport(parts) {
+  return parts.filter((p) => p && p.trim())
+    .join("\n---\n\n");
+}
+try { window.__ghostExport2 = { titledMarkdown,
+  allChatsExport }; } catch (e) {}
+/*@@EXPORT2-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -4759,6 +4775,39 @@ try {
   const lr = localStorage.getItem("ghostide-lastrun");
   if (lr) $("lastRun").textContent = lr;
 } catch (e) {}
+
+
+/* ---------------- Export pack 2 (v1.86) ------------ */
+$("toolExportAll").onclick = () => {
+  hideTools();
+  saveHistory();
+  const parts = [];
+  for (const s of chatSessions) {
+    let items = [];
+    try {
+      items = JSON.parse(localStorage.getItem(
+        sessionHistoryKey(historyScope, s.id)) || "[]");
+    } catch (e) {}
+    if (Array.isArray(items) && items.length)
+      parts.push(titledMarkdown(chatToMarkdown(items),
+        s.name));
+  }
+  const out = allChatsExport(parts);
+  if (!out) {
+    alert("No chats with messages in this project yet.");
+    return;
+  }
+  download("ghostide-all-chats.md", out, "text/markdown");
+};
+$("promptExport").onclick = () => {
+  const list = loadPrompts();
+  if (!list.length) {
+    alert("No saved prompts yet.");
+    return;
+  }
+  download("ghostide-prompts.json",
+    JSON.stringify(list, null, 1), "application/json");
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
