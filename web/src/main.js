@@ -1138,6 +1138,50 @@ try { window.__ghostComposer = { CONTINUE_TEXT, estTokens,
   counterText, chatDraftKey }; } catch (e) {}
 /*@@COMPOSER-END@@*/
 
+/*@@SESSIONS@@*/
+/* Chat sessions (v1.59): several named chats per
+   project. The default session keeps the pre-v1.59
+   history key, so existing chats survive the upgrade;
+   later sessions suffix theirs. */
+const DEFAULT_SESSION = { id: "s1", name: "Chat 1" };
+function normalizeSessions(list) {
+  const out = [];
+  const seen = new Set();
+  if (Array.isArray(list)) {
+    for (const s of list) {
+      if (!s || typeof s.id !== "string" || !s.id) continue;
+      if (seen.has(s.id)) continue;
+      seen.add(s.id);
+      out.push({ id: s.id,
+        name: (typeof s.name === "string" && s.name.trim())
+          ? s.name.trim().slice(0, 40) : "Chat" });
+    }
+  }
+  if (!out.length) out.push({ id: DEFAULT_SESSION.id,
+    name: DEFAULT_SESSION.name });
+  return out;
+}
+function sessionHistoryKey(scope, id) {
+  const base = "ghostide-history:" + scope;
+  return (!id || id === DEFAULT_SESSION.id)
+    ? base : base + ":" + id;
+}
+function nextSessionName(list) {
+  const used = new Set(list.map((s) => s.name));
+  let n = list.length + 1;
+  while (used.has("Chat " + n)) n++;
+  return "Chat " + n;
+}
+function removeSession(list, id) {
+  if (list.length <= 1) return { list, removed: false };
+  const next = list.filter((s) => s.id !== id);
+  return { list: next, removed: next.length !== list.length };
+}
+try { window.__ghostSessions = { DEFAULT_SESSION,
+  normalizeSessions, sessionHistoryKey, nextSessionName,
+  removeSession }; } catch (e) {}
+/*@@SESSIONS-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1165,7 +1209,9 @@ const GREETING =
   "file and ask about it, or pause while typing for " +
   "inline suggestions. Nothing leaves this device.";
 let historyScope = null;
-function historyKey() { return "ghostide-history:" + historyScope; }
+function historyKey() {
+  return sessionHistoryKey(historyScope, activeSession);
+}
 function saveHistory() {
   if (!historyScope) return;
   try {
@@ -1657,6 +1703,7 @@ async function refreshWsLabel() {
     const scope = d.workspace || "on-device";
     if (scope !== historyScope) {
       historyScope = scope;
+      loadSessions();
       loadHistory();
     }
     return d.workspace;
@@ -3061,7 +3108,9 @@ $("copyLastBtn").onclick = async () => {
 
 /* ---------------- Chat composer pack (v1.58) ------ */
 function draftStorageKey() {
-  return historyScope ? chatDraftKey(historyScope) : null;
+  return historyScope
+    ? chatDraftKey(historyScope) + ":" + activeSession
+    : null;
 }
 function saveChatDraft() {
   const k = draftStorageKey();
@@ -3111,6 +3160,96 @@ $("continueBtn").onclick = () => {
   }
   $("chatText").value = CONTINUE_TEXT;
   sendChat();
+};
+
+
+/* ---------------- Chat sessions (v1.59) ------------ */
+let chatSessions = [{ id: "s1", name: "Chat 1" }];
+let activeSession = "s1";
+function sessionsKey() {
+  return "ghostide-sessions:" + historyScope;
+}
+function activeSessionKey() {
+  return "ghostide-activesession:" + historyScope;
+}
+function persistSessions() {
+  if (!historyScope) return;
+  try {
+    localStorage.setItem(sessionsKey(),
+      JSON.stringify(chatSessions));
+    localStorage.setItem(activeSessionKey(), activeSession);
+  } catch (e) {}
+}
+function renderSessionSel() {
+  const sel = $("sessionSel");
+  sel.innerHTML = "";
+  for (const s of chatSessions) {
+    const o = document.createElement("option");
+    o.value = s.id;
+    o.textContent = s.name;
+    sel.appendChild(o);
+  }
+  sel.value = activeSession;
+}
+function loadSessions() {
+  chatSessions = [{ id: "s1", name: "Chat 1" }];
+  activeSession = "s1";
+  if (historyScope) {
+    try {
+      chatSessions = normalizeSessions(JSON.parse(
+        localStorage.getItem(sessionsKey()) || "[]"));
+      const saved = localStorage.getItem(activeSessionKey());
+      if (saved && chatSessions.some((s) => s.id === saved))
+        activeSession = saved;
+    } catch (e) {}
+  }
+  renderSessionSel();
+}
+function switchSession(id) {
+  if (id === activeSession) { renderSessionSel(); return; }
+  saveHistory();
+  activeSession = id;
+  primerContext = null;
+  recallContext = null;
+  recallTaskLabel = "";
+  persistSessions();
+  renderSessionSel();
+  loadHistory();
+}
+$("sessionSel").onchange = (e) => switchSession(e.target.value);
+$("sessionNew").onclick = () => {
+  const id = "s" + Date.now().toString(36);
+  chatSessions.push({ id, name: nextSessionName(chatSessions) });
+  persistSessions();
+  switchSession(id);
+};
+$("sessionRename").onclick = () => {
+  const cur = chatSessions.find((s) => s.id === activeSession);
+  if (!cur) return;
+  const name = prompt("Rename this chat", cur.name);
+  if (name === null) return;
+  const clean = name.trim().slice(0, 40);
+  if (clean) { cur.name = clean; persistSessions(); }
+  renderSessionSel();
+};
+$("sessionDel").onclick = () => {
+  const cur = chatSessions.find((s) => s.id === activeSession);
+  if (!cur) return;
+  const r = removeSession(chatSessions, cur.id);
+  if (!r.removed) {
+    alert("This is the only chat for this project.");
+    return;
+  }
+  if (!confirm("Delete the chat \"" + cur.name + "\"?")) return;
+  try {
+    localStorage.removeItem(
+      sessionHistoryKey(historyScope, cur.id));
+  } catch (e) {}
+  chatSessions = r.list;
+  activeSession = chatSessions[0].id;
+  persistSessions();
+  renderSessionSel();
+  loadHistory();
 };
 
 /* ---------------- Tools pack ---------------- */
