@@ -89,7 +89,9 @@ const settings = Object.assign(
     historyTurns: 0, sendKey: "enter",
     timestamps: false, compactChat: false,
     reduceMotion: false, fontFamily: "default",
-    customTokens: 1024 },
+    customTokens: 1024, lineHeight: "1.45",
+    ligatures: true, lineNumbers: true,
+    activeLine: true },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
 function saveSettings() {
   localStorage.setItem("ghostide-settings", JSON.stringify(settings));
@@ -1248,6 +1250,27 @@ function genStats(chars, ms) {
 try { window.__ghostSampling = { TEMP_PRESETS, genStats }; }
 catch (e) {}
 /*@@SAMPLING-END@@*/
+
+/*@@READING@@*/
+/* Editor reading pack (v1.62): line spacing, ligatures,
+   line numbers and the current-line highlight as real
+   display settings. readingState is the pure mapping
+   from settings to the CSS variable + body classes. */
+const LINE_HEIGHTS = ["1.3", "1.45", "1.6", "1.8"];
+function readingState(s) {
+  return {
+    lineHeight: LINE_HEIGHTS.includes(s.lineHeight)
+      ? s.lineHeight : "1.45",
+    classes: [
+      s.ligatures === false ? "lig-off" : "",
+      s.lineNumbers === false ? "linenums-off" : "",
+      s.activeLine === false ? "activeline-off" : "",
+    ].filter(Boolean),
+  };
+}
+try { window.__ghostReading = { LINE_HEIGHTS,
+  readingState }; } catch (e) {}
+/*@@READING-END@@*/
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -3417,6 +3440,42 @@ $("setCustomTokens").onchange = (e) => {
   }
 };
 syncTempControls();
+
+
+/* ---------------- Editor reading pack (v1.62) ------ */
+function applyEditorReading() {
+  const st = readingState(settings);
+  document.documentElement.style.setProperty(
+    "--ghost-line-height", st.lineHeight);
+  for (const cl of ["lig-off", "linenums-off",
+                    "activeline-off"])
+    document.body.classList.toggle(cl, st.classes.includes(cl));
+}
+$("setLineHeight").value = settings.lineHeight || "1.45";
+$("setLineHeight").onchange = (e) => {
+  settings.lineHeight = e.target.value;
+  saveSettings();
+  applyEditorReading();
+};
+$("setLigatures").checked = settings.ligatures !== false;
+$("setLigatures").onchange = (e) => {
+  settings.ligatures = e.target.checked;
+  saveSettings();
+  applyEditorReading();
+};
+$("setLineNumbers").checked = settings.lineNumbers !== false;
+$("setLineNumbers").onchange = (e) => {
+  settings.lineNumbers = e.target.checked;
+  saveSettings();
+  applyEditorReading();
+};
+$("setActiveLine").checked = settings.activeLine !== false;
+$("setActiveLine").onchange = (e) => {
+  settings.activeLine = e.target.checked;
+  saveSettings();
+  applyEditorReading();
+};
+applyEditorReading();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
