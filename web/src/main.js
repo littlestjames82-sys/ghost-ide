@@ -2377,6 +2377,153 @@ $("recallBtn").onclick = async () => {
   }
 };
 
+/*@@E6@@*/
+/* Roadmap ECO E6: the pure state steps behind the Context
+   lab's GhostConvert export. parseLosses turns a LOSSES.md
+   into the named loss list (each loss is a "## " heading
+   with its detail paragraph), and convertState normalizes
+   a convert response into render rows: per format, the
+   artifacts the tool wrote and the losses it named. A
+   response is usable exactly when it carries outputs. */
+function parseLosses(lossesMd) {
+  const out = [];
+  if (!lossesMd) return out;
+  let cur = null;
+  for (const ln of String(lossesMd).split("\n")) {
+    if (ln.startsWith("## ")) {
+      cur = { name: ln.slice(3).trim(), detail: "" };
+      out.push(cur);
+    } else if (cur && ln.trim()) {
+      cur.detail = cur.detail
+        ? cur.detail + " " + ln.trim() : ln.trim();
+    }
+  }
+  return out;
+}
+function convertState(resp) {
+  if (!resp || resp.error || !resp.ok
+      || !Array.isArray(resp.outputs)) return null;
+  return {
+    target: resp.target || "",
+    bundle: resp.bundle || ".ghostide/slice",
+    slice: resp.slice || null,
+    verify: resp.verify || null,
+    outputs: resp.outputs.map((o) => {
+      const parsed = parseLosses(o.losses || "");
+      return {
+        target: o.target || "",
+        dir: o.dir || "",
+        artifacts: (o.artifacts || []).map((a) => ({
+          path: a.path || "", content: a.content || "" })),
+        lossesList: parsed.length ? parsed
+          : (o.losses_names || []).map((n) => ({
+              name: n, detail: "" })),
+      };
+    }),
+  };
+}
+/*@@E6-END@@*/
+
+/* ---------------- Roadmap ECO E6: convert export ------
+   From the Context lab: the server materialises the
+   current slice as a GhostSlice bundle and runs the
+   GhostConvert tool itself on it; this side renders the
+   artifacts, names the losses per format (from the
+   tool's own LOSSES.md), and saves artifacts through the
+   same Blob download the file menu uses. The slice mode
+   is the chat's selected slice (file/smart export as a
+   signatures project slice, the Save-slice mapping). */
+function downloadConverted(name, content) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([content],
+    { type: "text/plain" }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function renderCtxExport(st) {
+  const out = $("ctxExportOut");
+  out.innerHTML = "";
+  const s = st.slice || {};
+  const head = document.createElement("div");
+  head.textContent = "Exported the current slice (" +
+    (s.mode || "?") + " · " + (s.files || 0) + " files · ~" +
+    (s.tokens || 0) + " est tok) from " + st.bundle +
+    " · output verified by GhostConvert ✓";
+  out.appendChild(head);
+  for (const o of st.outputs) {
+    const sec = document.createElement("div");
+    const title = document.createElement("div");
+    title.textContent = o.target + " → " + o.dir;
+    sec.appendChild(title);
+    for (const a of o.artifacts) {
+      const row = document.createElement("div");
+      row.className = "ctxRow";
+      const label = document.createElement("span");
+      label.textContent = a.path + " (" + a.content.length +
+        " chars)";
+      row.appendChild(label);
+      const dl = document.createElement("button");
+      dl.textContent = "⬇ Save";
+      dl.onclick = () => downloadConverted(
+        a.path.split("/").pop(), a.content);
+      row.appendChild(dl);
+      sec.appendChild(row);
+      const det = document.createElement("details");
+      const sum = document.createElement("summary");
+      sum.textContent = "View " + a.path;
+      const pre = document.createElement("pre");
+      pre.textContent = a.content;
+      det.appendChild(sum);
+      det.appendChild(pre);
+      sec.appendChild(det);
+    }
+    const ldiv = document.createElement("div");
+    if (o.lossesList.length) {
+      const lh = document.createElement("div");
+      lh.textContent = "Losses for " + o.target + " (" +
+        o.lossesList.length + ", from LOSSES.md):";
+      ldiv.appendChild(lh);
+      const ul = document.createElement("ul");
+      for (const l of o.lossesList) {
+        const li = document.createElement("li");
+        li.textContent = l.detail
+          ? l.name + " - " + l.detail : l.name;
+        ul.appendChild(li);
+      }
+      ldiv.appendChild(ul);
+    } else {
+      ldiv.textContent = "Losses for " + o.target +
+        ": none recorded.";
+    }
+    sec.appendChild(ldiv);
+    out.appendChild(sec);
+  }
+}
+$("ctxExportBtn").onclick = async () => {
+  const out = $("ctxExportOut");
+  const target = $("ctxExportTarget").value;
+  const raw = $("ctxMode").value;
+  const mode = (raw === "file" || raw === "smart")
+    ? "signatures" : raw;
+  out.textContent = "Slicing this project and converting " +
+    "with GhostConvert…";
+  try {
+    const d = await postJson("/api/eco/convert", {
+      target, mode,
+      budget: BEHAVIOR.context.sliceBudget });
+    const st = convertState(d);
+    if (!st) {
+      out.textContent = "Export failed: " +
+        (d.error || "the tool could not run.");
+      return;
+    }
+    renderCtxExport(st);
+  } catch (e) {
+    out.textContent = "Export failed to reach the server.";
+  }
+};
+
 /* ---------------- Phase 6: settings additions ---------------- */
 $("setWrap").checked = settings.wrap;
 $("setWrap").onchange = (e) => {

@@ -107,7 +107,16 @@ project, token-budgeted like everything else.
 Done when: map and recall outputs match the tools'
 CLI output on a fixture project.
 
-**E6. GhostConvert export.**
+**E6. GhostConvert export.** BUILT v1.56.0
+(POST /api/eco/convert runs the tool itself on a
+slice bundle GhostSlice itself exports into
+.ghostide/slice; E6 harness ALL PASS - for each
+target and for all, the IDE's exported tree is
+byte-identical to the CLI's own convert output
+incl. LOSSES.md, CLI verify exits 0 against the
+IDE output, and the bundle's hashes are untouched
+by a convert; bundle unchanged at 25 packages,
+2,642 tests; phone bundled, device proof Ryan's).
 From the Context lab: export the current slice as
 AGENTS.md, Cursor rules, or Copilot instructions,
 with conversion losses named per format.

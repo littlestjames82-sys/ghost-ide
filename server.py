@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "1.55.0"
+APP_VERSION = "1.56.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2506,6 +2506,164 @@ def eco_recall(ws, task="", budget=6000, want_context=False):
     return {"ok": True, "mode": "scan", "items": items}
 
 
+ECO_CONVERT_TARGETS = ("agents", "cursor", "copilot", "generic")
+ECO_SLICE_MODES = ("signatures", "full", "interfaces",
+                   "structure", "headings", "strip-tests")
+
+
+def _eco_slice_bundle(ws, mode, budget, reuse=False):
+    """Materialise the current slice as a GhostSlice bundle at
+    <ws>/.ghostide/slice, using GhostSlice's own export (the
+    established route, same as make_context). The export runs
+    into a temp dir first and the finished bundle is moved
+    into .ghostide/, so the bundle never scans itself.
+    .ghostide/ is the IDE's own state dir (index db, primer,
+    handoff, recall, convert outputs); a "*" .gitignore inside
+    it keeps GhostSlice (which respects .gitignore) from
+    folding those artifacts into later slices. Returns
+    (bundle_dir, slice_info). With reuse=True an existing
+    bundle is converted as-is (the harness uses this to prove
+    the convert step leaves the bundle untouched)."""
+    bundle_dir = ws / ".ghostide" / "slice"
+    if reuse and (bundle_dir / "manifest.json").is_file():
+        manifest = json.loads(
+            (bundle_dir / "manifest.json").read_text(
+                errors="replace"))
+        return bundle_dir, {
+            "mode": mode, "budget": budget, "reused": True,
+            "files": len(manifest.get("files", [])),
+            "tokens": manifest.get("total_sliced_tokens", 0),
+            "originalTokens":
+                manifest.get("total_original_tokens", 0),
+            "fitted": (manifest.get("fit") or {}).get(
+                "fitted", True)}
+    src = eco_src_dir("ghostslice")
+    if src is None:
+        raise ValueError("GhostSlice not found (set "
+                         "GHOSTSLICE_SRC or GHOSTIDE_ECO_HOME)")
+    state_dir = ws / ".ghostide"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    gi = state_dir / ".gitignore"
+    if not gi.exists():
+        gi.write_text("*\n")
+    tmp = Path(tempfile.mkdtemp(prefix="ghostide-slice-"))
+    env = _eco_tool_env(src)
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "ghostslice", "export",
+             str(ws), "-o", str(tmp), "--mode", mode,
+             "--fit", str(budget)],
+            cwd=str(ws), env=env, capture_output=True,
+            text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise ValueError("GhostSlice ran past 180 seconds and "
+                         "was stopped")
+    manifest_p = tmp / "manifest.json"
+    if not manifest_p.is_file():
+        text = (r.stdout or "") + (r.stderr or "")
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise ValueError("GhostSlice could not build a slice "
+                         "bundle: " + text.strip()[:300])
+    manifest = json.loads(manifest_p.read_text(errors="replace"))
+    if not manifest.get("files"):
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise ValueError("the current slice is empty - there "
+                         "is nothing to convert")
+    if bundle_dir.exists():
+        shutil.rmtree(bundle_dir)
+    shutil.copytree(tmp, bundle_dir)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return bundle_dir, {
+        "mode": mode, "budget": budget, "reused": False,
+        "files": len(manifest.get("files", [])),
+        "tokens": manifest.get("total_sliced_tokens", 0),
+        "originalTokens": manifest.get("total_original_tokens", 0),
+        "fitted": (manifest.get("fit") or {}).get(
+            "fitted", True)}
+
+
+def _eco_losses_names(losses_md):
+    return [ln[3:].strip() for ln in losses_md.splitlines()
+            if ln.startswith("## ")]
+
+
+def eco_convert(ws, target="agents", mode="signatures",
+                budget=6000, reuse_bundle=False):
+    """Roadmap ECO E6: export the current slice to another
+    agent format with the GhostConvert tool itself. The slice
+    is materialised as a GhostSlice bundle (see
+    _eco_slice_bundle), then the tool converts it
+    (`convert <bundle> --to <target> -o
+    .ghostide/convert/<target> --force`) and the output is
+    checked with the tool's own `verify`. Returns the
+    produced artifacts plus LOSSES.md per format, so the
+    losses are named in the UI, not hidden in a file. The
+    source bundle is read-only for the tool; exit 2 from
+    convert is a plain "could not run" error, exit 1 from
+    verify is a mismatch error."""
+    target = (target or "agents").strip().lower()
+    if target != "all" and target not in ECO_CONVERT_TARGETS:
+        raise ValueError("unknown export target: " + target)
+    mode = mode if mode in ECO_SLICE_MODES else "signatures"
+    try:
+        budget = max(500, min(int(budget or 6000), 200000))
+    except (TypeError, ValueError):
+        budget = 6000
+    src = eco_src_dir("ghostconvert")
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    bundle_dir, slice_info = _eco_slice_bundle(
+        ws, mode, budget, reuse=reuse_bundle)
+    out_base = ws / ".ghostide" / "convert" / target
+    out_base.parent.mkdir(parents=True, exist_ok=True)
+    env = _eco_tool_env(src)
+    r = _eco_tool_run("ghostconvert",
+                      ["convert", str(bundle_dir), "--to", target,
+                       "-o", str(out_base), "--force"],
+                      ws, env, (0,))
+    if r.returncode != 0:
+        text = (r.stdout or "") + (r.stderr or "")
+        raise ValueError("the tool could not run: "
+                         + text.strip()[:300])
+    rv = _eco_tool_run("ghostconvert",
+                       ["verify", str(bundle_dir), str(out_base),
+                        "--to", target],
+                       ws, env, (0,))
+    verify = {"code": rv.returncode,
+              "output": ((rv.stdout or "")
+                         + (rv.stderr or "")).strip()}
+    if rv.returncode != 0:
+        raise ValueError("the converted output did not verify: "
+                         + verify["output"][:300])
+    targets = (list(ECO_CONVERT_TARGETS) if target == "all"
+               else [target])
+    outputs = []
+    for t in targets:
+        tdir = out_base / t if target == "all" else out_base
+        artifacts = []
+        losses_md = ""
+        for p in sorted(tdir.rglob("*")):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(tdir).as_posix()
+            content = p.read_text(errors="replace")
+            if rel == "LOSSES.md":
+                losses_md = content
+            artifacts.append({"path": rel, "content": content})
+        outputs.append({
+            "target": t,
+            "dir": tdir.relative_to(ws).as_posix(),
+            "artifacts": artifacts,
+            "losses": losses_md,
+            "losses_names": _eco_losses_names(losses_md)})
+    return {"ok": True, "target": target, "slice": slice_info,
+            "bundle": ".ghostide/slice", "verify": verify,
+            "outputs": outputs}
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -3289,6 +3447,20 @@ class Handler(SimpleHTTPRequestHandler):
                         str(data.get("task") or ""),
                         data.get("budget"),
                         bool(data.get("context")))
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/convert":
+                # Roadmap ECO E6: GhostConvert export from
+                # the Context lab (see eco_convert).
+                data = self.read_json()
+                try:
+                    out = eco_convert(
+                        WORKSPACE,
+                        str(data.get("target") or "agents"),
+                        str(data.get("mode") or "signatures"),
+                        data.get("budget"),
+                        bool(data.get("reuse_bundle")))
                     return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
