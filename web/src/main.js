@@ -1933,6 +1933,25 @@ try { window.__ghostLineOps = { planLineOp }; }
 catch (e) {}
 /*@@LINEOPS-END@@*/
 
+/*@@AUTONAME@@*/
+/* Auto-name (v1.90): a chat that still has its
+   default name renames itself from its first user
+   message - the first 28 characters, whitespace
+   collapsed. Renamed chats are never touched. */
+function autoChatName(text) {
+  const clean = String(text || "")
+    .replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return clean.length > 28
+    ? clean.slice(0, 27).trim() + "…" : clean;
+}
+function isDefaultChatName(name) {
+  return /^Chat( \d+)?$/.test(String(name || ""));
+}
+try { window.__ghostAutoName = { autoChatName,
+  isDefaultChatName }; } catch (e) {}
+/*@@AUTONAME-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -2289,6 +2308,7 @@ async function sendChat() {
   updateChatCount();
   addMsg("YOU", text, true);
   history.push({ role: "user", content: text });
+  maybeAutoName(text);
   saveHistory();
   const messages = [{ role: "system", content: sysContent },
     ...windowHistory(history, settings.historyTurns)];
@@ -4982,6 +5002,22 @@ document.addEventListener("keydown", (e) => {
     applyLineOp("dup");
   }
 });
+
+
+/* ---------------- Auto-name (v1.90) ---------------- */
+function maybeAutoName(text) {
+  const s = chatSessions.find(
+    (x) => x.id === activeSessionId);
+  if (!s || !isDefaultChatName(s.name)) return;
+  const users = history.filter(
+    (m) => m.role === "user").length;
+  if (users !== 1) return;
+  const name = autoChatName(text);
+  if (!name) return;
+  s.name = name;
+  saveSessions();
+  syncSessionPicker();
+}
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
