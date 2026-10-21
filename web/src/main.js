@@ -92,7 +92,7 @@ const settings = Object.assign(
     customTokens: 1024, lineHeight: "1.45",
     ligatures: true, lineNumbers: true,
     activeLine: true, chatFs: "13",
-    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, bubbles: false,
+    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false,
     roleLabels: true, sliceBudget: 6000,
     attachSelection: true, attachDiff: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
@@ -1802,6 +1802,24 @@ function trimScratch(text) {
 try { window.__ghostScratch = { trimScratch }; }
 catch (e) {}
 /*@@SCRATCH-END@@*/
+
+/*@@APPEAR2@@*/
+/* Appearance pack 2 (v1.84): a compact density for
+   the whole UI and a font family for the chat,
+   riding the same variable pattern as the chat text
+   size. Empty stack means "leave the default". */
+const CHAT_FONTS = {
+  default: "",
+  system: "ui-sans-serif, system-ui, sans-serif",
+  mono: "ui-monospace, Menlo, Consolas, monospace",
+  serif: "Georgia, 'Times New Roman', serif",
+};
+function chatFontStack(name) {
+  return CHAT_FONTS[name] || "";
+}
+try { window.__ghostAppear2 = { CHAT_FONTS,
+  chatFontStack }; } catch (e) {}
+/*@@APPEAR2-END@@*/
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -4682,6 +4700,33 @@ $("scratchSave").onclick = async () => {
   await loadFiles();
   addMsg("SYSTEM", "Scratchpad saved as scratchpad.md.");
 };
+
+
+/* ---------------- Appearance pack 2 (v1.84) -------- */
+function applyAppear2() {
+  document.body.classList.toggle("density-compact",
+    !!settings.density);
+  const stack = chatFontStack(settings.chatFont);
+  if (stack)
+    document.documentElement.style
+      .setProperty("--ghost-chat-font", stack);
+  else
+    document.documentElement.style
+      .removeProperty("--ghost-chat-font");
+}
+$("setDensity").checked = !!settings.density;
+$("setDensity").onchange = (e) => {
+  settings.density = e.target.checked;
+  saveSettings();
+  applyAppear2();
+};
+$("setChatFont").value = settings.chatFont;
+$("setChatFont").onchange = (e) => {
+  settings.chatFont = e.target.value;
+  saveSettings();
+  applyAppear2();
+};
+applyAppear2();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
