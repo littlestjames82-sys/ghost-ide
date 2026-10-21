@@ -1751,6 +1751,26 @@ try { window.__ghostSessions2 = { dupSessionName,
   sessionOptionLabel, planDuplicate }; } catch (e) {}
 /*@@SESSIONS2-END@@*/
 
+/*@@PROFILES@@*/
+/* Settings profiles (v1.81): named snapshots of the
+   settings object. Applying one runs it through the
+   same strict sanitize as JSON import, so a profile
+   can never smuggle in a bad value. */
+function applyProfile(current, profile) {
+  if (!profile || typeof profile !== "object" ||
+      Array.isArray(profile)) return { ...current };
+  const clean = sanitizeImportedSettings(profile, current);
+  return { ...current, ...(clean || {}) };
+}
+function profileNames(map) {
+  if (!map || typeof map !== "object") return [];
+  return Object.keys(map)
+    .sort((a, b) => a.localeCompare(b));
+}
+try { window.__ghostProfiles = { applyProfile,
+  profileNames }; } catch (e) {}
+/*@@PROFILES-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -4475,6 +4495,64 @@ $("sessionDup").onclick = () => {
   addMsg("SYSTEM", "Duplicated this chat as \"" +
     plan.copy.name + "\".");
 };
+
+
+/* ---------------- Settings profiles (v1.81) -------- */
+function loadProfiles() {
+  try {
+    const o = JSON.parse(
+      localStorage.getItem("ghostide-profiles") || "{}");
+    return o && typeof o === "object" &&
+      !Array.isArray(o) ? o : {};
+  } catch (e) { return {}; }
+}
+function saveProfiles(all) {
+  try {
+    localStorage.setItem("ghostide-profiles",
+      JSON.stringify(all));
+  } catch (e) {}
+}
+function renderProfSel() {
+  const sel = $("profSel");
+  sel.innerHTML = "";
+  for (const n of profileNames(loadProfiles())) {
+    const o = document.createElement("option");
+    o.value = n;
+    o.textContent = n;
+    sel.appendChild(o);
+  }
+}
+$("profSave").onclick = () => {
+  const name = (prompt("Profile name:", "My setup") || "")
+    .trim().slice(0, 40);
+  if (!name) return;
+  const all = loadProfiles();
+  all[name] = JSON.parse(JSON.stringify(settings));
+  saveProfiles(all);
+  renderProfSel();
+  $("profSel").value = name;
+};
+$("profApply").onclick = () => {
+  const name = $("profSel").value;
+  const all = loadProfiles();
+  if (!name || !all[name]) {
+    alert("Pick a profile first.");
+    return;
+  }
+  Object.assign(settings, applyProfile(settings, all[name]));
+  saveSettings();
+  location.reload();
+};
+$("profDelete").onclick = () => {
+  const name = $("profSel").value;
+  const all = loadProfiles();
+  if (!name || !all[name]) return;
+  if (!confirm("Delete profile \"" + name + "\"?")) return;
+  delete all[name];
+  saveProfiles(all);
+  renderProfSel();
+};
+renderProfSel();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
