@@ -92,7 +92,7 @@ const settings = Object.assign(
     customTokens: 1024, lineHeight: "1.45",
     ligatures: true, lineNumbers: true,
     activeLine: true, chatFs: "13",
-    chatWidth: "360", bubbles: false,
+    chatWidth: "360", accent: "green", bubbles: false,
     roleLabels: true, sliceBudget: 6000,
     attachSelection: true, attachDiff: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
@@ -1590,6 +1590,26 @@ function buildHelpText() {
 try { window.__ghostHelp = { buildHelpText }; }
 catch (e) {}
 /*@@HELP-END@@*/
+
+/*@@ACCENT@@*/
+/* Accent color (v1.74): one CSS variable pair drives
+   the primary buttons and highlights. Green is the
+   long-standing default from the v1.49 polish; the
+   pair for it reproduces the old hexes exactly. */
+const ACCENTS = {
+  green:  { base: "#2c6e49", hi: "#35855a" },
+  violet: { base: "#6716f3", hi: "#7d3bff" },
+  blue:   { base: "#2563eb", hi: "#3b82f6" },
+  amber:  { base: "#b45309", hi: "#d97706" },
+  rose:   { base: "#be2f4a", hi: "#e0445f" },
+  teal:   { base: "#0f766e", hi: "#14b8a6" },
+};
+function accentPair(name) {
+  return ACCENTS[name] || ACCENTS.green;
+}
+try { window.__ghostAccent = { ACCENTS, accentPair }; }
+catch (e) {}
+/*@@ACCENT-END@@*/
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -4123,6 +4143,23 @@ $("toolHelp").onclick = () => {
   hideTools();
   addMsg("SYSTEM", buildHelpText());
 };
+
+
+/* ---------------- Accent color (v1.74) ------------- */
+function applyAccent() {
+  const p = accentPair(settings.accent);
+  document.documentElement.style
+    .setProperty("--ghost-accent", p.base);
+  document.documentElement.style
+    .setProperty("--ghost-accent-hi", p.hi);
+}
+$("setAccent").value = settings.accent;
+$("setAccent").onchange = (e) => {
+  settings.accent = e.target.value;
+  saveSettings();
+  applyAccent();
+};
+applyAccent();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
