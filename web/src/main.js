@@ -2034,6 +2034,21 @@ try { window.__ghostStarAns = { starKeyOf,
   isStarAnswer }; } catch (e) {}
 /*@@STARANS-END@@*/
 
+/*@@RETRY@@*/
+/* Retry last send (v1.95): a failed send leaves
+   history ending on the user's message. retryText
+   returns that message, or "" when the last turn
+   already has its answer. */
+function retryText(hist) {
+  if (!hist || !hist.length) return "";
+  const last = hist[hist.length - 1];
+  return last && last.role === "user"
+    ? String(last.content || "") : "";
+}
+try { window.__ghostRetry = { retryText }; }
+catch (e) {}
+/*@@RETRY-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5202,6 +5217,21 @@ $("toolStarred").onclick = () => {
   addMsg("SYSTEM", "Starred answers (" + list.length +
     ", showing " + recent.length + "):\n\n" +
     recent.map((x) => x.text).join("\n\n---\n\n"));
+};
+
+
+/* ---------------- Retry last send (v1.95) ---------- */
+$("retryBtn").onclick = () => {
+  const text = retryText(history);
+  if (!text) {
+    alert("Nothing to retry: the last message " +
+      "already has its answer.");
+    return;
+  }
+  history.pop();
+  saveHistory();
+  $("chatText").value = text;
+  sendChat();
 };
 
 /* ---------------- Tools pack ---------------- */
