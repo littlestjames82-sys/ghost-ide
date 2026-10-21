@@ -2189,6 +2189,19 @@ try { window.__ghostDupFile = { copyName }; }
 catch (e) {}
 /*@@DUPFILE-END@@*/
 
+/*@@JUMP@@*/
+/* Jump to latest (v2.04): the button shows only
+   when the reader is well above the bottom - the
+   inverse of the auto-scroll pack's near-bottom
+   test, with a wider threshold so it does not
+   flicker over a line or two. */
+function showJump(st, ch, sh) {
+  return !isNearBottom(st, ch, sh, 120);
+}
+try { window.__ghostJump = { showJump }; }
+catch (e) {}
+/*@@JUMP-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5514,6 +5527,21 @@ $("dupFileBtn").onclick = async () => {
   if (wd.error) { alert(wd.error); return; }
   await loadFiles();
   openFile(name);
+};
+
+
+/* ---------------- Jump to latest (v2.04) ----------- */
+function syncJumpBtn() {
+  const el = $("chatLog");
+  $("jumpLatest").classList.toggle("hidden",
+    !showJump(el.scrollTop, el.clientHeight,
+      el.scrollHeight));
+}
+$("chatLog").addEventListener("scroll", syncJumpBtn);
+$("jumpLatest").onclick = () => {
+  const el = $("chatLog");
+  el.scrollTop = el.scrollHeight;
+  syncJumpBtn();
 };
 
 /* ---------------- Tools pack ---------------- */
