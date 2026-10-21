@@ -1972,6 +1972,26 @@ try { window.__ghostStars = { parseStars,
   toggleStar }; } catch (e) {}
 /*@@STARS-END@@*/
 
+/*@@SYSPREV@@*/
+/* What-Ghost-sees (v1.92): the invisible half of the
+   conversation, on one screen. Display only - the
+   preview is rendered as a system message and never
+   enters history or the model's context. */
+function systemPreview(o) {
+  return [
+    "Style: " + o.style,
+    "Persona: " + (o.persona || "(none)"),
+    "Custom instructions: " + (o.custom || "(none)"),
+    "Sampling: temp " + o.temp + " · max " + o.maxTok +
+      " tok",
+    "Context: slice budget " + o.budget +
+      " chars · history window " + o.window,
+  ].join("\n");
+}
+try { window.__ghostSysPrev = { systemPreview }; }
+catch (e) {}
+/*@@SYSPREV-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5067,6 +5087,22 @@ $("sessionStar").onclick = () => {
   sortSessionsByStars();
   persistSessions();
   renderSessionSel();
+};
+
+
+/* ---------------- What-Ghost-sees (v1.92) ---------- */
+$("sysPreviewBtn").onclick = () => {
+  addMsg("SYSTEM", "What Ghost sees:\n" + systemPreview({
+    style: settings.chatStyle,
+    persona: personaSuffix(settings.chatStyle),
+    custom: (settings.customInstructions || "").trim(),
+    temp: settings.temperature,
+    maxTok: answerMaxTokens(settings.chatLength,
+      settings.shortAnswers, BEHAVIOR.chat.maxTokens,
+      settings.customTokens),
+    budget: sliceBudget(),
+    window: settings.historyWindow,
+  }));
 };
 
 /* ---------------- Tools pack ---------------- */
