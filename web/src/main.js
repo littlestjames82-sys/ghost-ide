@@ -1348,6 +1348,16 @@ const SLASH_COMMANDS = [
     blurb: "Write tests for the current file or selection" },
   { cmd: "doc", kind: "ai",
     blurb: "Document the current file or selection" },
+  { cmd: "rename", kind: "local",
+    blurb: "Rename this chat: /rename My chat" },
+  { cmd: "star", kind: "local",
+    blurb: "Star or unstar this chat" },
+  { cmd: "scratch", kind: "local",
+    blurb: "Open the scratchpad" },
+  { cmd: "backup", kind: "local",
+    blurb: "Export all GhostIDE data" },
+  { cmd: "sees", kind: "local",
+    blurb: "Preview what Ghost sees" },
   { cmd: "clear", kind: "local", blurb: "Clear this chat" },
   { cmd: "export", kind: "local",
     blurb: "Export this chat (selected format)" },
@@ -4420,6 +4430,22 @@ function runSlash(s) {
     return;
   }
   if (s.cmd === "regen") { $("toolRegen").click(); return; }
+  if (s.cmd === "rename") {
+    const name = String(s.arg || "").trim().slice(0, 60);
+    const cur = chatSessions.find(
+      (x) => x.id === activeSession);
+    if (name && cur) {
+      cur.name = name;
+      persistSessions();
+      renderSessionSel();
+      addMsg("SYSTEM", "Chat renamed to " + name + ".");
+    }
+    return;
+  }
+  if (s.cmd === "star") { $("sessionStar").click(); return; }
+  if (s.cmd === "scratch") { $("toolScratch").click(); return; }
+  if (s.cmd === "backup") { $("toolBackup").click(); return; }
+  if (s.cmd === "sees") { $("sysPreviewBtn").click(); return; }
   if (s.cmd === "help") {
     addMsg("SYSTEM", slashHelpText());
     return;
