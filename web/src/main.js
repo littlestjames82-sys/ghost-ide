@@ -2049,6 +2049,17 @@ try { window.__ghostRetry = { retryText }; }
 catch (e) {}
 /*@@RETRY-END@@*/
 
+/*@@TABSPACK@@*/
+/* Tabs pack (v1.96): bulk closes computed from a
+   snapshot of the open order - closeTab mutates the
+   live order as it goes, so callers iterate a copy. */
+function othersOf(order, keep) {
+  return order.filter((p) => p !== keep);
+}
+try { window.__ghostTabsPack = { othersOf }; }
+catch (e) {}
+/*@@TABSPACK-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5232,6 +5243,19 @@ $("retryBtn").onclick = () => {
   saveHistory();
   $("chatText").value = text;
   sendChat();
+};
+
+
+/* ---------------- Tabs pack (v1.96) ---------------- */
+$("tabCloseOthers").onclick = () => {
+  if (!currentFile) return;
+  for (const p of othersOf(tabOrder.slice(), currentFile))
+    closeTab(p);
+  renderTabs();
+};
+$("tabCloseAll").onclick = () => {
+  for (const p of tabOrder.slice()) closeTab(p);
+  renderTabs();
 };
 
 /* ---------------- Tools pack ---------------- */
