@@ -1439,6 +1439,35 @@ try { window.__ghostSetUtil = { rowMatches,
   sanitizeImportedSettings }; } catch (e) {}
 /*@@SETUTIL-END@@*/
 
+/*@@MSGTOOLS@@*/
+/* Message tools (v1.68): what you can do with a single
+   message - save it as a file, copy only its code
+   blocks, or rewind the chat to one of your turns and
+   edit it. trimForEdit is the pure rewind step. */
+function extractCodeBlocks(text) {
+  const out = [];
+  const re = /```[^\n]*\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(text)) !== null)
+    out.push(m[1].replace(/\n$/, ""));
+  return out;
+}
+function trimForEdit(hist, idx) {
+  if (idx < 0 || idx >= hist.length) return null;
+  if (hist[idx].role !== "user") return null;
+  return { kept: hist.slice(0, idx), text: hist[idx].content };
+}
+function answerFilename(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return "answer-" + d.getFullYear() + "-" +
+    p(d.getMonth() + 1) + "-" + p(d.getDate()) + "-" +
+    p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) +
+    ".md";
+}
+try { window.__ghostMsgTools = { extractCodeBlocks,
+  trimForEdit, answerFilename }; } catch (e) {}
+/*@@MSGTOOLS-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1488,7 +1517,8 @@ function loadHistory() {
     if (m.role !== "user" && m.role !== "assistant") continue;
     history.push(m);
     if (m.role === "user") {
-      addMsg("YOU", m.content);
+      const body = addMsg("YOU", m.content);
+      attachEditBtn(body.parentElement, history.length - 1);
     } else {
       renderRich(addMsg("GHOST", ""), m.content);
     }
@@ -1540,6 +1570,35 @@ function renderRich(el, text) {
       } catch (e) {}
     };
     el.appendChild(cp);
+    const sv = document.createElement("button");
+    sv.className = "msgCopy";
+    sv.textContent = "💾 Save";
+    sv.onclick = async () => {
+      const d = await postJson("/api/file",
+        { path: answerFilename(new Date()), content: text });
+      if (d.error) { alert(d.error); return; }
+      await loadFiles();
+      sv.textContent = "✓ Saved";
+      setTimeout(() => { sv.textContent = "💾 Save"; }, 1200);
+    };
+    el.appendChild(sv);
+    const blocks = extractCodeBlocks(text);
+    if (blocks.length) {
+      const cb2 = document.createElement("button");
+      cb2.className = "msgCopy";
+      cb2.textContent = "</> Code (" + blocks.length + ")";
+      cb2.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(
+            blocks.join("\n\n"));
+          cb2.textContent = "✓ Copied";
+          setTimeout(() => {
+            cb2.textContent = "</> Code (" + blocks.length + ")";
+          }, 1200);
+        } catch (e) {}
+      };
+      el.appendChild(cb2);
+    }
   }
 }
 
@@ -3845,6 +3904,32 @@ $("setImportFile").onchange = async (e) => {
   }
   e.target.value = "";
 };
+
+
+/* ---------------- Message tools (v1.68) ------------ */
+function attachEditBtn(wrap, idx) {
+  if (!wrap) return;
+  const b = document.createElement("button");
+  b.className = "msgCopy";
+  b.textContent = "✎ Edit & resend";
+  b.onclick = () => editUserTurn(idx);
+  wrap.appendChild(b);
+}
+function editUserTurn(idx) {
+  const t = trimForEdit(history, idx);
+  if (!t) return;
+  if (!confirm("Edit this message? Everything after it " +
+      "in this chat will be removed.")) return;
+  history.length = 0;
+  for (const m of t.kept) history.push(m);
+  saveHistory();
+  loadHistory();
+  $("chatText").value = t.text;
+  growChatText();
+  updateChatCount();
+  saveChatDraft();
+  $("chatText").focus();
+}
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
