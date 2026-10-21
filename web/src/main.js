@@ -1771,6 +1771,26 @@ try { window.__ghostProfiles = { applyProfile,
   profileNames }; } catch (e) {}
 /*@@PROFILES-END@@*/
 
+/*@@PINFILES@@*/
+/* Pinned files (v1.82): up to 3 files per project
+   that ride along on every send, like a standing
+   @mention. togglePin is the pure list step: pinning
+   an already-pinned file unpins it, and the cap
+   drops the oldest pin. */
+const PIN_CAP = 3;
+function togglePin(list, path) {
+  if (!path) return list.slice();
+  if (list.includes(path))
+    return list.filter((p) => p !== path);
+  return [...list, path].slice(-PIN_CAP);
+}
+function pinKey(scope) {
+  return "ghostide-pinned:" + scope;
+}
+try { window.__ghostPinFiles = { PIN_CAP, togglePin,
+  pinKey }; } catch (e) {}
+/*@@PINFILES-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1830,6 +1850,7 @@ function loadHistory() {
   restoreChatDraft();
   updateChatStats();
   applyChatFind();
+  loadPinned();
 }
 
 function renderRich(el, text) {
@@ -2077,6 +2098,19 @@ async function sendChat() {
         }
       }
     } catch (e) { /* mentions are best-effort */ }
+  }
+  for (const p of pinnedFiles) {
+    try {
+      const rp = await fetch("/api/file?path=" +
+        encodeURIComponent(p));
+      const dp = await rp.json();
+      if (!dp.error && dp.content != null) {
+        sysContent += "\nPinned file " + p + ":\n```\n" +
+          dp.content.slice(0, BEHAVIOR.context.fileChars) +
+          "\n```";
+        attachedNames.push("📌 " + p);
+      }
+    } catch (e) { /* pinned files are best-effort */ }
   }
   const selNow = view.state.selection.main;
   if (!selNow.empty && currentFile &&
@@ -4553,6 +4587,51 @@ $("profDelete").onclick = () => {
   renderProfSel();
 };
 renderProfSel();
+
+
+/* ---------------- Pinned files (v1.82) ------------ */
+let pinnedFiles = [];
+function loadPinned() {
+  pinnedFiles = [];
+  try {
+    const a = JSON.parse(localStorage.getItem(
+      pinKey(historyScope)) || "[]");
+    if (Array.isArray(a))
+      pinnedFiles = a.filter((p) =>
+        typeof p === "string").slice(-PIN_CAP);
+  } catch (e) {}
+  renderPinChips();
+}
+function savePinned() {
+  try {
+    localStorage.setItem(pinKey(historyScope),
+      JSON.stringify(pinnedFiles));
+  } catch (e) {}
+  renderPinChips();
+}
+function renderPinChips() {
+  const box = $("pinChips");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const p of pinnedFiles) {
+    const c = document.createElement("button");
+    c.textContent = "📌 " + p + " ×";
+    c.title = "Unpin " + p;
+    c.onclick = () => {
+      pinnedFiles = togglePin(pinnedFiles, p);
+      savePinned();
+    };
+    box.appendChild(c);
+  }
+}
+$("pinFileBtn").onclick = () => {
+  if (!currentFile) {
+    alert("Open a file first, then pin it.");
+    return;
+  }
+  pinnedFiles = togglePin(pinnedFiles, currentFile);
+  savePinned();
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
