@@ -1272,6 +1272,58 @@ try { window.__ghostReading = { LINE_HEIGHTS,
   readingState }; } catch (e) {}
 /*@@READING-END@@*/
 
+/*@@EXPORT@@*/
+/* Chat export pack (v1.63): one history, three honest
+   renderings. Markdown matches the format the Tools
+   export has always written; HTML escapes everything
+   (chat text can never inject markup into the file). */
+function escHtmlBasic(s) {
+  return String(s).replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function chatToMarkdown(hist) {
+  return "# GhostIDE chat export\n\n" + hist.map((m) =>
+    (m.role === "user" ? "**You:** " : "**Ghost:** ") +
+    m.content).join("\n\n---\n\n") + "\n";
+}
+function chatToText(hist) {
+  return "GhostIDE chat export\n\n" + hist.map((m) =>
+    (m.role === "user" ? "You: " : "Ghost: ") +
+    m.content).join("\n\n---\n\n") + "\n";
+}
+function chatToHtml(hist) {
+  const parts = hist.map((m) =>
+    "<h3>" + (m.role === "user" ? "You" : "Ghost") +
+    "</h3>\n<pre>" + escHtmlBasic(m.content) + "</pre>");
+  return "<!doctype html>\n<html><head>" +
+    "<meta charset=\"utf-8\">" +
+    "<title>GhostIDE chat export</title><style>" +
+    "body{font-family:system-ui;background:#131519;" +
+    "color:#e6e6e6;max-width:760px;margin:24px auto;" +
+    "padding:0 16px}h3{color:#9a9fb0;margin:18px 0 4px}" +
+    "pre{white-space:pre-wrap;margin:0}</style></head>" +
+    "<body><h1>GhostIDE chat export</h1>\n" +
+    parts.join("\n") + "\n</body></html>\n";
+}
+function chatStats(hist) {
+  let words = 0;
+  for (const m of hist)
+    words += (m.content.match(/\S+/g) || []).length;
+  return { messages: hist.length, words,
+    estTokens: Math.ceil(hist.reduce((a, m) =>
+      a + m.content.length, 0) / 4) };
+}
+function chatStatsText(hist) {
+  const s = chatStats(hist);
+  if (!s.messages) return "No messages yet.";
+  return s.messages + " messages · ~" +
+    s.words.toLocaleString() + " words · ~" +
+    s.estTokens.toLocaleString() + " tok (estimates)";
+}
+try { window.__ghostExport = { chatToMarkdown, chatToText,
+  chatToHtml, chatStats, chatStatsText }; } catch (e) {}
+/*@@EXPORT-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1308,6 +1360,7 @@ function saveHistory() {
     localStorage.setItem(historyKey(),
       JSON.stringify(history.slice(-60)));
   } catch (e) { /* best-effort */ }
+  updateChatStats();
 }
 function loadHistory() {
   history.length = 0;
@@ -1327,6 +1380,7 @@ function loadHistory() {
   }
   if (!items.length) addMsg("GHOST", GREETING);
   restoreChatDraft();
+  updateChatStats();
 }
 
 function renderRich(el, text) {
@@ -3176,7 +3230,7 @@ for (const p of QUICK_PROMPTS) {
   $("chatChips").appendChild(b);
 }
 $("regenBtn").onclick = () => $("toolRegen").click();
-$("exportChatBtn").onclick = () => $("toolExportChat").click();
+$("exportChatBtn").onclick = () => exportChatAs($("exportFmt").value);
 $("copyLastBtn").onclick = async () => {
   let last = "";
   for (let i = history.length - 1; i >= 0; i--) {
@@ -3476,6 +3530,49 @@ $("setActiveLine").onchange = (e) => {
   applyEditorReading();
 };
 applyEditorReading();
+
+
+/* ---------------- Chat export pack (v1.63) --------- */
+function updateChatStats() {
+  const el = $("chatStats");
+  if (el) el.textContent = chatStatsText(history);
+}
+async function exportChatAs(format) {
+  hideTools();
+  if (!history.length) {
+    alert("No chat to export yet.");
+    return;
+  }
+  const stamp = new Date().toISOString().slice(0, 19)
+    .replace(/[:T]/g, "-");
+  const build = { md: chatToMarkdown, txt: chatToText,
+    html: chatToHtml }[format] || chatToMarkdown;
+  const ext = { md: "md", txt: "txt",
+    html: "html" }[format] || "md";
+  const name = "chat-export-" + stamp + "." + ext;
+  const d = await postJson("/api/file",
+    { path: name, content: build(history) });
+  if (d.error) { alert(d.error); return; }
+  await loadFiles();
+  alert("Chat saved to " + name + " in the workspace.");
+}
+$("copyWholeBtn").onclick = async () => {
+  if (!history.length) {
+    alert("No chat to copy yet.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(
+      chatToText(history));
+    $("copyWholeBtn").textContent = "✓ Copied";
+    setTimeout(() => {
+      $("copyWholeBtn").textContent = "⧉ Whole chat";
+    }, 1500);
+  } catch (e) {
+    alert("Copy is not available here.");
+  }
+};
+updateChatStats();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
@@ -4357,19 +4454,7 @@ $("toolRegen").onclick = () => {
   sendChat();
 };
 
-$("toolExportChat").onclick = async () => {
-  hideTools();
-  if (!history.length) { alert("No chat to export yet."); return; }
-  const md = "# GhostIDE chat export\n\n" + history.map((m) =>
-    (m.role === "user" ? "**You:** " : "**Ghost:** ") + m.content)
-    .join("\n\n---\n\n") + "\n";
-  const name = "chat-export-" +
-    new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".md";
-  const d = await postJson("/api/file", { path: name, content: md });
-  if (d.error) { alert(d.error); return; }
-  await loadFiles();
-  alert("Chat saved to " + name + " in the workspace.");
-};
+$("toolExportChat").onclick = () => exportChatAs("md");
 
 $("toolZip").onclick = async () => {
   hideTools();
