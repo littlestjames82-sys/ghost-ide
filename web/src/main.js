@@ -2153,6 +2153,23 @@ try { window.__ghostAutosave = { autosaveDue }; }
 catch (e) {}
 /*@@AUTOSAVE-END@@*/
 
+/*@@SUMMARIZE@@*/
+/* Summarize chat (v2.02): not a new pipeline - a
+   standing instruction sent as a normal message.
+   The model's history window does the rest. Needs
+   at least one full exchange to be worth asking. */
+function summaryRequest(hist) {
+  if (!hist || hist.length < 2) return "";
+  return "Summarize our conversation so far in at " +
+    "most 5 short bullet points: what we set out " +
+    "to do, what we decided, and what is still " +
+    "open. Plain language, no code unless it " +
+    "matters.";
+}
+try { window.__ghostSummarize = { summaryRequest }; }
+catch (e) {}
+/*@@SUMMARIZE-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5442,6 +5459,18 @@ setInterval(() => {
     saveFile();
   }
 }, 1500);
+
+
+/* ---------------- Summarize chat (v2.02) ----------- */
+$("summarizeBtn").onclick = () => {
+  const req = summaryRequest(history);
+  if (!req) {
+    alert("Not enough conversation to summarize yet.");
+    return;
+  }
+  $("chatText").value = req;
+  sendChat();
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
