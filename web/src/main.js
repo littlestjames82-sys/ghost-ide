@@ -1952,6 +1952,26 @@ try { window.__ghostAutoName = { autoChatName,
   isDefaultChatName }; } catch (e) {}
 /*@@AUTONAME-END@@*/
 
+/*@@STARS@@*/
+/* Starred sessions (v1.91): star the chats you live
+   in; they sort to the top of the picker with a star
+   prefix. Stars live under their own per-project key
+   so the session records stay untouched. */
+function parseStars(raw) {
+  try {
+    const a = JSON.parse(raw || "[]");
+    return Array.isArray(a)
+      ? a.filter((x) => typeof x === "string") : [];
+  } catch (e) { return []; }
+}
+function toggleStar(list, id) {
+  return list.includes(id)
+    ? list.filter((x) => x !== id) : list.concat([id]);
+}
+try { window.__ghostStars = { parseStars,
+  toggleStar }; } catch (e) {}
+/*@@STARS-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -4083,7 +4103,8 @@ function renderSessionSel() {
   for (const s of chatSessions) {
     const o = document.createElement("option");
     o.value = s.id;
-    o.textContent = sessionOptionLabel(s, storedHistLen(s.id));
+    o.textContent = (loadStars().includes(s.id) ? "\u2605 " : "") +
+      sessionOptionLabel(s, storedHistLen(s.id));
     sel.appendChild(o);
   }
   sel.value = activeSession;
@@ -4901,7 +4922,7 @@ $("toolExportAll").onclick = () => {
   download("ghostide-all-chats.md", out, "text/markdown");
 };
 $("promptExport").onclick = () => {
-  const list = loadPrompts();
+  const list = promptLib;
   if (!list.length) {
     alert("No saved prompts yet.");
     return;
@@ -5007,7 +5028,7 @@ document.addEventListener("keydown", (e) => {
 /* ---------------- Auto-name (v1.90) ---------------- */
 function maybeAutoName(text) {
   const s = chatSessions.find(
-    (x) => x.id === activeSessionId);
+    (x) => x.id === activeSession);
   if (!s || !isDefaultChatName(s.name)) return;
   const users = history.filter(
     (m) => m.role === "user").length;
@@ -5015,9 +5036,38 @@ function maybeAutoName(text) {
   const name = autoChatName(text);
   if (!name) return;
   s.name = name;
-  saveSessions();
-  syncSessionPicker();
+  persistSessions();
+  renderSessionSel();
 }
+
+
+/* ---------------- Starred sessions (v1.91) --------- */
+function starredKey() {
+  return "ghostide-starred:" + historyScope;
+}
+function loadStars() {
+  try {
+    return parseStars(localStorage.getItem(starredKey()));
+  } catch (e) { return []; }
+}
+function persistStars(list) {
+  try {
+    localStorage.setItem(starredKey(),
+      JSON.stringify(list));
+  } catch (e) {}
+}
+function sortSessionsByStars() {
+  const stars = loadStars();
+  chatSessions.sort((a, b) =>
+    (stars.includes(b.id) ? 1 : 0) -
+    (stars.includes(a.id) ? 1 : 0));
+}
+$("sessionStar").onclick = () => {
+  persistStars(toggleStar(loadStars(), activeSession));
+  sortSessionsByStars();
+  persistSessions();
+  renderSessionSel();
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
