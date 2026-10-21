@@ -2100,6 +2100,45 @@ try { window.__ghostFsQuick = { FS_STEPS, stepFs }; }
 catch (e) {}
 /*@@FSQUICK-END@@*/
 
+/*@@CHATSEARCH@@*/
+/* Search all chats (v2.00): case-insensitive scan
+   of every stored chat in the project. Hits carry
+   the chat name, who said it, and a window around
+   the match. Capped so one common word cannot flood
+   the chat. */
+function searchChats(chats, q, cap) {
+  const needle = String(q || "").trim().toLowerCase();
+  if (!needle) return [];
+  const limit = cap || 12;
+  const out = [];
+  for (const c of chats || []) {
+    for (const m of c.messages || []) {
+      const text = String(m.content || "");
+      const i = text.toLowerCase().indexOf(needle);
+      if (i < 0) continue;
+      const from = Math.max(0, i - 40);
+      out.push({ chat: c.name, role: m.role,
+        excerpt: (from ? "\u2026" : "") +
+          text.slice(from, i + needle.length + 60)
+            .replace(/\s+/g, " ") + "\u2026" });
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+function searchResultsText(q, hits) {
+  if (!hits.length)
+    return "No matches for \"" + q + "\" in this project.";
+  return hits.length + " match" +
+    (hits.length === 1 ? "" : "es") + " for \"" + q +
+    "\":\n\n" + hits.map((h) => "[" + h.chat + "] " +
+    (h.role === "user" ? "You" : "Ghost") + ": " +
+    h.excerpt).join("\n\n");
+}
+try { window.__ghostChatSearch = { searchChats,
+  searchResultsText }; } catch (e) {}
+/*@@CHATSEARCH-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5344,6 +5383,27 @@ function bumpChatFs(dir) {
 }
 $("fsDown").onclick = () => bumpChatFs(-1);
 $("fsUp").onclick = () => bumpChatFs(1);
+
+
+/* ---------------- Search all chats (v2.00) --------- */
+$("toolSearchChats").onclick = () => {
+  hideTools();
+  const q = prompt("Search all chats in this project:");
+  if (!q || !q.trim()) return;
+  saveHistory();
+  const chats = [];
+  for (const s of chatSessions) {
+    let items = [];
+    try {
+      items = JSON.parse(localStorage.getItem(
+        sessionHistoryKey(historyScope, s.id)) || "[]");
+    } catch (e) {}
+    if (Array.isArray(items) && items.length)
+      chats.push({ name: s.name, messages: items });
+  }
+  addMsg("SYSTEM", searchResultsText(q.trim(),
+    searchChats(chats, q, 12)));
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
