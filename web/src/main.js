@@ -2085,6 +2085,21 @@ try { window.__ghostWrapChat = { wrapChatClass }; }
 catch (e) {}
 /*@@WRAPCHAT-END@@*/
 
+/*@@FSQUICK@@*/
+/* Chat size quick-step (v1.99): A- and A+ walk the
+   same size list the Settings picker offers, clamped
+   at both ends. Unknown values land on the middle. */
+const FS_STEPS = ["12", "13", "15"];
+function stepFs(cur, dir) {
+  let i = FS_STEPS.indexOf(String(cur));
+  if (i < 0) i = 1;
+  i = Math.min(FS_STEPS.length - 1, Math.max(0, i + dir));
+  return FS_STEPS[i];
+}
+try { window.__ghostFsQuick = { FS_STEPS, stepFs }; }
+catch (e) {}
+/*@@FSQUICK-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5318,6 +5333,17 @@ $("setWrapChat").onchange = (e) => {
   applyWrapChat();
 };
 applyWrapChat();
+
+
+/* ---------------- Chat size quick-step (v1.99) ----- */
+function bumpChatFs(dir) {
+  settings.chatFs = stepFs(settings.chatFs, dir);
+  $("setChatFs").value = String(settings.chatFs);
+  saveSettings();
+  applyChatLook();
+}
+$("fsDown").onclick = () => bumpChatFs(-1);
+$("fsUp").onclick = () => bumpChatFs(1);
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
