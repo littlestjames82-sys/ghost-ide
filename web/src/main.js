@@ -2060,6 +2060,21 @@ try { window.__ghostTabsPack = { othersOf }; }
 catch (e) {}
 /*@@TABSPACK-END@@*/
 
+/*@@APPINFO@@*/
+/* App info (v1.97): one honest line in Settings -
+   the running version (from the bundled changelog,
+   the same source What's new reads) and live counts
+   of the libraries on this device. */
+function appInfoText(o) {
+  return "GhostIDE v" + o.version + " · " + o.chats +
+    " chats · " + o.prompts + " prompts · " +
+    o.profiles + " profiles · " + o.starred +
+    " starred answers · eco bundle " + o.eco;
+}
+try { window.__ghostAppInfo = { appInfoText }; }
+catch (e) {}
+/*@@APPINFO-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5257,6 +5272,28 @@ $("tabCloseAll").onclick = () => {
   for (const p of tabOrder.slice()) closeTab(p);
   renderTabs();
 };
+
+
+/* ---------------- App info (v1.97) ----------------- */
+async function refreshAppInfo() {
+  let version = "?";
+  try {
+    const r = await fetch("changelog.json");
+    const d = await r.json();
+    if (d.entries && d.entries.length)
+      version = d.entries[0].version;
+  } catch (e) {}
+  const el = $("appInfo");
+  if (el) el.textContent = appInfoText({
+    version,
+    chats: chatSessions.length,
+    prompts: promptLib.length,
+    profiles: Object.keys(loadProfiles()).length,
+    starred: loadStarAnswers().length,
+    eco: "25 packages / 2,642 tests",
+  });
+}
+setTimeout(refreshAppInfo, 900);
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
