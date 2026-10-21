@@ -1852,6 +1852,35 @@ try { window.__ghostExport2 = { titledMarkdown,
   allChatsExport }; } catch (e) {}
 /*@@EXPORT2-END@@*/
 
+/*@@WHATSNEW@@*/
+/* What's new (v1.87): after an update, one quiet
+   system message names the newest change. First run
+   on a device only sets the baseline - no message -
+   and only the single newest entry is ever shown,
+   however many versions were skipped. */
+function cmpVer(a, b) {
+  const pa = String(a).split(".").map(Number);
+  const pb = String(b).split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+function whatsNew(entries, seen) {
+  if (!entries || !entries.length) return null;
+  if (!seen) return null;
+  const top = entries[0];
+  return cmpVer(top.version, seen) > 0 ? top : null;
+}
+function whatsNewText(e) {
+  return "What's new in v" + e.version + " (" +
+    e.goal + "): " + e.summary;
+}
+try { window.__ghostWhatsNew = { cmpVer, whatsNew,
+  whatsNewText }; } catch (e) {}
+/*@@WHATSNEW-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -4808,6 +4837,24 @@ $("promptExport").onclick = () => {
   download("ghostide-prompts.json",
     JSON.stringify(list, null, 1), "application/json");
 };
+
+
+/* ---------------- What's new (v1.87) --------------- */
+async function checkWhatsNew() {
+  try {
+    const r = await fetch("changelog.json");
+    const d = await r.json();
+    const entries = d.entries || [];
+    if (!entries.length) return;
+    const seen = localStorage.getItem(
+      "ghostide-seen-version");
+    const fresh = whatsNew(entries, seen);
+    localStorage.setItem("ghostide-seen-version",
+      entries[0].version);
+    if (fresh) addMsg("SYSTEM", whatsNewText(fresh));
+  } catch (e) {}
+}
+setTimeout(checkWhatsNew, 1200);
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
