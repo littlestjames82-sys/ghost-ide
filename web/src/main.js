@@ -1182,6 +1182,48 @@ try { window.__ghostSessions = { DEFAULT_SESSION,
   removeSession }; } catch (e) {}
 /*@@SESSIONS-END@@*/
 
+/*@@PROMPTS@@*/
+/* Prompt library (v1.60): named prompts the user saves
+   from the chat box and reuses in any project. Stored
+   globally (they are personal tooling, not project
+   data) under ghostide-prompts. */
+function normalizePrompts(list) {
+  const out = [];
+  const seen = new Set();
+  if (Array.isArray(list)) {
+    for (const p of list) {
+      if (!p || typeof p.name !== "string" ||
+          typeof p.text !== "string") continue;
+      const name = p.name.trim().slice(0, 40);
+      const text = p.text.trim().slice(0, 4000);
+      if (!name || !text || seen.has(name)) continue;
+      seen.add(name);
+      out.push({ name, text });
+    }
+  }
+  return out;
+}
+function upsertPrompt(list, name, text) {
+  const clean = normalizePrompts([{ name, text }]);
+  if (!clean.length) return normalizePrompts(list);
+  const rest = normalizePrompts(list)
+    .filter((p) => p.name !== clean[0].name);
+  rest.push(clean[0]);
+  return rest;
+}
+function removePrompt(list, name) {
+  return normalizePrompts(list)
+    .filter((p) => p.name !== name);
+}
+function promptByName(list, name) {
+  return normalizePrompts(list)
+    .find((p) => p.name === name) || null;
+}
+try { window.__ghostPrompts = { normalizePrompts,
+  upsertPrompt, removePrompt, promptByName }; }
+catch (e) {}
+/*@@PROMPTS-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -3250,6 +3292,67 @@ $("sessionDel").onclick = () => {
   persistSessions();
   renderSessionSel();
   loadHistory();
+};
+
+
+/* ---------------- Prompt library (v1.60) ---------- */
+let promptLib = [];
+try {
+  promptLib = normalizePrompts(JSON.parse(
+    localStorage.getItem("ghostide-prompts") || "[]"));
+} catch (e) { promptLib = []; }
+function persistPrompts() {
+  try {
+    localStorage.setItem("ghostide-prompts",
+      JSON.stringify(promptLib));
+  } catch (e) {}
+}
+function renderPromptSel() {
+  const sel = $("promptSel");
+  sel.innerHTML = "";
+  const head = document.createElement("option");
+  head.value = "";
+  head.textContent = promptLib.length
+    ? "Saved prompts…" : "No saved prompts yet";
+  sel.appendChild(head);
+  for (const p of promptLib) {
+    const o = document.createElement("option");
+    o.value = p.name;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  }
+}
+renderPromptSel();
+$("promptSave").onclick = () => {
+  const text = $("chatText").value.trim();
+  if (!text) {
+    alert("Type the prompt in the chat box first.");
+    return;
+  }
+  const name = prompt("Name this prompt",
+    text.slice(0, 30));
+  if (name === null) return;
+  promptLib = upsertPrompt(promptLib, name, text);
+  persistPrompts();
+  renderPromptSel();
+  $("promptSel").value = name.trim().slice(0, 40);
+};
+$("promptInsert").onclick = () => {
+  const p = promptByName(promptLib, $("promptSel").value);
+  if (!p) { alert("Pick a saved prompt first."); return; }
+  $("chatText").value = p.text;
+  growChatText();
+  updateChatCount();
+  saveChatDraft();
+  $("chatText").focus();
+};
+$("promptDel").onclick = () => {
+  const name = $("promptSel").value;
+  if (!name) { alert("Pick a saved prompt first."); return; }
+  if (!confirm("Delete the prompt \"" + name + "\"?")) return;
+  promptLib = removePrompt(promptLib, name);
+  persistPrompts();
+  renderPromptSel();
 };
 
 /* ---------------- Tools pack ---------------- */
