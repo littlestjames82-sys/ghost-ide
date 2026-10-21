@@ -1791,6 +1791,18 @@ try { window.__ghostPinFiles = { PIN_CAP, togglePin,
   pinKey }; } catch (e) {}
 /*@@PINFILES-END@@*/
 
+/*@@SCRATCH@@*/
+/* Scratchpad (v1.83): one persistent note. trimScratch
+   is the shared gate for its actions - an empty pad
+   does nothing, anywhere. */
+function trimScratch(text) {
+  const t = String(text || "").trim();
+  return t ? t : null;
+}
+try { window.__ghostScratch = { trimScratch }; }
+catch (e) {}
+/*@@SCRATCH-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -4631,6 +4643,44 @@ $("pinFileBtn").onclick = () => {
   }
   pinnedFiles = togglePin(pinnedFiles, currentFile);
   savePinned();
+};
+
+
+/* ---------------- Scratchpad (v1.83) --------------- */
+$("toolScratch").onclick = () => {
+  hideTools();
+  try {
+    $("scratchText").value =
+      localStorage.getItem("ghostide-scratch") || "";
+  } catch (e) {}
+  $("scratchPanel").classList.remove("hidden");
+  $("scratchText").focus();
+};
+$("scratchClose").onclick = () =>
+  $("scratchPanel").classList.add("hidden");
+$("scratchText").addEventListener("input", (e) => {
+  try {
+    localStorage.setItem("ghostide-scratch", e.target.value);
+  } catch (err) {}
+});
+$("scratchToChat").onclick = () => {
+  const t = trimScratch($("scratchText").value);
+  if (!t) { alert("The scratchpad is empty."); return; }
+  $("chatText").value = t;
+  growChatText();
+  updateChatCount();
+  saveChatDraft();
+  $("scratchPanel").classList.add("hidden");
+  $("chatText").focus();
+};
+$("scratchSave").onclick = async () => {
+  const t = trimScratch($("scratchText").value);
+  if (!t) { alert("The scratchpad is empty."); return; }
+  const d = await postJson("/api/file",
+    { path: "scratchpad.md", content: t });
+  if (d.error) { alert(d.error); return; }
+  await loadFiles();
+  addMsg("SYSTEM", "Scratchpad saved as scratchpad.md.");
 };
 
 /* ---------------- Tools pack ---------------- */
