@@ -1821,6 +1821,21 @@ try { window.__ghostAppear2 = { CHAT_FONTS,
   chatFontStack }; } catch (e) {}
 /*@@APPEAR2-END@@*/
 
+/*@@LASTRUN@@*/
+/* Last run (v1.85): the generation stats, kept. The
+   completion stats used to flash in the context
+   meter and vanish; this line keeps the latest one,
+   with the temperature and token cap that produced
+   it, and survives restarts. */
+function lastRunText(stats, temp, maxTok) {
+  if (!stats) return "";
+  return "Last run: " + stats + " · temp " + temp +
+    " · max " + maxTok + " tok";
+}
+try { window.__ghostLastRun = { lastRunText }; }
+catch (e) {}
+/*@@LASTRUN-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -2260,7 +2275,17 @@ async function sendChat() {
   sendBtn.onclick = sendChat;
   renderRich(body, full);
   const stats = genStats(full.length, Date.now() - chatT0);
-  if (stats) $("ctxMeter").textContent = stats;
+  if (stats) {
+    $("ctxMeter").textContent = stats;
+    const lr = lastRunText(stats, settings.temperature,
+      answerMaxTokens(settings.chatLength,
+        settings.shortAnswers, BEHAVIOR.chat.maxTokens,
+        settings.customTokens));
+    $("lastRun").textContent = lr;
+    try {
+      localStorage.setItem("ghostide-lastrun", lr);
+    } catch (e) {}
+  }
   history.push({ role: "assistant", content: full });
   saveHistory();
   notifyDone("Ghost answered", "Your chat reply is ready.",
@@ -4727,6 +4752,13 @@ $("setChatFont").onchange = (e) => {
   applyAppear2();
 };
 applyAppear2();
+
+
+/* ---------------- Last run (v1.85) ----------------- */
+try {
+  const lr = localStorage.getItem("ghostide-lastrun");
+  if (lr) $("lastRun").textContent = lr;
+} catch (e) {}
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
