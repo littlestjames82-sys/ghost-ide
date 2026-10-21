@@ -91,7 +91,9 @@ const settings = Object.assign(
     reduceMotion: false, fontFamily: "default",
     customTokens: 1024, lineHeight: "1.45",
     ligatures: true, lineNumbers: true,
-    activeLine: true },
+    activeLine: true, chatFs: "13",
+    chatWidth: "360", bubbles: false,
+    roleLabels: true },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
 function saveSettings() {
   localStorage.setItem("ghostide-settings", JSON.stringify(settings));
@@ -1363,6 +1365,30 @@ function slashHelpText() {
 try { window.__ghostSlash = { SLASH_COMMANDS, parseSlash,
   slashHelpText }; } catch (e) {}
 /*@@SLASH-END@@*/
+
+/*@@DISPLAY@@*/
+/* Chat display pack (v1.65): chat text size, panel
+   width, message bubbles and who labels. Pure mapping
+   from settings to CSS variables + body classes; the
+   Compact chat density still wins over the text size
+   when both are set (its rule is more specific). */
+const CHAT_FS = ["12", "13", "15"];
+const CHAT_WIDTHS = ["320", "360", "460", "560"];
+function displayState(s) {
+  return {
+    chatFs: CHAT_FS.includes(String(s.chatFs))
+      ? String(s.chatFs) : "13",
+    chatW: CHAT_WIDTHS.includes(String(s.chatWidth))
+      ? String(s.chatWidth) : "360",
+    classes: [
+      s.bubbles === true ? "chat-bubbles" : "",
+      s.roleLabels === false ? "no-roles" : "",
+    ].filter(Boolean),
+  };
+}
+try { window.__ghostDisplay = { CHAT_FS, CHAT_WIDTHS,
+  displayState }; } catch (e) {}
+/*@@DISPLAY-END@@*/
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -3637,6 +3663,43 @@ function runSlash(s) {
     return;
   }
 }
+
+
+/* ---------------- Chat display pack (v1.65) -------- */
+function applyChatLook() {
+  const st = displayState(settings);
+  document.documentElement.style.setProperty(
+    "--ghost-chat-fs", st.chatFs + "px");
+  document.documentElement.style.setProperty(
+    "--ghost-chat-w", st.chatW + "px");
+  for (const cl of ["chat-bubbles", "no-roles"])
+    document.body.classList.toggle(cl, st.classes.includes(cl));
+}
+$("setChatFs").value = String(settings.chatFs || "13");
+$("setChatFs").onchange = (e) => {
+  settings.chatFs = e.target.value;
+  saveSettings();
+  applyChatLook();
+};
+$("setChatWidth").value = String(settings.chatWidth || "360");
+$("setChatWidth").onchange = (e) => {
+  settings.chatWidth = e.target.value;
+  saveSettings();
+  applyChatLook();
+};
+$("setBubbles").checked = settings.bubbles === true;
+$("setBubbles").onchange = (e) => {
+  settings.bubbles = e.target.checked;
+  saveSettings();
+  applyChatLook();
+};
+$("setRoleLabels").checked = settings.roleLabels !== false;
+$("setRoleLabels").onchange = (e) => {
+  settings.roleLabels = e.target.checked;
+  saveSettings();
+  applyChatLook();
+};
+applyChatLook();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
