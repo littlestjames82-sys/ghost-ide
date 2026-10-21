@@ -1730,6 +1730,27 @@ try { window.__ghostInsert = { insertionText }; }
 catch (e) {}
 /*@@INSERT-END@@*/
 
+/*@@SESSIONS2@@*/
+/* Sessions pack 2 (v1.80): duplicate a chat (list and
+   stored history) and see message counts in the
+   picker. planDuplicate is the pure list step; the
+   history copy itself is a raw storage copy. */
+function dupSessionName(name) {
+  return (name || "Chat") + " copy";
+}
+function sessionOptionLabel(s, count) {
+  return s.name + " (" + count + ")";
+}
+function planDuplicate(list, activeId, newId) {
+  const src = list.find((s) => s.id === activeId);
+  if (!src) return null;
+  const copy = { id: newId, name: dupSessionName(src.name) };
+  return { list: [...list, copy], copy };
+}
+try { window.__ghostSessions2 = { dupSessionName,
+  sessionOptionLabel, planDuplicate }; } catch (e) {}
+/*@@SESSIONS2-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -3836,7 +3857,7 @@ function renderSessionSel() {
   for (const s of chatSessions) {
     const o = document.createElement("option");
     o.value = s.id;
-    o.textContent = s.name;
+    o.textContent = sessionOptionLabel(s, storedHistLen(s.id));
     sel.appendChild(o);
   }
   sel.value = activeSession;
@@ -4427,6 +4448,33 @@ $("chatText").addEventListener("keydown", (e) => {
   updateChatCount();
   ta.setSelectionRange(ta.value.length, ta.value.length);
 });
+
+
+/* ---------------- Sessions pack 2 (v1.80) ---------- */
+function storedHistLen(sid) {
+  try {
+    const items = JSON.parse(localStorage.getItem(
+      sessionHistoryKey(historyScope, sid)) || "[]");
+    return Array.isArray(items) ? items.length : 0;
+  } catch (e) { return 0; }
+}
+$("sessionDup").onclick = () => {
+  const plan = planDuplicate(chatSessions, activeSession,
+    "s" + Date.now().toString(36));
+  if (!plan) return;
+  saveHistory();
+  try {
+    const raw = localStorage.getItem(
+      sessionHistoryKey(historyScope, activeSession));
+    if (raw) localStorage.setItem(
+      sessionHistoryKey(historyScope, plan.copy.id), raw);
+  } catch (e) {}
+  chatSessions = plan.list;
+  persistSessions();
+  switchSession(plan.copy.id);
+  addMsg("SYSTEM", "Duplicated this chat as \"" +
+    plan.copy.name + "\".");
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
