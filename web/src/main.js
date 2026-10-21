@@ -1511,6 +1511,24 @@ try { window.__ghostShortcuts = { SHORTCUTS, stepSession,
   shortcutHelpText }; } catch (e) {}
 /*@@SHORTCUTS-END@@*/
 
+/*@@SPEAK@@*/
+/* Speak answer (v1.71): answers read aloud with the
+   platform voice. speakText flattens markdown into
+   something listenable - code blocks become a spoken
+   placeholder instead of a stream of symbols. */
+function speakText(text) {
+  return String(text)
+    .replace(/```[\s\S]*?```/g, " (code block) ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 4000);
+}
+try { window.__ghostSpeak = { speakText }; } catch (e) {}
+/*@@SPEAK-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1626,6 +1644,22 @@ function renderRich(el, text) {
       setTimeout(() => { sv.textContent = "💾 Save"; }, 1200);
     };
     el.appendChild(sv);
+    const sp = document.createElement("button");
+    sp.className = "msgCopy";
+    sp.textContent = "🔊 Speak";
+    sp.onclick = () => {
+      if (!("speechSynthesis" in window)) {
+        alert("Speech is not available on this device.");
+        return;
+      }
+      if (speechSynthesis.speaking) {
+        speechSynthesis.cancel();
+        return;
+      }
+      speechSynthesis.speak(
+        new SpeechSynthesisUtterance(speakText(text)));
+    };
+    el.appendChild(sp);
     const blocks = extractCodeBlocks(text);
     if (blocks.length) {
       const cb2 = document.createElement("button");
