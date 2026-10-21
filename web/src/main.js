@@ -1717,6 +1717,19 @@ try { window.__ghostInputHist = { SENT_CAP, pushSent,
   navSent }; } catch (e) {}
 /*@@INPUTHIST-END@@*/
 
+/*@@INSERT@@*/
+/* Insert answer (v1.79): what lands in the editor
+   when you tap Insert on an answer - just the code
+   when the answer has code blocks, the full text
+   otherwise. */
+function insertionText(text) {
+  const blocks = extractCodeBlocks(text);
+  return blocks.length ? blocks.join("\n\n") : String(text);
+}
+try { window.__ghostInsert = { insertionText }; }
+catch (e) {}
+/*@@INSERT-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1848,6 +1861,29 @@ function renderRich(el, text) {
         new SpeechSynthesisUtterance(speakText(text)));
     };
     el.appendChild(sp);
+    const ins = document.createElement("button");
+    ins.className = "msgCopy";
+    ins.textContent = "⤵ Insert";
+    ins.title = "Insert into the editor at the cursor";
+    ins.onclick = () => {
+      if (!currentFile) {
+        alert("Open a file first, then insert.");
+        return;
+      }
+      const sel = view.state.selection.main;
+      const payload = insertionText(text);
+      view.dispatch({
+        changes: { from: sel.from, to: sel.to,
+          insert: payload },
+        selection: { anchor: sel.from + payload.length },
+      });
+      view.focus();
+      ins.textContent = "✓ Inserted";
+      setTimeout(() => {
+        ins.textContent = "⤵ Insert";
+      }, 1200);
+    };
+    el.appendChild(ins);
     const blocks = extractCodeBlocks(text);
     if (blocks.length) {
       const cb2 = document.createElement("button");
