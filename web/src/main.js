@@ -92,7 +92,7 @@ const settings = Object.assign(
     customTokens: 1024, lineHeight: "1.45",
     ligatures: true, lineNumbers: true,
     activeLine: true, chatFs: "13",
-    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false, wrapChat: false,
+    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false, wrapChat: false, autosave: false,
     roleLabels: true, sliceBudget: 6000,
     attachSelection: true, attachDiff: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
@@ -2138,6 +2138,20 @@ function searchResultsText(q, hits) {
 try { window.__ghostChatSearch = { searchChats,
   searchResultsText }; } catch (e) {}
 /*@@CHATSEARCH-END@@*/
+
+/*@@AUTOSAVE@@*/
+/* Autosave (v2.01): the poller snapshots the doc
+   every 1.5s; autosave is due only when the setting
+   is on, a file is open and dirty, and the snapshot
+   has been stable for two ticks (about 3 idle
+   seconds). Typing resets the clock by changing
+   the snapshot. */
+function autosaveDue(on, hasFile, isDirty, idleTicks) {
+  return !!(on && hasFile && isDirty && idleTicks >= 2);
+}
+try { window.__ghostAutosave = { autosaveDue }; }
+catch (e) {}
+/*@@AUTOSAVE-END@@*/
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -5404,6 +5418,30 @@ $("toolSearchChats").onclick = () => {
   addMsg("SYSTEM", searchResultsText(q.trim(),
     searchChats(chats, q, 12)));
 };
+
+
+/* ---------------- Autosave (v2.01) ----------------- */
+$("setAutosave").checked = !!settings.autosave;
+$("setAutosave").onchange = (e) => {
+  settings.autosave = e.target.checked;
+  saveSettings();
+};
+let asSnap = null, asIdle = 0;
+setInterval(() => {
+  if (!settings.autosave || !currentFile || !dirty) {
+    asSnap = null;
+    asIdle = 0;
+    return;
+  }
+  const cur = view.state.doc.toString();
+  if (cur === asSnap) asIdle++;
+  else { asSnap = cur; asIdle = 0; }
+  if (autosaveDue(settings.autosave, !!currentFile,
+      dirty, asIdle)) {
+    asIdle = 0;
+    saveFile();
+  }
+}, 1500);
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
