@@ -92,7 +92,7 @@ const settings = Object.assign(
     customTokens: 1024, lineHeight: "1.45",
     ligatures: true, lineNumbers: true,
     activeLine: true, chatFs: "13",
-    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false,
+    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false, wrapChat: false,
     roleLabels: true, sliceBudget: 6000,
     attachSelection: true, attachDiff: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
@@ -2074,6 +2074,16 @@ function appInfoText(o) {
 try { window.__ghostAppInfo = { appInfoText }; }
 catch (e) {}
 /*@@APPINFO-END@@*/
+
+/*@@WRAPCHAT@@*/
+/* Chat wrap (v1.98): one body class flips the chat
+   to soft wrapping. Pure step maps the setting. */
+function wrapChatClass(on) {
+  return on ? "chat-wrap" : "";
+}
+try { window.__ghostWrapChat = { wrapChatClass }; }
+catch (e) {}
+/*@@WRAPCHAT-END@@*/
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -5294,6 +5304,20 @@ async function refreshAppInfo() {
   });
 }
 setTimeout(refreshAppInfo, 900);
+
+
+/* ---------------- Chat wrap (v1.98) ---------------- */
+function applyWrapChat() {
+  document.body.classList.toggle("chat-wrap",
+    !!settings.wrapChat);
+}
+$("setWrapChat").checked = !!settings.wrapChat;
+$("setWrapChat").onchange = (e) => {
+  settings.wrapChat = e.target.checked;
+  saveSettings();
+  applyWrapChat();
+};
+applyWrapChat();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
