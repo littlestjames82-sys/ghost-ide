@@ -1881,6 +1881,19 @@ try { window.__ghostWhatsNew = { cmpVer, whatsNew,
   whatsNewText }; } catch (e) {}
 /*@@WHATSNEW-END@@*/
 
+/*@@FILEACT@@*/
+/* File header actions (v1.88): one-tap copies for the
+   open file. pathBase is the label helper - the part
+   of the path you actually recognize. */
+function pathBase(path) {
+  if (!path) return "";
+  const parts = String(path).split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
+}
+try { window.__ghostFileAct = { pathBase }; }
+catch (e) {}
+/*@@FILEACT-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -4855,6 +4868,36 @@ async function checkWhatsNew() {
   } catch (e) {}
 }
 setTimeout(checkWhatsNew, 1200);
+
+
+/* ---------------- File header actions (v1.88) ----- */
+$("copyPathBtn").onclick = async () => {
+  if (!currentFile) {
+    alert("No file is open.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(currentFile);
+    $("copyPathBtn").textContent = "✓ Path";
+    setTimeout(() => {
+      $("copyPathBtn").textContent = "⧉ Path";
+    }, 1200);
+  } catch (e) {}
+};
+$("copyFileBtn").onclick = async () => {
+  if (!currentFile) {
+    alert("No file is open.");
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(
+      view.state.doc.toString());
+    $("copyFileBtn").textContent = "✓ File";
+    setTimeout(() => {
+      $("copyFileBtn").textContent = "⧉ File";
+    }, 1200);
+  } catch (e) {}
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
