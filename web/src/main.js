@@ -2216,6 +2216,21 @@ try { window.__ghostClearChats = { projectHistoryKeys }; }
 catch (e) {}
 /*@@CLEARCHATS-END@@*/
 
+/*@@SPEAKLAST@@*/
+/* Speak last answer (v2.06): the newest assistant
+   message in history, or "" when there is none. */
+function lastAnswerOf(hist) {
+  const h = hist || [];
+  for (let i = h.length - 1; i >= 0; i--) {
+    if (h[i].role === "assistant")
+      return String(h[i].content || "");
+  }
+  return "";
+}
+try { window.__ghostSpeakLast = { lastAnswerOf }; }
+catch (e) {}
+/*@@SPEAKLAST-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5569,6 +5584,26 @@ $("clearChatsBtn").onclick = () => {
   }
   loadHistory();
   renderSessionSel();
+};
+
+
+/* ---------------- Speak last answer (v2.06) -------- */
+$("speakLastBtn").onclick = () => {
+  const text = lastAnswerOf(history);
+  if (!text) {
+    alert("No answer to speak yet.");
+    return;
+  }
+  if (!("speechSynthesis" in window)) {
+    alert("Speech is not available on this device.");
+    return;
+  }
+  if (speechSynthesis.speaking) {
+    speechSynthesis.cancel();
+    return;
+  }
+  speechSynthesis.speak(
+    new SpeechSynthesisUtterance(speakText(text)));
 };
 
 /* ---------------- Tools pack ---------------- */
