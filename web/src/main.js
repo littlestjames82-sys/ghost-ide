@@ -1482,6 +1482,35 @@ try { window.__ghostFindChat = { msgMatches }; }
 catch (e) {}
 /*@@FINDCHAT-END@@*/
 
+/*@@SHORTCUTS@@*/
+/* Keyboard shortcuts (v1.70): chat-focused keys that
+   stay out of the code editor's way (CodeMirror owns
+   its keys; only Ctrl+. is taken there). The table is
+   the single source for the help text. */
+const SHORTCUTS = [
+  { keys: "Ctrl + .", what: "Jump to the chat box" },
+  { keys: "Ctrl + /", what: "Show or hide Chat options" },
+  { keys: "Ctrl + L", what: "Clear this chat (asks first)" },
+  { keys: "Ctrl + Shift + Down", what: "Next chat" },
+  { keys: "Ctrl + Shift + Up", what: "Previous chat" },
+  { keys: "Ctrl + K", what: "Quick open (existing)" },
+  { keys: "Ctrl + Shift + P", what: "Command palette (existing)" },
+  { keys: "Ctrl + Shift + O", what: "Symbol search (existing)" },
+];
+function stepSession(list, activeId, dir) {
+  if (!list.length) return activeId;
+  const i = list.findIndex((s) => s.id === activeId);
+  if (i < 0) return list[0].id;
+  return list[(i + dir + list.length) % list.length].id;
+}
+function shortcutHelpText() {
+  return "Keyboard shortcuts (outside the code editor):\n" +
+    SHORTCUTS.map((s) => s.keys + " - " + s.what).join("\n");
+}
+try { window.__ghostShortcuts = { SHORTCUTS, stepSession,
+  shortcutHelpText }; } catch (e) {}
+/*@@SHORTCUTS-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -3962,6 +3991,35 @@ function applyChatFind() {
     : "";
 }
 $("chatFind").addEventListener("input", applyChatFind);
+
+
+/* ---------------- Shortcuts pack (v1.70) ----------- */
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const inEditor = e.target && e.target.closest &&
+    e.target.closest(".cm-editor");
+  if (e.key === ".") {
+    e.preventDefault();
+    $("chatText").focus();
+    return;
+  }
+  if (inEditor) return;
+  if (e.key === "/") {
+    e.preventDefault();
+    $("chatOptsBtn").click();
+  } else if (e.key.toLowerCase() === "l" && !e.shiftKey) {
+    e.preventDefault();
+    $("clearChatBtn").click();
+  } else if (e.shiftKey && e.key === "ArrowDown") {
+    e.preventDefault();
+    switchSession(stepSession(chatSessions, activeSession, 1));
+  } else if (e.shiftKey && e.key === "ArrowUp") {
+    e.preventDefault();
+    switchSession(stepSession(chatSessions, activeSession, -1));
+  }
+});
+$("shortcutBtn").onclick = () =>
+  addMsg("SYSTEM", shortcutHelpText());
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
