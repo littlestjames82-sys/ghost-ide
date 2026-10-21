@@ -88,7 +88,8 @@ const settings = Object.assign(
     chatLength: "normal", customInstr: "",
     historyTurns: 0, sendKey: "enter",
     timestamps: false, compactChat: false,
-    reduceMotion: false, fontFamily: "default" },
+    reduceMotion: false, fontFamily: "default",
+    customTokens: 1024 },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
 function saveSettings() {
   localStorage.setItem("ghostide-settings", JSON.stringify(settings));
@@ -1091,9 +1092,13 @@ function personaSuffix(styleId, custom) {
     "every answer:\n" + c;
   return s;
 }
-function answerMaxTokens(lenId, shortLegacy, base) {
+function answerMaxTokens(lenId, shortLegacy, base, custom) {
   if (lenId === "short") return 512;
   if (lenId === "long") return 2048;
+  if (lenId === "custom") {
+    const n = parseInt(custom, 10);
+    return (n >= 128 && n <= 2048) ? n : base;
+  }
   if (lenId === "normal") return base;
   return shortLegacy ? 512 : base;
 }
@@ -1223,6 +1228,26 @@ try { window.__ghostPrompts = { normalizePrompts,
   upsertPrompt, removePrompt, promptByName }; }
 catch (e) {}
 /*@@PROMPTS-END@@*/
+
+/*@@SAMPLING@@*/
+/* Sampling controls (v1.61): temperature presets and
+   the generation stats line. Only controls the model
+   path really honors on BOTH builds live here - the
+   phone bridge takes temperature + max tokens, and
+   the desktop proxies the same fields. */
+const TEMP_PRESETS = { precise: 0.1, balanced: 0.3,
+  creative: 0.7 };
+function genStats(chars, ms) {
+  if (!chars || !ms || ms <= 0) return "";
+  const tok = Math.ceil(chars / 4);
+  const secs = (ms / 1000).toFixed(1);
+  const rate = Math.max(1, Math.round(tok / (ms / 1000)));
+  return "answered in " + secs + "s · ~" + tok +
+    " tok · ~" + rate + " tok/s (estimates)";
+}
+try { window.__ghostSampling = { TEMP_PRESETS, genStats }; }
+catch (e) {}
+/*@@SAMPLING-END@@*/
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -1507,7 +1532,8 @@ async function sendChat() {
       body: JSON.stringify({
         messages, stream: true,
         max_tokens: answerMaxTokens(settings.chatLength,
-          settings.shortAnswers, BEHAVIOR.chat.maxTokens),
+          settings.shortAnswers, BEHAVIOR.chat.maxTokens,
+          settings.customTokens),
         temperature: settings.temperature }),
     });
     const reader = r.body.getReader();
@@ -1548,6 +1574,8 @@ async function sendChat() {
   sendBtn.textContent = "Send";
   sendBtn.onclick = sendChat;
   renderRich(body, full);
+  const stats = genStats(full.length, Date.now() - chatT0);
+  if (stats) $("ctxMeter").textContent = stats;
   history.push({ role: "assistant", content: full });
   saveHistory();
   notifyDone("Ghost answered", "Your chat reply is ready.",
@@ -3354,6 +3382,41 @@ $("promptDel").onclick = () => {
   persistPrompts();
   renderPromptSel();
 };
+
+
+/* ---------------- Sampling controls (v1.61) ------- */
+function syncTempControls() {
+  $("setTemp").value = settings.temperature;
+  $("setTempVal").textContent = settings.temperature;
+  $("chatTemp").value = settings.temperature;
+  $("chatTempVal").textContent = settings.temperature;
+}
+function setTemperature(v) {
+  settings.temperature = v;
+  saveSettings();
+  syncTempControls();
+}
+/* Replaces the Phase 1.6 setTemp handler so the chat
+   slider and the Settings slider never drift apart. */
+$("setTemp").oninput = () =>
+  setTemperature(parseFloat($("setTemp").value));
+$("chatTemp").oninput = () =>
+  setTemperature(parseFloat($("chatTemp").value));
+$("tempPrecise").onclick = () =>
+  setTemperature(TEMP_PRESETS.precise);
+$("tempBalanced").onclick = () =>
+  setTemperature(TEMP_PRESETS.balanced);
+$("tempCreative").onclick = () =>
+  setTemperature(TEMP_PRESETS.creative);
+$("setCustomTokens").value = settings.customTokens || 1024;
+$("setCustomTokens").onchange = (e) => {
+  const n = parseInt(e.target.value, 10);
+  if (n >= 128 && n <= 2048) {
+    settings.customTokens = n;
+    saveSettings();
+  }
+};
+syncTempControls();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
