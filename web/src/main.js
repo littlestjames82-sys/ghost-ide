@@ -2202,6 +2202,20 @@ try { window.__ghostJump = { showJump }; }
 catch (e) {}
 /*@@JUMP-END@@*/
 
+/*@@CLEARCHATS@@*/
+/* Clear all chats (v2.05): the key list comes from
+   the real sessionHistoryKey, so the default
+   session's bare key and the named sessions' keys
+   are all covered - nothing else in storage is
+   touched. */
+function projectHistoryKeys(scope, sessions) {
+  return (sessions || []).map(
+    (s) => sessionHistoryKey(scope, s.id));
+}
+try { window.__ghostClearChats = { projectHistoryKeys }; }
+catch (e) {}
+/*@@CLEARCHATS-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5542,6 +5556,19 @@ $("jumpLatest").onclick = () => {
   const el = $("chatLog");
   el.scrollTop = el.scrollHeight;
   syncJumpBtn();
+};
+
+
+/* ---------------- Clear all chats (v2.05) ---------- */
+$("clearChatsBtn").onclick = () => {
+  if (!confirm("Delete every chat in this project? " +
+      "This cannot be undone.")) return;
+  for (const k of projectHistoryKeys(historyScope,
+      chatSessions)) {
+    try { localStorage.removeItem(k); } catch (e) {}
+  }
+  loadHistory();
+  renderSessionSel();
 };
 
 /* ---------------- Tools pack ---------------- */
