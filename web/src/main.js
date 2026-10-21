@@ -92,7 +92,7 @@ const settings = Object.assign(
     customTokens: 1024, lineHeight: "1.45",
     ligatures: true, lineNumbers: true,
     activeLine: true, chatFs: "13",
-    chatWidth: "360", accent: "green", notifySound: "soft", bubbles: false,
+    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, bubbles: false,
     roleLabels: true, sliceBudget: 6000,
     attachSelection: true, attachDiff: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
@@ -1673,6 +1673,22 @@ try { window.__ghostBackup = { backupKeyOk, buildBackup,
   parseBackup }; } catch (e) {}
 /*@@BACKUP-END@@*/
 
+/*@@SCROLL@@*/
+/* Auto-scroll control (v1.77): with auto-scroll on
+   (the long-standing behavior) the chat always jumps
+   to the newest message. With it off, the view only
+   follows when you were already near the bottom, so
+   reading back is never interrupted. */
+function isNearBottom(st, ch, sh, thr) {
+  return sh - (st + ch) <= (thr || 80);
+}
+function shouldChatScroll(auto, wasNear) {
+  return auto !== false || !!wasNear;
+}
+try { window.__ghostScroll = { isNearBottom,
+  shouldChatScroll }; } catch (e) {}
+/*@@SCROLL-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1840,8 +1856,12 @@ function addMsg(who, text, stamp) {
   body.textContent = text;
   wrap.appendChild(w);
   wrap.appendChild(body);
-  $("chatLog").appendChild(wrap);
-  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+  const logEl = $("chatLog");
+  const wasNear = isNearBottom(logEl.scrollTop,
+    logEl.clientHeight, logEl.scrollHeight);
+  logEl.appendChild(wrap);
+  if (shouldChatScroll(settings.autoScroll, wasNear))
+    logEl.scrollTop = logEl.scrollHeight;
   return body;
 }
 
@@ -2045,7 +2065,11 @@ async function sendChat() {
           const delta = j.choices?.[0]?.delta?.content || "";
           full += delta;
           body.textContent = full;
-          $("chatLog").scrollTop = $("chatLog").scrollHeight;
+          const logS = $("chatLog");
+          if (shouldChatScroll(settings.autoScroll,
+              isNearBottom(logS.scrollTop,
+                logS.clientHeight, logS.scrollHeight)))
+            logS.scrollTop = logS.scrollHeight;
         } catch (e) { /* partial JSON line; wait for more */ }
       }
     }
@@ -4292,6 +4316,14 @@ $("setImportData").onclick = () => pickTextFile((text) => {
   }
   location.reload();
 });
+
+
+/* ---------------- Auto-scroll (v1.77) -------------- */
+$("setAutoScroll").checked = settings.autoScroll !== false;
+$("setAutoScroll").onchange = (e) => {
+  settings.autoScroll = e.target.checked;
+  saveSettings();
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
