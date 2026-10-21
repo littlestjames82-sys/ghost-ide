@@ -1568,6 +1568,29 @@ try { window.__ghostStatus = { LANG_NAMES, langName,
   cursorStatus }; } catch (e) {}
 /*@@STATUS-END@@*/
 
+/*@@HELP@@*/
+/* Help pack (v1.73): one help text assembled from the
+   live tables - chat styles, slash commands, keyboard
+   shortcuts - so it can never drift from what the app
+   actually does. */
+function buildHelpText() {
+  return "GhostIDE help\n" +
+    "Answer styles: " +
+    Object.keys(CHAT_STYLES).join(", ") + "\n" +
+    "Quick prompts: " +
+    QUICK_PROMPTS.map((q) => q.label).join(", ") + "\n" +
+    "Slash commands: " +
+    SLASH_COMMANDS.map((c) => "/" + c.name).join(" ") + "\n" +
+    shortcutHelpText() + "\n" +
+    "Tips: quick prompts fill the box without sending. " +
+    "Continue asks for the next part of a cut-off answer. " +
+    "Edit & resend on one of your messages rewinds the " +
+    "chat to it. Find in chat lives in Chat options.";
+}
+try { window.__ghostHelp = { buildHelpText }; }
+catch (e) {}
+/*@@HELP-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -4093,6 +4116,13 @@ document.addEventListener("keydown", (e) => {
 });
 $("shortcutBtn").onclick = () =>
   addMsg("SYSTEM", shortcutHelpText());
+
+
+/* ---------------- Help pack (v1.73) ---------------- */
+$("toolHelp").onclick = () => {
+  hideTools();
+  addMsg("SYSTEM", buildHelpText());
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
