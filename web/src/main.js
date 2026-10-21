@@ -2170,6 +2170,25 @@ try { window.__ghostSummarize = { summaryRequest }; }
 catch (e) {}
 /*@@SUMMARIZE-END@@*/
 
+/*@@DUPFILE@@*/
+/* Duplicate file (v2.03): the suggested name puts
+   " copy" before the extension, in the same folder.
+   Dotfiles and extensionless names take it at the
+   end. */
+function copyName(path) {
+  const slash = path.lastIndexOf("/");
+  const dir = slash >= 0 ? path.slice(0, slash + 1) : "";
+  const base = slash >= 0 ? path.slice(slash + 1) : path;
+  const dot = base.lastIndexOf(".");
+  if (dot > 0)
+    return dir + base.slice(0, dot) + " copy" +
+      base.slice(dot);
+  return dir + base + " copy";
+}
+try { window.__ghostDupFile = { copyName }; }
+catch (e) {}
+/*@@DUPFILE-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5470,6 +5489,31 @@ $("summarizeBtn").onclick = () => {
   }
   $("chatText").value = req;
   sendChat();
+};
+
+
+/* ---------------- Duplicate file (v2.03) ----------- */
+$("dupFileBtn").onclick = async () => {
+  if (!currentFile) {
+    alert("No file is open.");
+    return;
+  }
+  const name = prompt("Duplicate as:", copyName(currentFile));
+  if (!name || name === currentFile) return;
+  const r = await fetch("/api/file?path=" +
+    encodeURIComponent(currentFile));
+  const d = await r.json();
+  if (d.error) { alert(d.error); return; }
+  const w = await fetch("/api/file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: name,
+      content: d.content || "" }),
+  });
+  const wd = await w.json();
+  if (wd.error) { alert(wd.error); return; }
+  await loadFiles();
+  openFile(name);
 };
 
 /* ---------------- Tools pack ---------------- */
