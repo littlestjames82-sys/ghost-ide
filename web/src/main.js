@@ -1116,6 +1116,28 @@ try { window.__ghostChatOpts = { CHAT_STYLES, QUICK_PROMPTS,
   quickPromptText, msgStamp }; } catch (e) {}
 /*@@CHATOPTS-END@@*/
 
+/*@@COMPOSER@@*/
+/* Chat composer pack (v1.58): the pure steps behind the
+   input counter, the per-project chat draft and the
+   Continue action. */
+const CONTINUE_TEXT =
+  "Continue exactly where you left off. Finish the " +
+  "answer; do not repeat what you already said.";
+function estTokens(text) {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
+function counterText(text) {
+  if (!text) return "";
+  return text.length + " chars · ~" + estTokens(text) + " tok";
+}
+function chatDraftKey(scope) {
+  return "ghostide-chatdraft:" + scope;
+}
+try { window.__ghostComposer = { CONTINUE_TEXT, estTokens,
+  counterText, chatDraftKey }; } catch (e) {}
+/*@@COMPOSER-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1168,6 +1190,7 @@ function loadHistory() {
     }
   }
   if (!items.length) addMsg("GHOST", GREETING);
+  restoreChatDraft();
 }
 
 function renderRich(el, text) {
@@ -1200,6 +1223,19 @@ function renderRich(el, text) {
       el.appendChild(div);
     }
   });
+  if (text && text.trim()) {
+    const cp = document.createElement("button");
+    cp.className = "msgCopy";
+    cp.textContent = "⧉ Copy";
+    cp.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        cp.textContent = "✓ Copied";
+        setTimeout(() => { cp.textContent = "⧉ Copy"; }, 1200);
+      } catch (e) {}
+    };
+    el.appendChild(cp);
+  }
 }
 
 function addMsg(who, text, stamp) {
@@ -1352,6 +1388,8 @@ async function sendChat() {
   }
 
   ta.value = "";
+  clearChatDraft();
+  updateChatCount();
   addMsg("YOU", text, true);
   history.push({ role: "user", content: text });
   saveHistory();
@@ -2731,6 +2769,7 @@ const I18N = {
   regenBtn: { en: "↻ Regenerate", es: "↻ Regenerar" },
   copyLastBtn: { en: "⧉ Copy last answer", es: "⧉ Copiar última respuesta" },
   exportChatBtn: { en: "⬇ Export chat", es: "⬇ Exportar chat" },
+  continueBtn: { en: "⏩ Continue", es: "⏩ Continuar" },
   primeBtn: { en: "🧭 Prime this project", es: "🧭 Preparar este proyecto" },
   handoffBtn: { en: "📦 Draft handoff", es: "📦 Borrador de traspaso" },
   recallBtn: { en: "📚 Recall memory", es: "📚 Recuperar memoria" },
@@ -3018,6 +3057,61 @@ $("copyLastBtn").onclick = async () => {
   }
 };
 
+
+
+/* ---------------- Chat composer pack (v1.58) ------ */
+function draftStorageKey() {
+  return historyScope ? chatDraftKey(historyScope) : null;
+}
+function saveChatDraft() {
+  const k = draftStorageKey();
+  if (!k) return;
+  try {
+    const v = $("chatText").value;
+    if (v) localStorage.setItem(k, v);
+    else localStorage.removeItem(k);
+  } catch (e) {}
+}
+function clearChatDraft() {
+  const k = draftStorageKey();
+  if (k) { try { localStorage.removeItem(k); } catch (e) {} }
+}
+function growChatText() {
+  const ta = $("chatText");
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+}
+function updateChatCount() {
+  $("chatCount").textContent =
+    counterText($("chatText").value);
+}
+function restoreChatDraft() {
+  const k = draftStorageKey();
+  if (!k) return;
+  try {
+    const v = localStorage.getItem(k);
+    if (v && !$("chatText").value) {
+      $("chatText").value = v;
+      growChatText();
+      updateChatCount();
+    }
+  } catch (e) {}
+}
+$("chatText").addEventListener("input", () => {
+  growChatText();
+  updateChatCount();
+  saveChatDraft();
+});
+updateChatCount();
+$("continueBtn").onclick = () => {
+  if (chatAbort) return;
+  if (!history.length) {
+    alert("Nothing to continue yet - ask something first.");
+    return;
+  }
+  $("chatText").value = CONTINUE_TEXT;
+  sendChat();
+};
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
