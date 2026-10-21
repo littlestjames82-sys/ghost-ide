@@ -92,7 +92,7 @@ const settings = Object.assign(
     customTokens: 1024, lineHeight: "1.45",
     ligatures: true, lineNumbers: true,
     activeLine: true, chatFs: "13",
-    chatWidth: "360", accent: "green", bubbles: false,
+    chatWidth: "360", accent: "green", notifySound: "soft", bubbles: false,
     roleLabels: true, sliceBudget: 6000,
     attachSelection: true, attachDiff: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
@@ -1610,6 +1610,26 @@ function accentPair(name) {
 try { window.__ghostAccent = { ACCENTS, accentPair }; }
 catch (e) {}
 /*@@ACCENT-END@@*/
+
+/*@@SOUND@@*/
+/* Notification sounds (v1.75): synthesized with
+   WebAudio, no audio files. A sound is a short list
+   of notes (frequency, duration, offset in seconds),
+   which keeps the pure step trivially checkable. */
+const NOTIFY_SOUNDS = {
+  off: [],
+  soft: [{ f: 880, d: 0.12, at: 0 }],
+  chime: [{ f: 660, d: 0.14, at: 0 },
+          { f: 990, d: 0.2, at: 0.13 }],
+  pop: [{ f: 520, d: 0.07, at: 0 },
+        { f: 780, d: 0.09, at: 0.06 }],
+};
+function beepSpec(name) {
+  return NOTIFY_SOUNDS[name] || NOTIFY_SOUNDS.soft;
+}
+try { window.__ghostSound = { NOTIFY_SOUNDS, beepSpec }; }
+catch (e) {}
+/*@@SOUND-END@@*/
 
 /* ---------------- chat ---------------- */
 const history = [];
@@ -4160,6 +4180,44 @@ $("setAccent").onchange = (e) => {
   applyAccent();
 };
 applyAccent();
+
+
+/* ---------------- Notify sounds (v1.75) ------------ */
+let actx = null;
+function playNotifySound() {
+  const spec = beepSpec(settings.notifySound);
+  if (!spec.length) return;
+  try {
+    const AC = window.AudioContext ||
+      window.webkitAudioContext;
+    if (!AC) return;
+    actx = actx || new AC();
+    if (actx.state === "suspended") actx.resume();
+    const t0 = actx.currentTime;
+    for (const b of spec) {
+      const o = actx.createOscillator();
+      const g = actx.createGain();
+      o.type = "sine";
+      o.frequency.value = b.f;
+      g.gain.setValueAtTime(0.0001, t0 + b.at);
+      g.gain.exponentialRampToValueAtTime(0.18,
+        t0 + b.at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,
+        t0 + b.at + b.d);
+      o.connect(g);
+      g.connect(actx.destination);
+      o.start(t0 + b.at);
+      o.stop(t0 + b.at + b.d + 0.05);
+    }
+  } catch (e) {}
+}
+$("setSound").value = settings.notifySound;
+$("setSound").onchange = (e) => {
+  settings.notifySound = e.target.value;
+  saveSettings();
+  playNotifySound();
+};
+$("setSoundTest").onclick = () => playNotifySound();
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
@@ -8022,6 +8080,7 @@ function flashTitle(text) {
 function notifyDone(title, body, startedAt) {
   if (!pingWorthIt(startedAt, Date.now(), notifyEnabled()))
     return;
+  playNotifySound();
   if (document.hidden) flashTitle(title);
   try {
     if (window.GhostNative) {
