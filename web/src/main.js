@@ -1631,6 +1631,48 @@ try { window.__ghostSound = { NOTIFY_SOUNDS, beepSpec }; }
 catch (e) {}
 /*@@SOUND-END@@*/
 
+/*@@BACKUP@@*/
+/* Data backup (v1.76): one JSON file with everything
+   the app keeps locally - settings, prompts, chat
+   history and sessions, drafts, bookmarks and the
+   rest of the ghostide- namespace. Import validates
+   strictly: right envelope, namespaced keys only,
+   string values, sane sizes. */
+function backupKeyOk(key) {
+  return typeof key === "string" &&
+    key.startsWith("ghostide-") && key.length > 9 &&
+    key.length <= 512 &&
+    !/[\x00-\x1f\x7f]/.test(key);
+}
+function buildBackup(map) {
+  const data = {};
+  for (const k of Object.keys(map)) {
+    if (backupKeyOk(k) && typeof map[k] === "string")
+      data[k] = map[k];
+  }
+  return { app: "ghostide-backup", version: 1, data };
+}
+function parseBackup(text) {
+  let o;
+  try { o = JSON.parse(text); } catch (e) { return null; }
+  if (!o || o.app !== "ghostide-backup" ||
+      o.version !== 1 || !o.data ||
+      typeof o.data !== "object") return null;
+  const keys = Object.keys(o.data);
+  if (!keys.length || keys.length > 500) return null;
+  const out = {};
+  for (const k of keys) {
+    if (!backupKeyOk(k)) return null;
+    if (typeof o.data[k] !== "string" ||
+        o.data[k].length > 2000000) return null;
+    out[k] = o.data[k];
+  }
+  return out;
+}
+try { window.__ghostBackup = { backupKeyOk, buildBackup,
+  parseBackup }; } catch (e) {}
+/*@@BACKUP-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -4218,6 +4260,38 @@ $("setSound").onchange = (e) => {
   playNotifySound();
 };
 $("setSoundTest").onclick = () => playNotifySound();
+
+
+/* ---------------- Data backup (v1.76) -------------- */
+function collectLocalMap() {
+  const map = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      map[k] = localStorage.getItem(k);
+    }
+  } catch (e) {}
+  return map;
+}
+$("setExportData").onclick = () => {
+  download("ghostide-backup.json",
+    JSON.stringify(buildBackup(collectLocalMap()), null, 1),
+    "application/json");
+};
+$("setImportData").onclick = () => pickTextFile((text) => {
+  const data = parseBackup(text);
+  if (!data) {
+    alert("That file is not a valid GhostIDE backup.");
+    return;
+  }
+  if (!confirm("Import this backup? It replaces the " +
+      "matching local data (settings, prompts, chats, " +
+      "drafts) and reloads the app.")) return;
+  for (const k of Object.keys(data)) {
+    try { localStorage.setItem(k, data[k]); } catch (e) {}
+  }
+  location.reload();
+});
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
