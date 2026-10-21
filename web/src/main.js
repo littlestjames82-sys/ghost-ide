@@ -1324,6 +1324,46 @@ try { window.__ghostExport = { chatToMarkdown, chatToText,
   chatToHtml, chatStats, chatStatsText }; } catch (e) {}
 /*@@EXPORT-END@@*/
 
+/*@@SLASH@@*/
+/* Slash commands (v1.64): a leading /word in the chat
+   box runs a command instead of going to the model.
+   AI commands reuse the Tools quick actions (with an
+   optional note appended); local ones drive the
+   existing buttons, so there is one code path each. */
+const SLASH_COMMANDS = [
+  { cmd: "explain", kind: "ai",
+    blurb: "Explain the current file or selection" },
+  { cmd: "fix", kind: "ai",
+    blurb: "Find and fix bugs in the current file or selection" },
+  { cmd: "tests", kind: "ai",
+    blurb: "Write tests for the current file or selection" },
+  { cmd: "doc", kind: "ai",
+    blurb: "Document the current file or selection" },
+  { cmd: "clear", kind: "local", blurb: "Clear this chat" },
+  { cmd: "export", kind: "local",
+    blurb: "Export this chat (selected format)" },
+  { cmd: "regen", kind: "local",
+    blurb: "Regenerate the last answer" },
+  { cmd: "help", kind: "local", blurb: "Show this list" },
+];
+function parseSlash(text) {
+  if (!text || text[0] !== "/") return null;
+  const m = text.slice(1).match(/^(\w+)(?:\s+([\s\S]*))?$/);
+  if (!m) return null;
+  const hit = SLASH_COMMANDS.find(
+    (c) => c.cmd === m[1].toLowerCase());
+  if (!hit) return null;
+  return { cmd: hit.cmd, kind: hit.kind,
+    arg: (m[2] || "").trim() };
+}
+function slashHelpText() {
+  return "Slash commands:\n" + SLASH_COMMANDS.map(
+    (c) => "/" + c.cmd + " - " + c.blurb).join("\n");
+}
+try { window.__ghostSlash = { SLASH_COMMANDS, parseSlash,
+  slashHelpText }; } catch (e) {}
+/*@@SLASH-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1453,6 +1493,14 @@ async function sendChat() {
   const ta = $("chatText");
   const text = ta.value.trim();
   if (!text) return;
+  const slash = parseSlash(text);
+  if (slash) {
+    ta.value = "";
+    clearChatDraft();
+    updateChatCount();
+    runSlash(slash);
+    return;
+  }
   if (!modelUp) { addMsg("SYSTEM", "Model is down - hit Start model first."); return; }
   if ($("agentToggle") && $("agentToggle").checked) {
     ta.value = "";
@@ -3574,6 +3622,22 @@ $("copyWholeBtn").onclick = async () => {
 };
 updateChatStats();
 
+
+/* ---------------- Slash commands (v1.64) ----------- */
+function runSlash(s) {
+  if (s.kind === "ai") { aiAction(s.cmd, s.arg); return; }
+  if (s.cmd === "clear") { $("clearChatBtn").click(); return; }
+  if (s.cmd === "export") {
+    exportChatAs($("exportFmt").value);
+    return;
+  }
+  if (s.cmd === "regen") { $("toolRegen").click(); return; }
+  if (s.cmd === "help") {
+    addMsg("SYSTEM", slashHelpText());
+    return;
+  }
+}
+
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
 $("toolsClose").onclick = () => $("toolsPanel").classList.add("hidden");
@@ -3586,7 +3650,7 @@ function codeForAi() {
   const picked = sel.empty ? doc : doc.slice(sel.from, sel.to);
   return picked.slice(0, BEHAVIOR.context.fileChars);
 }
-function aiAction(kind) {
+function aiAction(kind, note) {
   if (!currentFile) { alert("Open a file first."); return; }
   const fence = "```\n" + codeForAi() + "\n```";
   const prompts = {
@@ -3602,7 +3666,8 @@ function aiAction(kind) {
       "full updated file:\n" + fence,
   };
   hideTools();
-  $("chatText").value = prompts[kind];
+  $("chatText").value = prompts[kind] +
+    (note ? "\n\nAlso: " + note : "");
   sendChat();
 }
 $("aiExplain").onclick = () => aiAction("explain");
