@@ -1468,6 +1468,20 @@ try { window.__ghostMsgTools = { extractCodeBlocks,
   trimForEdit, answerFilename }; } catch (e) {}
 /*@@MSGTOOLS-END@@*/
 
+/*@@FINDCHAT@@*/
+/* Find in chat (v1.69): a live filter over the visible
+   messages. It works on the rendered messages, so it
+   covers greetings, system notes and answers alike,
+   with no fragile index bookkeeping. */
+function msgMatches(text, q) {
+  if (!q) return true;
+  return String(text).toLowerCase()
+    .includes(String(q).toLowerCase());
+}
+try { window.__ghostFindChat = { msgMatches }; }
+catch (e) {}
+/*@@FINDCHAT-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -1526,6 +1540,7 @@ function loadHistory() {
   if (!items.length) addMsg("GHOST", GREETING);
   restoreChatDraft();
   updateChatStats();
+  applyChatFind();
 }
 
 function renderRich(el, text) {
@@ -3930,6 +3945,23 @@ function editUserTurn(idx) {
   saveChatDraft();
   $("chatText").focus();
 }
+
+
+/* ---------------- Find in chat (v1.69) ------------- */
+function applyChatFind() {
+  const q = $("chatFind").value.trim().toLowerCase();
+  const msgs = $("chatLog").querySelectorAll(".msg");
+  let shown = 0;
+  msgs.forEach((el) => {
+    const hit = msgMatches(el.textContent, q);
+    el.style.display = hit ? "" : "none";
+    if (hit && q) shown++;
+  });
+  $("chatFindCount").textContent = q
+    ? shown + " of " + msgs.length + " messages match"
+    : "";
+}
+$("chatFind").addEventListener("input", applyChatFind);
 
 /* ---------------- Tools pack ---------------- */
 $("toolsBtn").onclick = () => $("toolsPanel").classList.toggle("hidden");
