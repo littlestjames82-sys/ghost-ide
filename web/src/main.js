@@ -1992,6 +1992,38 @@ try { window.__ghostSysPrev = { systemPreview }; }
 catch (e) {}
 /*@@SYSPREV-END@@*/
 
+/*@@STARANS@@*/
+/* Starred answers (v1.93): keep the answers worth
+   coming back to. Identity is the answer's first
+   120 chars; the list caps at 50, newest last. */
+function starKeyOf(text) {
+  return String(text || "").slice(0, 120);
+}
+function parseStarAnswers(raw) {
+  try {
+    const a = JSON.parse(raw || "[]");
+    return Array.isArray(a) ? a.filter((x) => x &&
+      typeof x.text === "string") : [];
+  } catch (e) { return []; }
+}
+function toggleStarAnswer(list, item) {
+  const k = starKeyOf(item.text);
+  const has = list.some(
+    (x) => starKeyOf(x.text) === k);
+  const out = has
+    ? list.filter((x) => starKeyOf(x.text) !== k)
+    : list.concat([item]);
+  return out.slice(-50);
+}
+function isStarAnswer(list, text) {
+  const k = starKeyOf(text);
+  return list.some((x) => starKeyOf(x.text) === k);
+}
+try { window.__ghostStarAns = { starKeyOf,
+  parseStarAnswers, toggleStarAnswer,
+  isStarAnswer }; } catch (e) {}
+/*@@STARANS-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -2147,6 +2179,19 @@ function renderRich(el, text) {
       }, 1200);
     };
     el.appendChild(ins);
+    const star = document.createElement("button");
+    star.className = "msgCopy";
+    star.textContent = isStarAnswer(loadStarAnswers(),
+      text) ? "\u2605 Starred" : "\u2606 Star";
+    star.title = "Keep this answer in Starred answers";
+    star.onclick = () => {
+      const list = toggleStarAnswer(loadStarAnswers(),
+        { ts: Date.now(), text });
+      persistStarAnswers(list);
+      star.textContent = isStarAnswer(list, text)
+        ? "\u2605 Starred" : "\u2606 Star";
+    };
+    el.appendChild(star);
     const blocks = extractCodeBlocks(text);
     if (blocks.length) {
       const cb2 = document.createElement("button");
@@ -5103,6 +5148,34 @@ $("sysPreviewBtn").onclick = () => {
     budget: sliceBudget(),
     window: settings.historyWindow,
   }));
+};
+
+
+/* ---------------- Starred answers (v1.93) ---------- */
+function loadStarAnswers() {
+  try {
+    return parseStarAnswers(localStorage.getItem(
+      "ghostide-starred-answers"));
+  } catch (e) { return []; }
+}
+function persistStarAnswers(list) {
+  try {
+    localStorage.setItem("ghostide-starred-answers",
+      JSON.stringify(list));
+  } catch (e) {}
+}
+$("toolStarred").onclick = () => {
+  hideTools();
+  const list = loadStarAnswers();
+  if (!list.length) {
+    addMsg("SYSTEM", "No starred answers yet. " +
+      "Star one from its message buttons.");
+    return;
+  }
+  const recent = list.slice(-10).reverse();
+  addMsg("SYSTEM", "Starred answers (" + list.length +
+    ", showing " + recent.length + "):\n\n" +
+    recent.map((x) => x.text).join("\n\n---\n\n"));
 };
 
 /* ---------------- Tools pack ---------------- */
