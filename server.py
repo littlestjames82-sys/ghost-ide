@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.12.0"
+APP_VERSION = "2.13.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2194,19 +2194,32 @@ def git_out(args, timeout=30):
 # in an env var; a tiny askpass script answers git's
 # prompts from it. The script lives in the system
 # temp dir, outside any workspace.
-ASKPASS_PATH = Path(tempfile.gettempdir()) / "ghostide-askpass.sh"
+ASKPASS_PATH = None
 
 
 def _ensure_askpass():
+    """Per-process unique askpass script (R2): a
+    predictable name in a shared temp dir could be
+    pre-planted by another process and would run
+    with our token in the environment, so the file
+    is created fresh by mkstemp (mode 0600) and
+    always written by us."""
+    global ASKPASS_PATH
     try:
-        if not ASKPASS_PATH.exists():
-            ASKPASS_PATH.write_text(
+        if ASKPASS_PATH is not None and ASKPASS_PATH.exists():
+            return
+        import os as _os
+        fd, name = tempfile.mkstemp(
+            prefix="ghostide-askpass-", suffix=".sh")
+        with _os.fdopen(fd, "w") as f:
+            f.write(
                 "#!/bin/sh\n"
                 "case \"$1\" in\n"
                 "*Username*) echo \"x-access-token\" ;;\n"
                 "*) echo \"$GHOSTIDE_GH_TOKEN\" ;;\n"
                 "esac\n")
-            ASKPASS_PATH.chmod(0o700)
+        ASKPASS_PATH = Path(name)
+        ASKPASS_PATH.chmod(0o700)
     except Exception:
         pass
 
