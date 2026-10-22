@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.22.0"
+APP_VERSION = "2.23.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -62,7 +62,8 @@ MAX_BODY_BYTES = 64 * 1024 * 1024
 # (the host's own UI) is trusted. See PAIRING.md.
 import secrets as _secrets
 PAIR_CODE = "%06d" % _secrets.randbelow(1000000)
-PAIR_TOKENS = set()
+PAIR_TOKENS = {}
+PAIR_POLICY = {"viewOnly": False}
 
 PAIR_MAX_FAILS = 5
 PAIR_WINDOW = 600.0
@@ -2917,6 +2918,30 @@ class Handler(SimpleHTTPRequestHandler):
         return (self.headers.get("X-Pair-Token")
                 or "") in PAIR_TOKENS
 
+    def _pair_role_denied(self, path):
+        # R12: viewer guests may read and heartbeat,
+        # nothing else that mutates.
+        if self.client_address[0] in ("127.0.0.1",
+                                      "::1"):
+            return False
+        if path == "/api/pair/heartbeat":
+            return False
+        tok = self.headers.get("X-Pair-Token") or ""
+        return PAIR_TOKENS.get(tok) == "viewer"
+
+    def _pair_policy(self, method):
+        if self.client_address[0] not in ("127.0.0.1",
+                                          "::1"):
+            return self.send_json(
+                {"error": "pairing policy is set "
+                          "on the host"}, status=403)
+        if method == "POST":
+            data = self.read_json()
+            PAIR_POLICY["viewOnly"] = bool(
+                data.get("viewOnly"))
+        return self.send_json(
+            {"viewOnly": PAIR_POLICY["viewOnly"]})
+
     def _pair_code(self):
         if self.client_address[0] not in ("127.0.0.1",
                                           "::1"):
@@ -2933,6 +2958,8 @@ class Handler(SimpleHTTPRequestHandler):
                     {"error": "pairing required"}, status=401)
             if parsed.path == "/api/pair/code":
                 return self._pair_code()
+            if parsed.path == "/api/pair/policy":
+                return self._pair_policy("GET")
             if parsed.path == "/api/health":
                 return self.send_json(
                     {"model": "up" if llama_health() else "down",
@@ -3355,6 +3382,12 @@ class Handler(SimpleHTTPRequestHandler):
             if not self._pair_gate(parsed.path):
                 return self.send_json(
                     {"error": "pairing required"}, status=401)
+            if self._pair_role_denied(parsed.path):
+                return self.send_json(
+                    {"error": "view-only guest"},
+                    status=403)
+            if parsed.path == "/api/pair/policy":
+                return self._pair_policy("POST")
             if parsed.path == "/api/pair/join":
                 import time as _time
                 ip = self.client_address[0]
@@ -3372,9 +3405,12 @@ class Handler(SimpleHTTPRequestHandler):
                         status=401)
                 pair_join_record(ip, True, _time.time())
                 token = _secrets.token_hex(16)
-                PAIR_TOKENS.add(token)
+                role = ("viewer" if PAIR_POLICY["viewOnly"]
+                        else "editor")
+                PAIR_TOKENS[token] = role
                 return self.send_json(
-                    {"ok": True, "token": token})
+                    {"ok": True, "token": token,
+                     "role": role})
             if parsed.path == "/api/model/download":
                 data = self.read_json()
                 mid = str(data.get("id", "7b"))

@@ -54,7 +54,7 @@ check(h._pair_gate("/") is True
       and h._pair_gate("/app.js") is True,
       "LAN: IDE shell assets open")
 tok = "deadbeef" * 4
-mod.PAIR_TOKENS.add(tok)
+mod.PAIR_TOKENS[tok] = "editor"
 h2 = fake_handler(LAN, token=tok)
 check(h2._pair_gate("/api/git/status") is True,
       "LAN: valid token admitted")
@@ -75,6 +75,23 @@ check(h6._sent.get("status") == 200
       and h6._sent["obj"].get("code") == mod.PAIR_CODE,
       "code endpoint: loopback gets the code")
 
+
+
+# --- R12 role matrix on the real gate helpers ---
+vtok = "cafe" * 8
+mod.PAIR_TOKENS[vtok] = "viewer"
+hv = fake_handler(LAN, vtok)
+check(hv._pair_gate("/api/file") is True,
+      "viewer: token still admitted by the gate")
+check(hv._pair_role_denied("/api/file") is True,
+      "viewer: mutating POST denied")
+check(hv._pair_role_denied("/api/pair/heartbeat") is False,
+      "viewer: heartbeat allowed")
+check(h2._pair_role_denied("/api/file") is False,
+      "editor: mutating POST allowed")
+hl = fake_handler("127.0.0.1", vtok)
+check(hl._pair_role_denied("/api/file") is False,
+      "loopback: never role-denied")
 
 # --- rate limit helpers (R1) ---
 mod.PAIR_FAILS.clear()
@@ -124,6 +141,7 @@ try:
     st, d = req("/api/pair/code")
     check(st == 200 and len(str(d.get("code", ""))) == 6,
           "live loopback: 6-digit code served", str(d))
+
     # live lockout: 5 wrong joins, then even the
     # right code is refused with 429
     def join(code):
@@ -139,6 +157,34 @@ try:
         except urllib.error.HTTPError as e:
             return e.code, json.loads(
                 e.read().decode() or "{}")
+    # R12 live: policy roundtrip + join roles
+    def policy(method="GET", vo=None):
+        data = json.dumps({"viewOnly": vo}).encode() \
+            if vo is not None else None
+        r = urllib.request.Request(
+            "http://127.0.0.1:5271/api/pair/policy",
+            data=data, method=method,
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return resp.status, json.loads(
+                    resp.read().decode() or "{}")
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(
+                e.read().decode() or "{}")
+    stp, dp = policy()
+    check(stp == 200 and dp.get("viewOnly") is False,
+          "policy defaults to editors", str(dp))
+    stp, dp = policy("POST", True)
+    check(dp.get("viewOnly") is True,
+          "host flips policy to view-only", str(dp))
+    stj, dj = join(str(d.get("code")))
+    check(dj.get("role") == "viewer",
+          "new token under policy is a viewer", str(dj))
+    policy("POST", False)
+    stj, dj = join(str(d.get("code")))
+    check(dj.get("role") == "editor",
+          "policy off: new token is an editor", str(dj))
     wrong = "000000" if str(d.get("code")) != "000000" else "111111"
     codes = [join(wrong)[0] for _ in range(5)]
     check(codes == [401] * 5, "5 wrong joins get 401", str(codes))
