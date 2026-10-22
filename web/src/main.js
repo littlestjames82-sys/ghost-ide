@@ -11287,10 +11287,19 @@ async function openBackup() {
     row.className = "findRow";
     row.textContent = "↩ Restore " + p;
     row.onclick = async () => {
-      if (!confirm("Restore " + p + "? Files with the "
-          + "same names are overwritten.")) return;
       const pw = prompt("Passphrase for this backup:");
       if (!pw) return;
+      // R7: preview first - decrypts and validates
+      // without touching a file.
+      const ins = await postJson("/api/backup/inspect",
+        { path: p, passphrase: pw });
+      if (ins.error) { alert(ins.error); return; }
+      const kb = Math.max(1, Math.round(ins.bytes / 1024));
+      if (!confirm("Restore " + p + "?\nBackup from "
+          + (ins.created || "unknown date") + " - "
+          + ins.files + " files, " + kb + " KB, format v"
+          + ins.version + ". Files with the same names "
+          + "are overwritten.")) return;
       const d = await postJson("/api/backup/restore",
         { path: p, passphrase: pw });
       if (d.error) { alert(d.error); return; }
