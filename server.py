@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.32.0"
+APP_VERSION = "2.33.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2883,6 +2883,109 @@ def eco_convert(ws, target="agents", mode="signatures",
             "outputs": outputs}
 
 
+def _restore_journal_append(root, obj):
+    """Append one event to the restore journal and
+    fsync it BEFORE the filesystem step it
+    describes (v2.33)."""
+    with open(root / "journal.jsonl", "a",
+              encoding="utf-8") as f:
+        f.write(json.dumps(obj) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _restore_reconcile():
+    """Finish rolling back an interrupted restore
+    (v2.33). A restore that never reached its
+    "done" event did not happen: every file it
+    touched returns to its pre-restore state,
+    decided from what is actually on disk, so the
+    pass is idempotent and safe to re-run after a
+    kill at any point, including during this pass
+    itself. Runs at server startup and at the top
+    of every restore, replacing the old blind wipe
+    of .ghostide-restore, which could destroy the
+    only copy of a file a killed restore had moved
+    into rollback/."""
+    root = WORKSPACE / ".ghostide-restore"
+    journal = root / "journal.jsonl"
+    if not journal.is_file():
+        return
+    import shutil
+    roll = root / "rollback"
+    try:
+        events = []
+        for ln in journal.read_text(
+                encoding="utf-8").splitlines():
+            try:
+                ev = json.loads(ln)
+            except Exception:
+                continue
+            if isinstance(ev, dict):
+                events.append(ev)
+        if any(e.get("op") in ("done", "rolled-back")
+               for e in events):
+            return
+        begin = next((e for e in events
+                      if e.get("op") == "begin"), None)
+        if begin is not None:
+            manifest = [str(x) for x in
+                        begin.get("manifest", [])]
+            preexisting = set(str(x) for x in
+                              begin.get(
+                                  "preexisting", []))
+            applied = set(str(e.get("path", ""))
+                          for e in events
+                          if e.get("op") == "applied")
+            for clean in reversed(manifest):
+                parts = clean.split("/")
+                dst = WORKSPACE.joinpath(*parts)
+                rb = roll.joinpath(*parts)
+                try:
+                    if rb.is_file():
+                        if dst.is_file():
+                            dst.unlink()
+                        dst.parent.mkdir(
+                            parents=True,
+                            exist_ok=True)
+                        shutil.move(str(rb), str(dst))
+                    elif clean in applied \
+                            and clean not in preexisting \
+                            and dst.is_file():
+                        dst.unlink()
+                except Exception:
+                    pass
+            dirs = [str(x) for x in
+                    begin.get("dirs", [])]
+            for d in sorted(dirs,
+                            key=lambda s: -s.count("/")):
+                f = WORKSPACE.joinpath(*d.split("/"))
+                try:
+                    if f.is_dir() \
+                            and not any(f.iterdir()):
+                        f.rmdir()
+                except Exception:
+                    pass
+        elif roll.is_dir():
+            # Torn begin line: the rollback copies
+            # are the ground truth. Move each one
+            # home over whatever is in the way.
+            for rb in sorted(roll.rglob("*")):
+                if not rb.is_file():
+                    continue
+                dst = WORKSPACE / rb.relative_to(roll)
+                try:
+                    if dst.is_file():
+                        dst.unlink()
+                    dst.parent.mkdir(parents=True,
+                                     exist_ok=True)
+                    shutil.move(str(rb), str(dst))
+                except Exception:
+                    pass
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
@@ -3598,6 +3701,9 @@ class Handler(SimpleHTTPRequestHandler):
                 root = WORKSPACE / ".ghostide-restore"
                 stage = root / "stage"
                 roll = root / "rollback"
+                # v2.33: finish any interrupted
+                # restore before this one starts.
+                _restore_reconcile()
                 shutil.rmtree(root, ignore_errors=True)
                 stage.mkdir(parents=True)
                 paths = []
@@ -3646,6 +3752,32 @@ class Handler(SimpleHTTPRequestHandler):
                                 raise ValueError(
                                     "backup expands past "
                                     "the 512 MB restore cap")
+                    # v2.33: journal the apply BEFORE
+                    # it starts (manifest, which files
+                    # already exist, which parent dirs
+                    # the apply will create).
+                    _ws_res = WORKSPACE.resolve()
+                    _pre = []
+                    _dirs = set()
+                    for clean in paths:
+                        _dst = WORKSPACE.joinpath(
+                            *clean.split("/"))
+                        if _dst.is_file():
+                            _pre.append(clean)
+                        _parts = clean.split("/")
+                        for _i in range(
+                                len(_parts) - 1):
+                            _prefix = "/".join(
+                                _parts[:_i + 1])
+                            if not WORKSPACE.joinpath(
+                                    *_prefix.split("/")
+                                    ).is_dir():
+                                _dirs.add(_prefix)
+                    _restore_journal_append(root, {
+                        "op": "begin",
+                        "manifest": list(paths),
+                        "preexisting": _pre,
+                        "dirs": sorted(_dirs)})
                     applied = []
                     try:
                         for clean in paths:
@@ -3655,12 +3787,35 @@ class Handler(SimpleHTTPRequestHandler):
                                 *clean.split("/"))
                             rb = roll.joinpath(
                                 *clean.split("/"))
+                            # v2.33 (scout F7): the
+                            # apply target itself is
+                            # containment-checked, so
+                            # a pre-existing symlink
+                            # dir cannot carry a
+                            # restored file outside
+                            # the workspace.
+                            _dst_res = dst.resolve()
+                            if not (_dst_res == _ws_res
+                                    or _ws_res
+                                    in _dst_res.parents):
+                                raise ValueError(
+                                    "restore target "
+                                    "escapes workspace: "
+                                    + clean)
                             dst.parent.mkdir(parents=True,
                                              exist_ok=True)
                             if dst.is_file():
                                 rb.parent.mkdir(parents=True,
                                                 exist_ok=True)
+                                _restore_journal_append(
+                                    root,
+                                    {"op": "moved-out",
+                                     "path": clean})
                                 shutil.move(str(dst), str(rb))
+                            _restore_journal_append(
+                                root,
+                                {"op": "applied",
+                                 "path": clean})
                             shutil.move(str(src), str(dst))
                             applied.append(clean)
                     except Exception as e:
@@ -3680,9 +3835,17 @@ class Handler(SimpleHTTPRequestHandler):
                                                 str(dst))
                             except Exception:
                                 pass
+                        try:
+                            _restore_journal_append(
+                                root,
+                                {"op": "rolled-back"})
+                        except Exception:
+                            pass
                         raise ValueError(
                             "restore failed and was "
                             "rolled back: %s" % e)
+                    _restore_journal_append(
+                        root, {"op": "done"})
                 finally:
                     shutil.rmtree(root, ignore_errors=True)
                 return self.send_json({
@@ -4581,6 +4744,9 @@ def main():
           "needs none.")
     print(f"Model: {MODEL_NAME} via {LLAMA_BASE} "
           f"({'up' if llama_health() else 'down - use Start Model in the IDE'})")
+    # v2.33: an interrupted restore is rolled back
+    # before the server serves anything.
+    _restore_reconcile()
     srv.serve_forever()
 
 

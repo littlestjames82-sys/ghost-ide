@@ -220,6 +220,70 @@ def main():
               "earlier good restore survives the bad one")
     finally: p.terminate()
 
+    # v2.33: journal reconcile - a restore killed
+    # mid-apply is rolled back at startup, before
+    # the server serves anything.
+    ws = fresh_ws("journal")
+    (ws / "a.txt").write_text("NEW-A")
+    nd = ws / "newdir"; nd.mkdir()
+    (nd / "new.txt").write_text("NEW-N")
+    root = ws / ".ghostide-restore"
+    rb = root / "rollback"
+    (rb / "sub").mkdir(parents=True)
+    (rb / "a.txt").write_text("OLD-A")
+    (rb / "sub" / "b.txt").write_text("OLD-B")
+    (root / "journal.jsonl").write_text(
+        json.dumps({"op": "begin",
+                    "manifest": ["a.txt", "sub/b.txt",
+                                 "newdir/new.txt"],
+                    "preexisting": ["a.txt", "sub/b.txt"],
+                    "dirs": ["newdir"]}) + "\n"
+        + json.dumps({"op": "moved-out",
+                      "path": "a.txt"}) + "\n"
+        + json.dumps({"op": "applied",
+                      "path": "a.txt"}) + "\n"
+        + json.dumps({"op": "moved-out",
+                      "path": "sub/b.txt"}) + "\n"
+        + json.dumps({"op": "applied",
+                      "path": "newdir/new.txt"}) + "\n")
+    p = start(ws, 5268)
+    try:
+        check((ws / "a.txt").read_text() == "OLD-A",
+              "journal: applied file rolled back "
+              "at startup")
+        check((ws / "sub" / "b.txt").read_text()
+              == "OLD-B",
+              "journal: moved-out file (K1) "
+              "restored at startup")
+        check(not (ws / "newdir" / "new.txt").exists(),
+              "journal: new file removed at startup")
+        check(not (ws / "newdir").exists(),
+              "journal: created dir removed")
+        check(not root.exists(),
+              "journal: staging cleaned at startup")
+    finally: p.terminate()
+
+    # in-process reconcile with a torn begin line:
+    # the rollback copies are the ground truth.
+    ws = fresh_ws("journal-torn")
+    (ws / "x.txt").write_text("HALF")
+    root = ws / ".ghostide-restore"
+    (root / "rollback").mkdir(parents=True)
+    (root / "rollback" / "x.txt").write_text("ORIG")
+    (root / "journal.jsonl").write_text(
+        '{"op":"begin","manifest":["x.t')
+    saved = mod.WORKSPACE
+    mod.WORKSPACE = ws
+    try:
+        mod._restore_reconcile()
+    finally:
+        mod.WORKSPACE = saved
+    check((ws / "x.txt").read_text() == "ORIG",
+          "journal: torn begin falls back to "
+          "rollback copies")
+    check(not root.exists(),
+          "journal: torn state cleaned")
+
     print(f"RESTORE PROBES: {ok} passed, {fail} failed")
     return 1 if fail else 0
 
