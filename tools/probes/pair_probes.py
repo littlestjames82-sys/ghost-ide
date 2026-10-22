@@ -75,6 +75,30 @@ check(h6._sent.get("status") == 200
       and h6._sent["obj"].get("code") == mod.PAIR_CODE,
       "code endpoint: loopback gets the code")
 
+
+# --- rate limit helpers (R1) ---
+mod.PAIR_FAILS.clear()
+ip = "203.0.113.9"
+for i in range(4):
+    mod.pair_join_record(ip, False, 1000.0 + i)
+check(not mod.pair_join_locked(ip, 1004.0),
+      "4 wrong codes: not locked yet")
+mod.pair_join_record(ip, False, 1005.0)
+check(mod.pair_join_locked(ip, 1006.0),
+      "5th wrong code locks the source")
+check(mod.pair_join_locked(ip, 1005.0 + 599),
+      "lock holds inside the window")
+check(not mod.pair_join_locked(ip, 1005.0 + 601),
+      "lock expires after the lock period")
+mod.pair_join_record(ip, True, 2000.0)
+check(not mod.pair_join_locked(ip, 2001.0)
+      and ip not in mod.PAIR_FAILS,
+      "a successful join clears the record")
+for i in range(5):
+    mod.pair_join_record("198.51.100.2", False, 0.0)
+check(not mod.pair_join_locked("198.51.100.2", 10000.0),
+      "stale window does not lock later")
+
 # --- live loopback against a real server ---
 env = dict(os.environ, GHOST_IDE_WORKSPACE=str(FIX),
            GHOST_IDE_PORT="5271")
@@ -100,6 +124,28 @@ try:
     st, d = req("/api/pair/code")
     check(st == 200 and len(str(d.get("code", ""))) == 6,
           "live loopback: 6-digit code served", str(d))
+    # live lockout: 5 wrong joins, then even the
+    # right code is refused with 429
+    def join(code):
+        data = json.dumps({"code": code}).encode()
+        r = urllib.request.Request(
+            "http://127.0.0.1:5271/api/pair/join", data=data,
+            method="POST",
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return resp.status, json.loads(
+                    resp.read().decode() or "{}")
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(
+                e.read().decode() or "{}")
+    wrong = "000000" if str(d.get("code")) != "000000" else "111111"
+    codes = [join(wrong)[0] for _ in range(5)]
+    check(codes == [401] * 5, "5 wrong joins get 401", str(codes))
+    st2, d2 = join(str(d.get("code")))
+    check(st2 == 429, "6th join (right code) is locked out",
+          f"{st2} {d2}")
+
 finally:
     p.terminate()
 print(f"PAIR PROBES: {ok} passed, {fail} failed")

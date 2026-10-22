@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.11.0"
+APP_VERSION = "2.12.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -63,6 +63,33 @@ MAX_BODY_BYTES = 64 * 1024 * 1024
 import secrets as _secrets
 PAIR_CODE = "%06d" % _secrets.randbelow(1000000)
 PAIR_TOKENS = set()
+
+PAIR_MAX_FAILS = 5
+PAIR_WINDOW = 600.0
+PAIR_LOCK = 600.0
+PAIR_FAILS = {}
+
+
+def pair_join_locked(ip, now):
+    """True while this source is locked out of the
+    join endpoint after repeated wrong codes."""
+    rec = PAIR_FAILS.get(ip)
+    return bool(rec and rec[2] > now)
+
+
+def pair_join_record(ip, ok, now):
+    if ok:
+        PAIR_FAILS.pop(ip, None)
+        return
+    rec = PAIR_FAILS.get(ip)
+    if rec is None or now - rec[1] > PAIR_WINDOW:
+        rec = [0, now, 0.0]
+    rec[0] += 1
+    if rec[0] >= PAIR_MAX_FAILS:
+        rec[2] = now + PAIR_LOCK
+    PAIR_FAILS[ip] = rec
+
+
 
 
 
@@ -3314,12 +3341,21 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(
                     {"error": "pairing required"}, status=401)
             if parsed.path == "/api/pair/join":
+                import time as _time
+                ip = self.client_address[0]
+                if pair_join_locked(ip, _time.time()):
+                    return self.send_json(
+                        {"error": "too many attempts, "
+                                  "try again later"},
+                        status=429)
                 data = self.read_json()
                 if str(data.get("code", "")).strip() \
                         != PAIR_CODE:
+                    pair_join_record(ip, False, _time.time())
                     return self.send_json(
                         {"error": "wrong pairing code"},
                         status=401)
+                pair_join_record(ip, True, _time.time())
                 token = _secrets.token_hex(16)
                 PAIR_TOKENS.add(token)
                 return self.send_json(

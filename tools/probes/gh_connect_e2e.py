@@ -6,7 +6,7 @@ import json, os, pathlib, shutil, subprocess, sys, time
 import urllib.request
 
 BASE = pathlib.Path("/tmp/ghtest")
-SRV = pathlib.Path(__file__).parents[1] / "server.py"
+SRV = pathlib.Path(__file__).parents[2] / "server.py"
 ok = fail = 0
 def check(cond, label, extra=""):
     global ok, fail
