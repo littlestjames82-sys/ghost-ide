@@ -2231,6 +2231,20 @@ try { window.__ghostSpeakLast = { lastAnswerOf }; }
 catch (e) {}
 /*@@SPEAKLAST-END@@*/
 
+/*@@ABOUT@@*/
+/* About this build (v2.07): the Settings info line
+   plus the newest changelog entry, in the chat.
+   Missing changelog data degrades to the info line
+   alone - never an error. */
+function aboutText(info, entry) {
+  if (!entry) return info;
+  return info + "\n\nLatest change (v" + entry.version +
+    ", " + entry.goal + "): " + entry.summary;
+}
+try { window.__ghostAbout = { aboutText }; }
+catch (e) {}
+/*@@ABOUT-END@@*/
+
 /* ---------------- chat ---------------- */
 const history = [];
 
@@ -5604,6 +5618,29 @@ $("speakLastBtn").onclick = () => {
   }
   speechSynthesis.speak(
     new SpeechSynthesisUtterance(speakText(text)));
+};
+
+
+/* ---------------- About this build (v2.07) --------- */
+$("toolAbout").onclick = async () => {
+  hideTools();
+  let entry = null, version = "?";
+  try {
+    const r = await fetch("changelog.json");
+    const d = await r.json();
+    if (d.entries && d.entries.length) {
+      entry = d.entries[0];
+      version = entry.version;
+    }
+  } catch (e) {}
+  addMsg("SYSTEM", aboutText(appInfoText({
+    version,
+    chats: chatSessions.length,
+    prompts: promptLib.length,
+    profiles: Object.keys(loadProfiles()).length,
+    starred: loadStarAnswers().length,
+    eco: "25 packages / 2,642 tests",
+  }), entry));
 };
 
 /* ---------------- Tools pack ---------------- */
