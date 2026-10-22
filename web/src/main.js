@@ -1516,8 +1516,13 @@ function sanitizeImportedSettings(obj, schema) {
       Array.isArray(obj)) return null;
   const out = {};
   for (const k of Object.keys(schema)) {
-    if (k in obj && typeof obj[k] === typeof schema[k])
+    if (k in obj && typeof obj[k] === typeof schema[k]) {
+      // R13: an imported string is capped; anything
+      // longer is not a setting, it is a payload.
+      if (typeof obj[k] === "string"
+          && obj[k].length > 20000) continue;
       out[k] = obj[k];
+    }
   }
   return Object.keys(out).length ? out : null;
 }
