@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.37.0"
+APP_VERSION = "2.38.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -106,6 +106,195 @@ def pair_token_valid(tok, now):
         PAIR_TOKENS.pop(tok, None)
         return False
     return True
+
+
+# LAN TLS (v2.38, design draft Oct 22, 2026; Ryan's six
+# decisions: accept the browser click-through, one
+# persistent cert per host, desktop host first with the
+# phone always a guest, plain-HTTP fallback with a loud
+# warning when no cert can be made). In LAN mode the
+# desktop host serves HTTPS with a self-signed cert
+# whose SHA-256 fingerprint is the host's identity:
+# guests compare it with the host screen before typing
+# the code. The code stays the secret; the fingerprint
+# is public. Loopback keeps serving plain HTTP (the
+# host's own UI never warns). LAN mode only; a
+# loopback-only server never makes a cert.
+import base64 as _b64
+import hashlib as _hashlib
+import ipaddress as _ipaddr
+import shutil as _shutil
+import socket as _socket
+import ssl as _ssl
+
+TLS_DIR = Path(os.environ.get(
+    "GHOST_IDE_TLS_DIR",
+    Path.home() / ".ghostide" / "tls")).resolve()
+TLS_CERT = TLS_DIR / "host-cert.pem"
+TLS_KEY = TLS_DIR / "host-key.pem"
+TLS_META = TLS_DIR / "host-cert.json"
+TLS_STATE = {"active": False, "fingerprint": None}
+
+
+def _lan_ips():
+    """This machine's private / link-local IPv4
+    addresses plus loopback, for the cert SAN list."""
+    ips = {"127.0.0.1"}
+    try:
+        for info in _socket.getaddrinfo(
+                _socket.gethostname(), None,
+                _socket.AF_INET):
+            ip = info[4][0]
+            try:
+                a = _ipaddr.ip_address(ip)
+            except ValueError:
+                continue
+            if a.is_loopback:
+                continue
+            if a.is_private or a.is_link_local:
+                ips.add(ip)
+    except OSError:
+        pass
+    try:
+        s = _socket.socket(_socket.AF_INET,
+                           _socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))
+        a = _ipaddr.ip_address(s.getsockname()[0])
+        s.close()
+        if a.is_private or a.is_link_local:
+            ips.add(str(a))
+    except OSError:
+        pass
+    if HOST not in ("127.0.0.1", "localhost", "::1",
+                    "0.0.0.0"):
+        ips.add(HOST)
+    return sorted(ips)
+
+
+def _cert_fp(cert_pem_bytes):
+    """SHA-256 fingerprint of a PEM cert, colon-grouped
+    hex (the display form browsers use)."""
+    body = b"".join(
+        ln.strip() for ln in cert_pem_bytes.splitlines()
+        if ln and b"---" not in ln)
+    der = _b64.b64decode(body)
+    h = _hashlib.sha256(der).hexdigest().upper()
+    return ":".join(h[i:i + 2] for i in range(0, len(h), 2))
+
+
+def _gen_cert_crypto(ips, cert_path, key_path):
+    """Mint the self-signed host cert with the
+    cryptography package (the backup-v2 dependency)."""
+    import datetime as _dt
+    from cryptography import x509
+    from cryptography.hazmat.primitives import (
+        hashes, serialization)
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    key = rsa.generate_private_key(
+        public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(
+        NameOID.COMMON_NAME, "GhostIDE host")])
+    now = _dt.datetime.now(_dt.timezone.utc)
+    sans = [x509.DNSName("localhost")]
+    sans += [x509.IPAddress(_ipaddr.ip_address(i))
+             for i in ips]
+    cert = (x509.CertificateBuilder()
+            .subject_name(name).issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - _dt.timedelta(days=1))
+            .not_valid_after(now + _dt.timedelta(days=3650))
+            .add_extension(
+                x509.SubjectAlternativeName(sans),
+                critical=False)
+            .add_extension(x509.BasicConstraints(
+                ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256()))
+    key_path.write_bytes(key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption()))
+    cert_path.write_bytes(
+        cert.public_bytes(serialization.Encoding.PEM))
+
+
+def _gen_cert_openssl(ips, cert_path, key_path):
+    """The same cert via the openssl CLI when the
+    cryptography package is absent."""
+    san = ",".join(["DNS:localhost"]
+                   + ["IP:" + i for i in ips])
+    cmd = ["openssl", "req", "-x509", "-newkey", "rsa:2048",
+           "-keyout", str(key_path), "-out", str(cert_path),
+           "-days", "3650", "-nodes",
+           "-subj", "/CN=GhostIDE host",
+           "-addext", "subjectAltName=" + san,
+           "-addext", "basicConstraints=critical,CA:TRUE"]
+    subprocess.run(cmd, check=True, capture_output=True,
+                   timeout=60)
+
+
+def ensure_host_cert():
+    """Return (cert_path, key_path) for the persistent
+    host cert, generating it when needed, or None when
+    no generation route exists. A cert is regenerated
+    only when the current address set outgrows its
+    SANs; a changed fingerprint is announced on the
+    console because guests must re-verify it."""
+    ips = _lan_ips()
+    if (TLS_CERT.exists() and TLS_KEY.exists()
+            and TLS_META.exists()):
+        try:
+            meta = json.loads(TLS_META.read_text())
+            if set(ips) <= set(meta.get("sans", [])):
+                TLS_STATE["fingerprint"] = \
+                    meta["fingerprint"]
+                return (TLS_CERT, TLS_KEY)
+        except (ValueError, KeyError, OSError):
+            pass
+    old_fp = None
+    if TLS_CERT.exists():
+        try:
+            old_fp = _cert_fp(TLS_CERT.read_bytes())
+        except Exception:
+            old_fp = None
+    TLS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(TLS_DIR, 0o700)
+    except OSError:
+        pass
+    made = False
+    try:
+        _gen_cert_crypto(ips, TLS_CERT, TLS_KEY)
+        made = True
+    except Exception as e:
+        # Visible, not silent: a broken crypto path
+        # must not quietly become the openssl path.
+        print("TLS: cryptography cert generation "
+              f"failed ({e}); trying openssl.")
+        made = False
+    if not made and _shutil.which("openssl"):
+        try:
+            _gen_cert_openssl(ips, TLS_CERT, TLS_KEY)
+            made = True
+        except (subprocess.SubprocessError, OSError):
+            made = False
+    if not made:
+        return None
+    try:
+        os.chmod(TLS_KEY, 0o600)
+    except OSError:
+        pass
+    fp = _cert_fp(TLS_CERT.read_bytes())
+    TLS_STATE["fingerprint"] = fp
+    TLS_META.write_text(json.dumps(
+        {"fingerprint": fp, "sans": ips}, indent=1))
+    if old_fp and old_fp != fp:
+        print("TLS: the host certificate changed (the "
+              "network addresses moved or the old cert "
+              "was removed). Guests must verify the NEW "
+              "fingerprint before pairing again.")
+    return (TLS_CERT, TLS_KEY)
 
 
 
@@ -3138,6 +3327,21 @@ class Handler(SimpleHTTPRequestHandler):
                           "on the host"}, status=403)
         return self.send_json({"code": PAIR_CODE})
 
+    def _pair_certfp(self):
+        # v2.38: the host identity a guest verifies
+        # before typing the code. Loopback-only, like
+        # the code itself; the fingerprint is public
+        # once you are on the host, useless to a
+        # network caller who cannot see the screen.
+        if self.client_address[0] not in ("127.0.0.1",
+                                          "::1"):
+            return self.send_json(
+                {"error": "host identity is only shown "
+                          "on the host"}, status=403)
+        return self.send_json(
+            {"tls": bool(TLS_STATE["active"]),
+             "fingerprint": TLS_STATE["fingerprint"]})
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         try:
@@ -3146,6 +3350,8 @@ class Handler(SimpleHTTPRequestHandler):
                     {"error": "pairing required"}, status=401)
             if parsed.path == "/api/pair/code":
                 return self._pair_code()
+            if parsed.path == "/api/pair/certfp":
+                return self._pair_certfp()
             if parsed.path == "/api/pair/policy":
                 return self._pair_policy("GET")
             if parsed.path == "/api/health":
@@ -4854,22 +5060,67 @@ def main():
                         _seed_sh.copy2(item, dst)
         WORKSPACE = home_ws
     WORKSPACE.mkdir(parents=True, exist_ok=True)
-    srv = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"GhostIDE at http://{HOST}:{PORT}  workspace={WORKSPACE}")
-    if HOST not in ("127.0.0.1", "localhost"):
-        print("LAN mode: other devices on this network can open it at "
-              f"http://<this-computer's-IP>:{PORT} - the API "
-              "requires the pairing code below (trusted "
-              "networks still advised: traffic is plain HTTP).")
+    # v2.33: an interrupted restore is rolled back
+    # before the server serves anything.
+    _restore_reconcile()
+    import threading as _threading
+    lan = HOST not in ("127.0.0.1", "localhost", "::1")
+    servers = []
+    if not lan:
+        servers.append(ThreadingHTTPServer((HOST, PORT), Handler))
+        print(f"GhostIDE at http://{HOST}:{PORT}  workspace={WORKSPACE}")
+    else:
+        # v2.38: LAN mode is dual-listener - the host's
+        # own UI stays on loopback HTTP (never warns),
+        # guests come in over HTTPS on the LAN address.
+        servers.append(
+            ThreadingHTTPServer(("127.0.0.1", PORT), Handler))
+        print(f"GhostIDE at http://127.0.0.1:{PORT}  workspace={WORKSPACE}")
+        cert = ensure_host_cert()
+        if cert is not None:
+            ctx = _ssl.SSLContext(_ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(str(cert[0]), str(cert[1]))
+            addrs = set(_lan_ips()) - {"127.0.0.1"}
+            if HOST != "0.0.0.0":
+                addrs.add(HOST)
+            for ip in sorted(addrs):
+                secure = ThreadingHTTPServer((ip, PORT), Handler)
+                secure.socket = ctx.wrap_socket(
+                    secure.socket, server_side=True)
+                servers.append(secure)
+            TLS_STATE["active"] = True
+            print("LAN mode (encrypted): guests open "
+                  f"https://<this-computer's-IP>:{PORT} and "
+                  "accept the one-time browser warning.")
+            print("Host certificate fingerprint "
+                  f"(SHA-256): {TLS_STATE['fingerprint']}")
+            print("A guest checks this fingerprint on "
+                  "this screen before entering the "
+                  "pairing code; the code is the secret, "
+                  "the fingerprint is the host's identity.")
+        else:
+            servers.append(
+                ThreadingHTTPServer((HOST, PORT), Handler))
+            print("WARNING: LAN mode is serving PLAIN "
+                  "HTTP - no certificate could be "
+                  "generated (the cryptography package "
+                  "and the openssl command are both "
+                  "unavailable), so traffic and pair "
+                  "tokens are visible on the network. "
+                  "Pair only on networks you trust, or "
+                  "install one of those and restart.")
     print(f"Pairing code (this boot): {PAIR_CODE} - a new "
           "device enters it once to pair; this device "
           "needs none.")
     print(f"Model: {MODEL_NAME} via {LLAMA_BASE} "
           f"({'up' if llama_health() else 'down - use Start Model in the IDE'})")
-    # v2.33: an interrupted restore is rolled back
-    # before the server serves anything.
-    _restore_reconcile()
-    srv.serve_forever()
+    for s in servers[:-1]:
+        _threading.Thread(target=s.serve_forever,
+                          daemon=True).start()
+    try:
+        servers[-1].serve_forever()
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":

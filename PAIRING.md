@@ -34,15 +34,45 @@ who is allowed to talk to the host at all.
 - The host can revoke every guest at once from the pair panel
   ("Revoke all guests", `POST /api/pair/revoke`, loopback-only).
   Revoked guests re-join with the code the same way.
+- LAN traffic is encrypted (v2.38). In LAN mode the desktop host
+  serves guests over HTTPS with a self-signed certificate, while
+  the host's own screen keeps using plain HTTP on loopback (it
+  never sees a warning). The certificate is persistent - one per
+  host, generated once and kept in `~/.ghostide/tls` - so its
+  SHA-256 fingerprint is the host's stable identity. The
+  fingerprint is shown in the host's pair panel, in the server
+  console at boot, and at `GET /api/pair/certfp` (loopback-only,
+  like the code). A guest compares the fingerprint their browser
+  shows for the connection with the host screen before typing
+  the code: the code is still the secret, the fingerprint is
+  the identity.
+- The certificate is regenerated only when the host's network
+  addresses outgrow it (for example a new network) or its files
+  are deleted. When that happens the console says so, and the
+  new fingerprint must be verified on the host screen before
+  pairing again - treat it like a changed SSH host key.
 
 ## What this does not do
 
-- Traffic is plain HTTP on the LAN: a token stops casual access
-  and scripts, it does not encrypt anything, and anyone who can
-  sniff the network can replay a token for up to 12 hours (its
-  lifetime), or until the host revokes all guests or restarts.
-  Pair on networks you trust; use the GitHub connect or a USB
-  transfer for hostile networks.
+- Encryption stops sniffing, not impersonation by itself. A
+  browser guest's only warning that a certificate is self-signed
+  is the browser's "not private" page, and clicking through it
+  is the normal first-join flow. Someone actively impersonating
+  the host on the network produces the same warning, so the
+  protection against that is the fingerprint check above: a
+  guest who skips comparing can still be fooled at first
+  pairing. Encryption does defeat passive observers completely
+  (files, chat, and tokens cross the LAN unreadable, and a
+  sniffed session yields nothing replayable).
+- If the host cannot generate a certificate (neither the
+  `cryptography` package nor the `openssl` command is
+  available), LAN mode still starts, in plain HTTP, with a
+  loud warning in the server console. Check the console: in
+  that mode anyone who can sniff the network can replay a
+  token for up to 12 hours (its lifetime), or until the host
+  revokes all guests or restarts. Pair on networks you trust;
+  use the GitHub connect, a VPN, or a USB transfer for hostile
+  networks.
 - The code is 6 digits by design (typed once, on a phone). Join
   attempts are rate limited (v2.12): 5 wrong codes inside 10
   minutes locks the source out for 10 minutes. A rotated source

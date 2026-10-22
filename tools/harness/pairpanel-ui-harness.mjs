@@ -12,5 +12,7 @@ check(src.includes("Unpaired. Reload"), "unpair feedback text");
 check(src.includes('localStorage.removeItem(\n            "ghostide-pair-role:" + location.host)'), "unpair also forgets the role (v2.32)");
 check(src.includes('postJson("/api/pair/revoke", {})'), "host revoke-all row wired (v2.32)");
 check(src.includes("Revoke all guests"), "revoke row labelled");
+check(src.includes('fetch("/api/pair/certfp")'), "fingerprint row wired (v2.38)");
+check(src.includes("Certificate fingerprint: "), "fingerprint row labelled");
 console.log(`RESULT ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
