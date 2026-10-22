@@ -2231,6 +2231,24 @@ try { window.__ghostSpeakLast = { lastAnswerOf }; }
 catch (e) {}
 /*@@SPEAKLAST-END@@*/
 
+
+// @@GHCONNECT@@ GitHub connect (v2.08): pure helpers
+// for the git panel's remote section. The token is
+// sent per request to the local server only and used
+// through git's askpass env; it is never written to
+// .git/config by these endpoints.
+export function repoNameFromUrl(url) {
+  const clean = String(url || "").trim().replace(/\/+$/, "")
+    .replace(/\.git$/, "");
+  const parts = clean.split(/[/:]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "";
+}
+export function validRemoteUrl(url) {
+  const u = String(url || "").trim();
+  return !!u && !u.startsWith("-");
+}
+// @@GHCONNECT-END@@
+
 /*@@ABOUT@@*/
 /* About this build (v2.07): the Settings info line
    plus the newest changelog entry, in the chat.
@@ -2760,6 +2778,7 @@ $("runBtn").onclick = async () => {
 $("runClose").onclick = () => $("runPane").classList.add("hidden");
 
 async function refreshGit() {
+  refreshGhRemote();
   const box = $("gitChanges");
   if (!box) return;
   try {
@@ -2865,6 +2884,91 @@ async function showDiff(path) {
   $("diffPanel").classList.remove("hidden");
 }
 $("diffClose").onclick = () => $("diffPanel").classList.add("hidden");
+
+// GitHub connect (v2.08): panel wiring. The token
+// persists on this device only (localStorage) and is
+// sent per request to the local server.
+function ghToken() {
+  const el = $("ghToken");
+  return el ? el.value.trim() : "";
+}
+function ghSay(text) {
+  const out = $("ghOut");
+  if (out) out.textContent = text || "";
+}
+async function ghPost(path, extra) {
+  ghSay("working...");
+  const r = await postJson(path,
+    Object.assign({ token: ghToken() }, extra || {}));
+  if (r.error) { ghSay("Error: " + r.error); return null; }
+  ghSay(r.output || "Done.");
+  return r;
+}
+async function refreshGhRemote() {
+  const info = $("ghRemoteInfo");
+  if (!info) return;
+  try {
+    const r = await fetch("/api/git/remote");
+    const d = await r.json();
+    if (!d.repo || !d.remotes || !d.remotes.length) {
+      info.textContent = "No remote set on this repo yet.";
+      return;
+    }
+    info.textContent = d.remotes.map(function (x) {
+      return x.name + ": " + (x.url || "(no url)");
+    }).join("  ");
+    const origin = d.remotes.filter(function (x) {
+      return x.name === "origin";
+    })[0] || d.remotes[0];
+    const urlEl = $("ghRemoteUrl");
+    if (origin && urlEl && !urlEl.value) urlEl.value = origin.url;
+  } catch (e) { /* panel still loading */ }
+}
+(function wireGhConnect() {
+  const tok = $("ghToken");
+  if (!tok) return;
+  try {
+    tok.value = localStorage.getItem("ghostide-gh-token") || "";
+  } catch (e) { /* storage off */ }
+  tok.addEventListener("change", function () {
+    try {
+      localStorage.setItem("ghostide-gh-token", tok.value.trim());
+    } catch (e) { /* storage off */ }
+  });
+  $("ghSaveRemote").onclick = async () => {
+    const url = $("ghRemoteUrl").value.trim();
+    if (!validRemoteUrl(url)) {
+      ghSay("Paste a remote URL first."); return;
+    }
+    const r = await ghPost("/api/git/remote-set",
+      { name: "origin", url: url });
+    if (r) { ghSay("Remote saved."); refreshGhRemote(); }
+  };
+  $("ghClone").onclick = async () => {
+    const url = $("ghRemoteUrl").value.trim();
+    if (!validRemoteUrl(url)) {
+      ghSay("Paste a repo URL to clone first."); return;
+    }
+    const dir = prompt("Clone into folder:",
+      repoNameFromUrl(url));
+    if (!dir) return;
+    const r = await ghPost("/api/git/clone",
+      { url: url, dir: dir.trim() });
+    if (r) { loadFiles(); refreshGit(); }
+  };
+  $("ghFetch").onclick = async () => {
+    await ghPost("/api/git/fetch", {});
+  };
+  $("ghPull").onclick = async () => {
+    const r = await ghPost("/api/git/pull", {});
+    if (r) { loadFiles(); refreshGit(); }
+  };
+  $("ghPush").onclick = async () => {
+    const r = await ghPost("/api/git/push", {});
+    if (r) refreshGit();
+  };
+})();
+
 $("commitBtn").onclick = async () => {
   const msg = $("commitMsg").value.trim();
   if (!msg) { alert("Write a commit message first."); return; }

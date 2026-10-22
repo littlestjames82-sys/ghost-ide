@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.07.0"
+APP_VERSION = "2.08.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -229,12 +229,12 @@ import time
 CTX_BUDGET_DEFAULT = 6000  # of the desktop model's 8192 ctx
 
 
-def run_cmd(args, cwd, timeout=30):
+def run_cmd(args, cwd, timeout=30, env=None):
     """Run a local command, returning (rc, stdout, stderr) truncated."""
     try:
         t0 = time.time()
         r = subprocess.run(args, cwd=str(cwd), capture_output=True,
-                           text=True, timeout=timeout)
+                           text=True, timeout=timeout, env=env)
         ms = int((time.time() - t0) * 1000)
         return r.returncode, r.stdout[-65536:], r.stderr[-16384:], ms
     except FileNotFoundError:
@@ -2049,6 +2049,46 @@ def git_out(args, timeout=30):
                    WORKSPACE, timeout)
 
 
+# GitHub connect (v2.08): network git with token auth
+# that never lands in .git/config. The token travels
+# in an env var; a tiny askpass script answers git's
+# prompts from it. The script lives in the system
+# temp dir, outside any workspace.
+ASKPASS_PATH = Path(tempfile.gettempdir()) / "ghostide-askpass.sh"
+
+
+def _ensure_askpass():
+    try:
+        if not ASKPASS_PATH.exists():
+            ASKPASS_PATH.write_text(
+                "#!/bin/sh\n"
+                "case \"$1\" in\n"
+                "*Username*) echo \"x-access-token\" ;;\n"
+                "*) echo \"$GHOSTIDE_GH_TOKEN\" ;;\n"
+                "esac\n")
+            ASKPASS_PATH.chmod(0o700)
+    except Exception:
+        pass
+
+
+def git_net(args, token="", timeout=180, cwd=None):
+    if not shutil.which("git"):
+        raise ValueError("git is not installed")
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    if token:
+        _ensure_askpass()
+        env["GIT_ASKPASS"] = str(ASKPASS_PATH)
+        env["GHOSTIDE_GH_TOKEN"] = token
+    return run_cmd(["git"] + args, cwd or WORKSPACE, timeout,
+                   env=env)
+
+
+def repo_name_from_url(url):
+    clean = (url or "").strip().rstrip("/").removesuffix(".git")
+    parts = clean.replace("/", " ").replace(":", " ").split()
+    return parts[-1] if parts else ""
+
 
 def _dl_worker(mid):
     """Background model download (Roadmap G18): streams to
@@ -2954,6 +2994,22 @@ class Handler(SimpleHTTPRequestHandler):
                                         "path": ln[3:].strip()})
                 return self.send_json({"repo": True, "branch": branch,
                                        "changes": changes})
+            if parsed.path == "/api/git/remote":
+                rc, out, err, _ = git_out(["remote"])
+                if rc != 0:
+                    return self.send_json({"repo": False,
+                                           "error": err.strip()[:200]})
+                remotes = []
+                for name in out.splitlines():
+                    name = name.strip()
+                    if not name:
+                        continue
+                    rc2, u, _, _ = git_out(
+                        ["remote", "get-url", name])
+                    remotes.append({"name": name,
+                                    "url": u.strip() if rc2 == 0 else ""})
+                return self.send_json({"repo": True,
+                                       "remotes": remotes})
             if parsed.path == "/api/git/diff":
                 rel = urllib.parse.parse_qs(parsed.query)["path"][0]
                 safe_path(rel)
@@ -3371,6 +3427,90 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError((err or out).strip()[:400] or
                                      "git commit failed")
                 return self.send_json({"ok": True, "output": out.strip()})
+            if parsed.path == "/api/git/remote-set":
+                data = self.read_json()
+                name = (data.get("name") or "origin").strip()
+                url = (data.get("url") or "").strip()
+                if not name or name.startswith("-"):
+                    raise ValueError("bad remote name")
+                if not url or url.startswith("-"):
+                    raise ValueError("bad remote url")
+                rc, out, err, _ = git_out(["remote"])
+                if rc != 0:
+                    raise ValueError(err.strip()[:300]
+                                     or "not a git repo")
+                if name in out.split():
+                    rc, out, err, _ = git_out(
+                        ["remote", "set-url", name, url])
+                else:
+                    rc, out, err, _ = git_out(
+                        ["remote", "add", name, url])
+                if rc != 0:
+                    raise ValueError(err.strip()[:300]
+                                     or "git remote failed")
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/git/clone":
+                data = self.read_json()
+                url = (data.get("url") or "").strip()
+                if not url or url.startswith("-"):
+                    raise ValueError("bad clone url")
+                target = (data.get("dir") or "").strip() \
+                    or repo_name_from_url(url)
+                if not target:
+                    raise ValueError("cannot name the target folder")
+                safe_path(target)
+                dest = WORKSPACE / target
+                if dest.exists() and any(dest.iterdir()):
+                    raise ValueError(
+                        "target folder exists and is not empty: "
+                        + target)
+                rc, out, err, _ = git_net(
+                    ["clone", url, target],
+                    token=(data.get("token") or "").strip(),
+                    timeout=300)
+                if rc != 0:
+                    raise ValueError((err or out).strip()[:400]
+                                     or "git clone failed")
+                return self.send_json({"ok": True, "dir": target,
+                                       "output": out.strip()[-300:]})
+            if parsed.path == "/api/git/fetch":
+                data = self.read_json()
+                args = ["fetch"]
+                remote = (data.get("remote") or "").strip()
+                if remote:
+                    if remote.startswith("-"):
+                        raise ValueError("bad remote name")
+                    args.append(remote)
+                rc, out, err, _ = git_net(
+                    args, token=(data.get("token") or "").strip())
+                if rc != 0:
+                    raise ValueError((err or out).strip()[:400]
+                                     or "git fetch failed")
+                return self.send_json(
+                    {"ok": True, "output": (out + err).strip()[-300:]})
+            if parsed.path == "/api/git/pull":
+                data = self.read_json()
+                rc, out, err, _ = git_net(
+                    ["pull"], token=(data.get("token") or "").strip())
+                if rc != 0:
+                    raise ValueError((err or out).strip()[:400]
+                                     or "git pull failed")
+                return self.send_json(
+                    {"ok": True, "output": (out + err).strip()[-300:]})
+            if parsed.path == "/api/git/push":
+                data = self.read_json()
+                token = (data.get("token") or "").strip()
+                rc, _, _, _ = git_out(
+                    ["rev-parse", "--abbrev-ref",
+                     "--symbolic-full-name", "@{u}"])
+                args = ["push"] if rc == 0 else \
+                    ["push", "-u", "origin", "HEAD"]
+                rc, out, err, _ = git_net(args, token=token)
+                if rc != 0:
+                    raise ValueError((err or out).strip()[:400]
+                                     or "git push failed")
+                return self.send_json(
+                    {"ok": True, "output": (out + err).strip()[-300:]})
             if parsed.path == "/api/search":
                 data = self.read_json()
                 q = data.get("query", "")
