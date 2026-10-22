@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.26.0"
+APP_VERSION = "2.27.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -182,6 +182,8 @@ def backup_encrypt(passphrase, zip_bytes, files, nbytes):
         ct = AESGCM(enc_key).encrypt(iv, zip_bytes, None)
         env = {
             "app": "ghostide-backup", "v": 2,
+            "createdBy": "GhostIDE",
+            "appVersion": APP_VERSION,
             "cipher": "AES-256-GCM",
             "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "files": files, "bytes": nbytes,
@@ -200,6 +202,8 @@ def backup_encrypt(passphrase, zip_bytes, files, nbytes):
                    hashlib.sha256).digest()
     env = {
         "app": "ghostide-backup", "v": 1,
+        "createdBy": "GhostIDE",
+        "appVersion": APP_VERSION,
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "files": files, "bytes": nbytes,
         "kdf": {"algo": "PBKDF2-HMAC-SHA256", "iter": BACKUP_ITER,
@@ -3541,6 +3545,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({
                     "ok": True,
                     "version": env.get("v", 0),
+                    "appVersion": env.get("appVersion", ""),
                     "files": len(paths),
                     "bytes": total,
                     "created": env.get("created", "")})

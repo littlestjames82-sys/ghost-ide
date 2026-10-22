@@ -11358,7 +11358,10 @@ async function openBackup() {
       if (ins.error) { alert(ins.error); return; }
       const kb = Math.max(1, Math.round(ins.bytes / 1024));
       if (!confirm("Restore " + p + "?\nBackup from "
-          + (ins.created || "unknown date") + " - "
+          + (ins.created || "unknown date")
+          + (ins.appVersion
+            ? " - made by GhostIDE " + ins.appVersion : "")
+          + " - "
           + ins.files + " files, " + kb + " KB, format v"
           + ins.version + ". Files with the same names "
           + "are overwritten.")) return;
