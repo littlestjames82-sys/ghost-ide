@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.18.0"
+APP_VERSION = "2.19.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2937,6 +2937,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(
                     {"model": "up" if llama_health() else "down",
                      "modelName": MODEL_NAME, "version": APP_VERSION,
+                     "pairRequired": True,
+                     "backupFormats": [1, 2],
                      "workspace": str(WORKSPACE)})
             if parsed.path == "/api/eco/tools":
                 return self.send_json({"tools": eco_tools_state()})
