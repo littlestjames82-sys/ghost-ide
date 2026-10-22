@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.10.0"
+APP_VERSION = "2.11.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -56,6 +56,14 @@ def pair_snapshot():
 # (encrypt-then-MAC). A wrong passphrase fails the MAC.
 BACKUP_ITER = 200000
 MAX_BODY_BYTES = 64 * 1024 * 1024
+
+# Pair trust (item 12): a per-boot 6-digit code gates
+# every /api route for non-loopback callers; loopback
+# (the host's own UI) is trusted. See PAIRING.md.
+import secrets as _secrets
+PAIR_CODE = "%06d" % _secrets.randbelow(1000000)
+PAIR_TOKENS = set()
+
 
 
 def _bk_keys(passphrase, salt, iters):
@@ -103,6 +111,30 @@ def _aesgcm():
         return AESGCM
     except Exception:
         return None
+
+
+_ZIP_MAX_ENTRIES = 20000
+_ZIP_MAX_ENTRY = 200 * 1024 * 1024
+_ZIP_MAX_TOTAL = 512 * 1024 * 1024
+
+
+def _zipguard_clean(name):
+    """Hostile-ZIP entry rules, mirroring ZipGuard.java:
+    drop empty/dot/dotdot parts, skip dot-prefixed
+    parts and the top-level backups folder."""
+    parts = []
+    for part in str(name).replace("\\", "/").split("/"):
+        if part in ("", ".", ".."):
+            continue
+        if part.startswith("."):
+            return None
+        parts.append(part)
+    if not parts:
+        return None
+    clean = "/".join(parts)
+    if clean == "backups" or clean.startswith("backups/"):
+        return None
+    return clean
 
 
 def backup_encrypt(passphrase, zip_bytes, files, nbytes):
@@ -2835,9 +2867,32 @@ class Handler(SimpleHTTPRequestHandler):
         conn.close()
 
     # ---------- routes ----------
+    def _pair_gate(self, path):
+        if not path.startswith("/api/"):
+            return True
+        if path == "/api/pair/join":
+            return True
+        if self.client_address[0] in ("127.0.0.1", "::1"):
+            return True
+        return (self.headers.get("X-Pair-Token")
+                or "") in PAIR_TOKENS
+
+    def _pair_code(self):
+        if self.client_address[0] not in ("127.0.0.1",
+                                          "::1"):
+            return self.send_json(
+                {"error": "pairing code is only shown "
+                          "on the host"}, status=403)
+        return self.send_json({"code": PAIR_CODE})
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         try:
+            if not self._pair_gate(parsed.path):
+                return self.send_json(
+                    {"error": "pairing required"}, status=401)
+            if parsed.path == "/api/pair/code":
+                return self._pair_code()
             if parsed.path == "/api/health":
                 return self.send_json(
                     {"model": "up" if llama_health() else "down",
@@ -3255,6 +3310,20 @@ class Handler(SimpleHTTPRequestHandler):
         global WORKSPACE, MODEL, MODEL_NAME
         parsed = urllib.parse.urlparse(self.path)
         try:
+            if not self._pair_gate(parsed.path):
+                return self.send_json(
+                    {"error": "pairing required"}, status=401)
+            if parsed.path == "/api/pair/join":
+                data = self.read_json()
+                if str(data.get("code", "")).strip() \
+                        != PAIR_CODE:
+                    return self.send_json(
+                        {"error": "wrong pairing code"},
+                        status=401)
+                token = _secrets.token_hex(16)
+                PAIR_TOKENS.add(token)
+                return self.send_json(
+                    {"ok": True, "token": token})
             if parsed.path == "/api/model/download":
                 data = self.read_json()
                 mid = str(data.get("id", "7b"))
@@ -3347,31 +3416,101 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("backup file not found")
                 raw = backup_decrypt(pw, p.read_text())
                 import io
+                import shutil
                 import zipfile
-                count = 0
+                root = WORKSPACE / ".ghostide-restore"
+                stage = root / "stage"
+                roll = root / "rollback"
+                shutil.rmtree(root, ignore_errors=True)
+                stage.mkdir(parents=True)
+                paths = []
                 total = 0
-                with zipfile.ZipFile(io.BytesIO(raw)) as z:
-                    for info in z.infolist():
-                        parts = [x for x in
-                                 info.filename.replace(
-                                     "\\", "/").split("/")
-                                 if x not in ("", ".", "..")]
-                        if not parts:
-                            continue
-                        if any(x.startswith(".")
-                               for x in parts):
-                            continue
-                        if parts[0] == "backups":
-                            continue
-                        dst = WORKSPACE.joinpath(*parts)
-                        dst.parent.mkdir(parents=True,
-                                         exist_ok=True)
-                        content = z.read(info)
-                        dst.write_bytes(content)
-                        count += 1
-                        total += len(content)
+                try:
+                    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                        seen = set()
+                        for info in z.infolist():
+                            clean = _zipguard_clean(
+                                info.filename)
+                            if clean is None:
+                                continue
+                            if clean in seen:
+                                raise ValueError(
+                                    "backup has a duplicate "
+                                    "entry: " + clean)
+                            seen.add(clean)
+                            if len(paths) >= _ZIP_MAX_ENTRIES:
+                                raise ValueError(
+                                    "backup has too many "
+                                    "entries")
+                            out_f = stage.joinpath(
+                                *clean.split("/"))
+                            if info.is_dir():
+                                out_f.mkdir(parents=True,
+                                            exist_ok=True)
+                                continue
+                            out_f.parent.mkdir(parents=True,
+                                               exist_ok=True)
+                            n = 0
+                            with z.open(info) as src, \
+                                    open(out_f, "wb") as dst:
+                                while True:
+                                    chunk = src.read(65536)
+                                    if not chunk:
+                                        break
+                                    dst.write(chunk)
+                                    n += len(chunk)
+                                    if n > _ZIP_MAX_ENTRY:
+                                        raise ValueError(
+                                            "backup entry too "
+                                            "large: " + clean)
+                            paths.append(clean)
+                            total += n
+                            if total > _ZIP_MAX_TOTAL:
+                                raise ValueError(
+                                    "backup expands past "
+                                    "the 512 MB restore cap")
+                    applied = []
+                    try:
+                        for clean in paths:
+                            src = stage.joinpath(
+                                *clean.split("/"))
+                            dst = WORKSPACE.joinpath(
+                                *clean.split("/"))
+                            rb = roll.joinpath(
+                                *clean.split("/"))
+                            dst.parent.mkdir(parents=True,
+                                             exist_ok=True)
+                            if dst.is_file():
+                                rb.parent.mkdir(parents=True,
+                                                exist_ok=True)
+                                shutil.move(str(dst), str(rb))
+                            shutil.move(str(src), str(dst))
+                            applied.append(clean)
+                    except Exception as e:
+                        for clean in reversed(applied):
+                            dst = WORKSPACE.joinpath(
+                                *clean.split("/"))
+                            rb = roll.joinpath(
+                                *clean.split("/"))
+                            try:
+                                if dst.is_file():
+                                    dst.unlink()
+                                if rb.is_file():
+                                    dst.parent.mkdir(
+                                        parents=True,
+                                        exist_ok=True)
+                                    shutil.move(str(rb),
+                                                str(dst))
+                            except Exception:
+                                pass
+                        raise ValueError(
+                            "restore failed and was "
+                            "rolled back: %s" % e)
+                finally:
+                    shutil.rmtree(root, ignore_errors=True)
                 return self.send_json({
-                    "ok": True, "files": count, "bytes": total})
+                    "ok": True, "files": len(paths),
+                    "bytes": total, "staged": True})
             if parsed.path == "/api/pair/heartbeat":
                 data = self.read_json()
                 pid = str(data.get("id", ""))[:64]
@@ -4257,8 +4396,12 @@ def main():
     print(f"GhostIDE at http://{HOST}:{PORT}  workspace={WORKSPACE}")
     if HOST not in ("127.0.0.1", "localhost"):
         print("LAN mode: other devices on this network can open it at "
-              f"http://<this-computer's-IP>:{PORT} - no auth, "
-              "trusted networks only.")
+              f"http://<this-computer's-IP>:{PORT} - the API "
+              "requires the pairing code below (trusted "
+              "networks still advised: traffic is plain HTTP).")
+    print(f"Pairing code (this boot): {PAIR_CODE} - a new "
+          "device enters it once to pair; this device "
+          "needs none.")
     print(f"Model: {MODEL_NAME} via {LLAMA_BASE} "
           f"({'up' if llama_health() else 'down - use Start Model in the IDE'})")
     srv.serve_forever()

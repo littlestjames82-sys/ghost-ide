@@ -645,6 +645,67 @@ async function openFile(path, skipGuard) {
   checkQuiet();
 }
 
+
+// Pairing (item 12): every fetch carries this host's
+// pair token when one is stored; a 401 "pairing
+// required" asks for the 6-digit code shown on the
+// host, joins, and retries once. Loopback hosts never
+// ask (their server does not gate them).
+const PAIR_TOKEN_KEY = "ghostide-pair-token:"
+  + location.host;
+function storedPairToken() {
+  try {
+    return localStorage.getItem(PAIR_TOKEN_KEY) || "";
+  } catch (e) { return ""; }
+}
+const _rawFetch = window.fetch.bind(window);
+window.fetch = async function (input, init) {
+  init = init || {};
+  const headers = new Headers(
+    init.headers || (input && input.headers) || {});
+  const tok = storedPairToken();
+  if (tok && !headers.has("X-Pair-Token"))
+    headers.set("X-Pair-Token", tok);
+  init = Object.assign({}, init, { headers: headers });
+  let resp = await _rawFetch(input, init);
+  if (resp.status === 401) {
+    let need = false;
+    try {
+      const d = await resp.clone().json();
+      need = d && d.error === "pairing required";
+    } catch (e) { /* not a pair gate */ }
+    if (need) {
+      const code = prompt(
+        "This GhostIDE host asks for a pairing code. "
+        + "It is shown in the pair panel on the host "
+        + "device.");
+      if (code) {
+        const jr = await _rawFetch("/api/pair/join", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code: code.trim(),
+            id: typeof pairId !== "undefined"
+              ? pairId : "",
+            name: "guest device"
+          })
+        });
+        const jd = await jr.json().catch(() => null);
+        if (jd && jd.token) {
+          try {
+            localStorage.setItem(PAIR_TOKEN_KEY, jd.token);
+          } catch (e) { /* storage off */ }
+          headers.set("X-Pair-Token", jd.token);
+          init = Object.assign({}, init,
+            { headers: headers });
+          resp = await _rawFetch(input, init);
+        }
+      }
+    }
+  }
+  return resp;
+};
+
 function postJson(url, obj) {
   return fetch(url, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -11097,6 +11158,20 @@ async function openPair() {
     }
   }
   if (pairOn) {
+    const codeRow = document.createElement("div");
+    codeRow.className = "dim";
+    box.appendChild(codeRow);
+    fetch("/api/pair/code")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        codeRow.textContent = d && d.code
+          ? "Pairing code for this host: " + d.code
+            + " - a new device enters it once to pair. "
+            + "It resets when the server restarts."
+          : "This device is a guest here; the pairing "
+            + "code is shown on the host.";
+      })
+      .catch(() => { codeRow.textContent = ""; });
     await pairHeartbeat();
     if (!pairPeers.length) {
       const none = document.createElement("div");
