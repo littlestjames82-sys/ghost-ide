@@ -896,7 +896,11 @@ $("setUpdateBtn").onclick = async () => {
       d.updateAvailable
         ? "Update available: v" + d.latest + ". "
         : "You are up to date. "));
-    if (d.updateAvailable && d.url) {
+    if (d.updateAvailable && d.url
+        && /^https?:\/\//i.test(d.url)) {
+      // v2.36: only web URLs become links - the
+      // version feed is remote data, and a
+      // javascript: URL here would run on click.
       const a = document.createElement("a");
       a.href = d.url;
       a.target = "_blank";
@@ -5979,23 +5983,41 @@ function renderMarkdown(src, basePath) {
       }
     }
   };
+  // v2.36: attribute values are quote-escaped at
+  // interpolation. escHtml already ran over the
+  // source, but it leaves double quotes alone, so
+  // a quote in alt text or a URL used to break out
+  // of the attribute - a stored-XSS hole in any
+  // previewed .md, on an origin that holds the
+  // GitHub and pair tokens.
+  const escQ = (s) => s.replace(/"/g, "&quot;");
   const inline = (t) => t
     .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, s) =>
-      "<img alt=\"" + alt + "\" src=\"" +
-      (/^(https?:|data:)/.test(s) ? s
+      "<img alt=\"" + escQ(alt) + "\" src=\"" +
+      (/^(https?:|data:)/i.test(s) ? escQ(s)
         : "/api/raw?path=" + encodeURIComponent(mdResolve(base, s))) +
       "\">")
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, text, href) => {
-      if (/^https?:/.test(href)) {
-        return "<a href=\"" + href +
+      if (/^https?:/i.test(href) || href.startsWith("//")) {
+        return "<a href=\"" + escQ(href) +
           "\" target=\"_blank\" rel=\"noopener\">" + text + "</a>";
+      }
+      if (/^mailto:/i.test(href)) {
+        return "<a href=\"" + escQ(href) + "\">" + text + "</a>";
+      }
+      // v2.36: any other scheme (javascript:,
+      // data:, vbscript:, file:) renders as plain
+      // text - the link is inert, the words stay
+      // readable.
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+        return text;
       }
       const resolved = mdResolve(base, href);
       if (/\.md$/i.test(resolved)) {
-        return "<a href=\"#" + resolved + "\" data-md=\"" +
-          resolved + "\">" + text + "</a>";
+        return "<a href=\"#" + escQ(resolved) + "\" data-md=\"" +
+          escQ(resolved) + "\">" + text + "</a>";
       }
-      return "<a href=\"" + href + "\">" + text + "</a>";
+      return "<a href=\"" + escQ(href) + "\">" + text + "</a>";
     })
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
@@ -11178,7 +11200,11 @@ async function quietUpdateCheck() {
     pill.textContent = "⬆ v" + d.latest + " available";
     pill.classList.remove("hidden");
     pill.onclick = () => {
-      if (d.url) window.open(d.url, "_blank", "noopener");
+      // v2.36: same scheme gate as the Settings
+      // update link - remote feed data never
+      // becomes a javascript: navigation.
+      if (d.url && /^https?:\/\//i.test(d.url))
+        window.open(d.url, "_blank", "noopener");
       localStorage.setItem("ghostide-update-dismissed",
         d.latest);
       pill.classList.add("hidden");
