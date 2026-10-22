@@ -92,11 +92,29 @@ const settings = Object.assign(
     customTokens: 1024, lineHeight: "1.45",
     ligatures: true, lineNumbers: true,
     activeLine: true, chatFs: "13",
-    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false, wrapChat: false, autosave: false,
+    chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false, wrapChat: false,
     roleLabels: true, sliceBudget: 6000,
     attachSelection: true, attachDiff: false },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
+/*@@AUTOSAVE@@*/
+/* Autosave has ONE shape (v2.37 untangle): a mode
+   string, "off" or "delay", owned by the editor
+   settings select and the queueAutosave debounce.
+   The v2.01 checkbox wiring is gone - it shared
+   this key and the setAutosave element id, so its
+   binding landed on the select and stomped the
+   mode. A boolean left in stored settings by
+   that wiring maps to the mode it meant. */
+function autosaveMode(v) {
+  if (typeof v === "boolean") return v ? "delay" : "off";
+  return v === "delay" ? "delay" : "off";
+}
+try { window.__ghostAutosave = { autosaveMode }; }
+catch (e) {}
+/*@@AUTOSAVE-END@@*/
+settings.autosave = autosaveMode(settings.autosave);
 function saveSettings() {
+  settings.autosave = autosaveMode(settings.autosave);
   localStorage.setItem("ghostide-settings", JSON.stringify(settings));
 }
 
@@ -2218,19 +2236,9 @@ try { window.__ghostChatSearch = { searchChats,
   searchResultsText }; } catch (e) {}
 /*@@CHATSEARCH-END@@*/
 
-/*@@AUTOSAVE@@*/
-/* Autosave (v2.01): the poller snapshots the doc
-   every 1.5s; autosave is due only when the setting
-   is on, a file is open and dirty, and the snapshot
-   has been stable for two ticks (about 3 idle
-   seconds). Typing resets the clock by changing
-   the snapshot. */
-function autosaveDue(on, hasFile, isDirty, idleTicks) {
-  return !!(on && hasFile && isDirty && idleTicks >= 2);
-}
-try { window.__ghostAutosave = { autosaveDue }; }
-catch (e) {}
-/*@@AUTOSAVE-END@@*/
+/* (The v2.01 autosave poller that used to live
+   here was removed in the v2.37 untangle - see
+   the @@AUTOSAVE@@ block by the settings load.) */
 
 /*@@SUMMARIZE@@*/
 /* Summarize chat (v2.02): not a new pipeline - a
@@ -5738,28 +5746,10 @@ $("toolSearchChats").onclick = () => {
 };
 
 
-/* ---------------- Autosave (v2.01) ----------------- */
-$("setAutosave").checked = !!settings.autosave;
-$("setAutosave").onchange = (e) => {
-  settings.autosave = e.target.checked;
-  saveSettings();
-};
-let asSnap = null, asIdle = 0;
-setInterval(() => {
-  if (!settings.autosave || !currentFile || !dirty) {
-    asSnap = null;
-    asIdle = 0;
-    return;
-  }
-  const cur = view.state.doc.toString();
-  if (cur === asSnap) asIdle++;
-  else { asSnap = cur; asIdle = 0; }
-  if (autosaveDue(settings.autosave, !!currentFile,
-      dirty, asIdle)) {
-    asIdle = 0;
-    saveFile();
-  }
-}, 1500);
+/* (The v2.01 autosave checkbox binding and
+   poller that used to live here were removed in
+   the v2.37 untangle: one autosave setting, the
+   editor select + queueAutosave debounce.) */
 
 
 /* ---------------- Summarize chat (v2.02) ----------- */
