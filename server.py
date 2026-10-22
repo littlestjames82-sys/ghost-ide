@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.34.0"
+APP_VERSION = "2.35.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -3004,6 +3004,14 @@ def _restore_reconcile():
 
 
 class Handler(SimpleHTTPRequestHandler):
+    # v2.35: a client that trickles or stalls a
+    # request gets 30 s per blocking socket call,
+    # not forever (this server is LAN-exposed in
+    # LAN mode). Long responses stay legal: the
+    # timeout bounds each read/write stall, not
+    # the whole transfer.
+    timeout = 30
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(WEB), **kw)
 
@@ -3020,10 +3028,29 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def read_json(self):
-        n = int(self.headers.get("Content-Length") or 0)
+        # v2.35: refuse ambiguous framing instead
+        # of guessing - a second Content-Length or
+        # any Transfer-Encoding is a hard error
+        # (bodies here are length-framed only).
+        cls = self.headers.get_all("Content-Length") or []
+        if len(cls) > 1:
+            raise ValueError("duplicate Content-Length")
+        if self.headers.get("Transfer-Encoding"):
+            raise ValueError(
+                "chunked transfer not supported")
+        try:
+            n = int(cls[0]) if cls else 0
+        except ValueError:
+            raise ValueError("bad Content-Length")
         if n < 0 or n > MAX_BODY_BYTES:
             raise ValueError("request body too large")
-        return json.loads(self.rfile.read(n) or b"{}")
+        raw_body = self.rfile.read(n)
+        if len(raw_body) < n:
+            # v2.35: a short read at EOF means the
+            # client promised bytes it never sent;
+            # never route the partial body.
+            raise ValueError("request body truncated")
+        return json.loads(raw_body or b"{}")
 
     def proxy(self, path, payload, stream=False):
         """Forward a JSON POST to llama.cpp and relay the response."""

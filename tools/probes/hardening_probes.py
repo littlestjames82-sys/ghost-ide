@@ -137,6 +137,84 @@ try:
     with urllib.request.urlopen(req, timeout=10) as r:
         d = json.loads(r.read().decode())
     check("matches" in d, "normal POST still works")
+    # v2.35: raw-socket framing probes - urllib and
+    # http.client will not emit these, so speak HTTP
+    # by hand. The server speaks HTTP/1.0 and closes
+    # after each response, so read to EOF.
+    import socket
+    def raw(req_bytes, wait=10):
+        s = socket.create_connection(("127.0.0.1", 5251),
+                                     timeout=wait)
+        s.sendall(req_bytes)
+        out = b""
+        try:
+            while True:
+                chunk = s.recv(4096)
+                if not chunk: break
+                out += chunk
+        except socket.timeout:
+            pass
+        s.close()
+        return out.decode(errors="replace")
+    r = raw(b"POST /api/search HTTP/1.1\r\n"
+            b"Host: x\r\nContent-Type: application/json\r\n"
+            b"Content-Length: 2\r\nContent-Length: 2\r\n"
+            b"\r\n{}")
+    check("duplicate" in r,
+          "duplicate Content-Length refused", r[:100])
+    r = raw(b"POST /api/search HTTP/1.1\r\n"
+            b"Host: x\r\nTransfer-Encoding: chunked\r\n"
+            b"\r\n2\r\n{}\r\n0\r\n\r\n")
+    check("chunked" in r,
+          "Transfer-Encoding refused", r[:100])
+    r = raw(b"POST /api/search HTTP/1.1\r\n"
+            b"Host: x\r\nContent-Length: abc\r\n\r\n{}")
+    check("bad Content-Length" in r,
+          "non-numeric Content-Length refused", r[:100])
+    # truncated body: declare 100, send 2, close the
+    # write side - the partial body must be refused,
+    # never routed as if whole.
+    # (this one needs a half-close, so no raw())
+    s = socket.create_connection(("127.0.0.1", 5251),
+                                 timeout=10)
+    s.sendall(b"POST /api/search HTTP/1.1\r\n"
+              b"Host: x\r\nContent-Length: 100\r\n"
+              b"\r\n{}")
+    s.shutdown(socket.SHUT_WR)
+    out = b""
+    try:
+        while True:
+            chunk = s.recv(4096)
+            if not chunk: break
+            out += chunk
+    except socket.timeout:
+        pass
+    s.close()
+    r = out.decode(errors="replace")
+    check("truncated" in r,
+          "truncated body refused, not routed", r[:100])
+    # slow trickle: partial headers, then silence -
+    # the server must drop the connection at its
+    # 30 s read timeout (generous bounds).
+    s = socket.create_connection(("127.0.0.1", 5251),
+                                 timeout=45)
+    s.sendall(b"POST /api/search HTTP/1.1\r\n"
+              b"Host: x\r\nContent-Length: 2\r\n")
+    t0 = time.time()
+    closed = False
+    try:
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                closed = True
+                break
+    except (socket.timeout, ConnectionResetError):
+        closed = True
+    elapsed = time.time() - t0
+    s.close()
+    check(closed and 25 <= elapsed <= 42,
+          "slow trickle dropped at the read timeout",
+          f"closed={closed} elapsed={elapsed:.1f}")
 finally:
     p.terminate()
 print(f"HARDENING PROBES: {ok} passed, {fail} failed")
