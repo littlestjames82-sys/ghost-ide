@@ -17,10 +17,75 @@ import { go } from "@codemirror/lang-go";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { openSearchPanel, selectNextOccurrence } from "@codemirror/search";
 import { snippet } from "@codemirror/autocomplete";
-import { foldAll, unfoldAll, indentUnit } from "@codemirror/language";
+import { foldAll, unfoldAll, indentUnit, HighlightStyle,
+  syntaxHighlighting } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 import { BEHAVIOR } from "./behavior.js";
 
 const $ = (id) => document.getElementById(id);
+
+/*@@THEME@@*/
+/* Ghost theme (v2.40): oneDark stays as the base, and
+   these two extensions sit after it in both editors,
+   so the surfaces and syntax colors are GhostIDE's
+   own - near-black violet-tinted background (the
+   v2.39 stylesheet palette), a violet-forward syntax
+   palette. Defined through CodeMirror's theme facet,
+   the mechanism that actually wins over the base
+   theme (the v2.39 CSS overrides alone were too
+   quiet on the phone). */
+const ghostTheme = EditorView.theme({
+  "&": { backgroundColor: "#0d0e13", color: "#e8eaf0" },
+  ".cm-content": { caretColor: "#bb9af7" },
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#bb9af7" },
+  ".cm-selectionBackground, &.cm-focused .cm-selectionBackground":
+    { backgroundColor: "rgba(103, 22, 243, 0.30)" },
+  ".cm-activeLine": { backgroundColor: "rgba(255, 255, 255, 0.045)" },
+  ".cm-gutters": {
+    backgroundColor: "#0d0e13", color: "#71768a",
+    borderRight: "1px solid #20222c",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "rgba(255, 255, 255, 0.045)",
+    color: "#ccd2e0",
+  },
+  ".cm-foldPlaceholder": {
+    backgroundColor: "#23252f", color: "#a3a8ba",
+    border: "1px solid #2c2f3b",
+  },
+}, { dark: true });
+const ghostHighlight = HighlightStyle.define([
+  { tag: t.keyword, color: "#bb9af7" },
+  { tag: [t.name, t.deleted, t.character, t.macroName],
+    color: "#e8eaf0" },
+  { tag: [t.function(t.variableName), t.labelName],
+    color: "#7aa2f7" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)],
+    color: "#f0b269" },
+  { tag: [t.definition(t.name), t.separator], color: "#a3a8ba" },
+  { tag: [t.typeName, t.className, t.number, t.changed,
+    t.annotation, t.modifier, t.self, t.namespace],
+    color: "#e0af68" },
+  { tag: [t.operator, t.operatorKeyword, t.url, t.escape,
+    t.regexp, t.special(t.string)], color: "#7ee0d2" },
+  { tag: [t.meta, t.comment], color: "#71768a",
+    fontStyle: "italic" },
+  { tag: t.strong, fontWeight: "bold" },
+  { tag: t.emphasis, fontStyle: "italic" },
+  { tag: t.strikethrough, textDecoration: "line-through" },
+  { tag: t.link, color: "#7ee0d2", textDecoration: "underline" },
+  { tag: t.heading, fontWeight: "bold", color: "#bb9af7" },
+  { tag: [t.atom, t.bool, t.special(t.variableName)],
+    color: "#f0b269" },
+  { tag: [t.processingInstruction, t.string, t.inserted],
+    color: "#9ece6a" },
+  { tag: t.invalid, color: "#ff7a72" },
+  { tag: t.propertyName, color: "#8ab8ff" },
+  { tag: t.tagName, color: "#7aa2f7" },
+  { tag: t.attributeName, color: "#7ee0d2" },
+  { tag: t.attributeValue, color: "#9ece6a" },
+]);
+/*@@THEME-END@@*/
 
 /* ---------------- ghost text (inline autocomplete) ---------------- */
 const setGhost = StateEffect.define();
@@ -240,7 +305,7 @@ function baseExtensions(path) {
   const lang = langFor(path || "");
   return [
     basicSetup,
-    oneDark,
+    oneDark, ghostTheme, syntaxHighlighting(ghostHighlight),
     bpVersion,
     bpGutter,
     ghostField,
@@ -3329,7 +3394,7 @@ let splitDirty = false;
 function splitExtensions(path) {
   return [
     basicSetup,
-    oneDark,
+    oneDark, ghostTheme, syntaxHighlighting(ghostHighlight),
     wrapComp.of(wrapExt()),
     indentComp.of(indentExt()),
     wsComp.of(wsExt()),
