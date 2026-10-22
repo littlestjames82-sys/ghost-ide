@@ -35,14 +35,19 @@ who is allowed to talk to the host at all.
   sniff the network can replay a token until the host restarts.
   Pair on networks you trust; use the GitHub connect or a USB
   transfer for hostile networks.
-- The code is 6 digits by design (typed once, on a phone). The
-  join endpoint has no retry limit in this version; on an
-  untrusted network that is a brute-force surface, which is one
-  more reason for the trusted-network rule above.
-- A guest with a token has full API access to the host workspace,
-  including file writes and the terminal-class routes the host
-  build exposes. Pairing is all-or-nothing per device, by design,
-  like handing someone your unlocked phone.
+- The code is 6 digits by design (typed once, on a phone). Join
+  attempts are rate limited (v2.12): 5 wrong codes inside 10
+  minutes locks the source out for 10 minutes. A rotated source
+  address resets that, which is one more reason for the
+  trusted-network rule above.
+- Guest roles (v2.23): the host sets a policy in the pair panel
+  and NEW tokens join as editors or view-only. A view-only token
+  can read and send presence heartbeats; every other POST is
+  refused with 403 "view-only guest". Roles are assigned by the
+  host at join time, never requested by the guest, and the policy
+  endpoint is loopback-only. An editor token still has full API
+  access to the host workspace, including file writes, so editor
+  pairing remains like handing someone your unlocked phone.
 
 ## Conflicts
 
