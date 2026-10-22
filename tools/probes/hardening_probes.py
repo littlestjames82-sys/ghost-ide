@@ -89,6 +89,31 @@ try:
         st, body = get(probe)
         check("root:" not in body and st != 200 or "root:" not in body,
               "traversal refused: " + probe[:44], f"st={st}")
+    # R14: control characters in paths refused live
+    st, body = get("/api/file?path=bad%01name.txt")
+    check(st == 400 and "control" in body,
+          "GET with a control char in path refused",
+          f"st={st} body={body[:80]}")
+    def post_file(path_value):
+        req = urllib.request.Request(
+            "http://127.0.0.1:5251/api/file",
+            data=json.dumps({"path": path_value,
+                             "content": "x"}).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.read().decode(
+                    errors="replace")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode(errors="replace")
+    st, body = post_file("bad\u007fname.txt")
+    check(st == 400 and "control" in body,
+          "POST write with DEL in path refused",
+          f"st={st} body={body[:80]}")
+    st, body = post_file("caf\u00e9.txt")
+    check(st == 200, "unicode path still writable",
+          f"st={st} body={body[:80]}")
     # oversized: declare a 65 MiB body (the cap inspects
     # the declared length and refuses before reading)
     import http.client

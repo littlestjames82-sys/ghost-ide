@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.24.0"
+APP_VERSION = "2.25.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -356,6 +356,10 @@ def start_model():
 
 def safe_path(rel):
     """Resolve a workspace-relative path, refusing escapes."""
+    # R14: C0 controls and DEL are never legitimate
+    # in a workspace path; refuse before resolution.
+    if any(ord(c) < 32 or ord(c) == 127 for c in rel):
+        raise ValueError("control characters in path")
     p = (WORKSPACE / rel).resolve()
     if p != WORKSPACE and WORKSPACE not in p.parents:
         raise ValueError("path escapes workspace")
