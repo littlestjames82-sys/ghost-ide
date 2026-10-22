@@ -24,7 +24,7 @@ ck("send-to-chat fills the box, save writes scratchpad.md",
    src.includes('{ path: "scratchpad.md", content: t }') &&
    src.includes('alert("The scratchpad is empty.")'));
 ck("the panel is styled like the other panels",
-   css.includes("#scratchPanel { border-top: 1px solid #2e3038;") &&
+   css.includes("#scratchPanel { border-top: 1px solid var(--line);") &&
    css.includes("#scratchText { width: 100%;"));
 console.log(`RESULT ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
