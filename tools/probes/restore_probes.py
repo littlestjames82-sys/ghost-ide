@@ -284,6 +284,65 @@ def main():
     check(not root.exists(),
           "journal: torn state cleaned")
 
+    # v2.34: _space_ok boundary checks (the live
+    # wiring reads the real disk; the comparison
+    # itself is unit-proven here).
+    slack = mod._BK_SPACE_SLACK
+    check(mod._space_ok(1000 + slack, 1000),
+          "space: free == need + slack is enough")
+    check(not mod._space_ok(999 + slack, 1000),
+          "space: one byte under the slack refuses")
+    check(not mod._space_ok(0, 0),
+          "space: empty disk refuses even zero bytes")
+
+    # v2.34: directory entries count against the
+    # entry cap - a dir flood is refused by the
+    # scan pass before any staging exists.
+    ws = fresh_ws("dirflood")
+    entries = [("d%05d/" % i, "") for i in range(20001)]
+    bk = make_backup(ws, entries, "f.ghostbak")
+    p = start(ws, 5269)
+    try:
+        d = restore(5269, bk)
+        check("error" in d and "too many entries" in d["error"],
+              "dir flood restore refused", str(d)[:120])
+        check(not (ws / "d00000").exists(),
+              "dir flood: no directory created")
+        check(not (ws / ".ghostide-restore").exists(),
+              "dir flood: no staging left behind")
+        d = inspect(5269, bk)
+        check("error" in d and "too many entries" in d["error"],
+              "dir flood inspect refused too", str(d)[:120])
+    finally: p.terminate()
+
+    # v2.34: a header that understates a file's
+    # size must not understate the preview. The
+    # old inspect trusted the header and would
+    # have reported 10 bytes; the streaming
+    # inspect either counts the true 5000 or the
+    # reader refuses the lying archive outright
+    # (zipfile CRC-checks the stream) - never 10.
+    ws = fresh_ws("liar")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("big.txt", b"A" * 5000)
+    raw = bytearray(buf.getvalue())
+    ci = raw.find(b"PK\x01\x02")
+    raw[ci + 24:ci + 28] = (10).to_bytes(4, "little")
+    env = mod.backup_encrypt("pw-123", bytes(raw), 1, len(raw))
+    bk_dir = ws / "backups"; bk_dir.mkdir(exist_ok=True)
+    (bk_dir / "liar.ghostbak").write_text(env)
+    p = start(ws, 5270)
+    try:
+        d = inspect(5270, "backups/liar.ghostbak")
+        check("error" in d or d.get("bytes") == 5000,
+              "inspect: header lie refused or "
+              "counted truly", str(d)[:140])
+        check(not (d.get("ok") and d.get("bytes") == 10),
+              "inspect: preview never reports the "
+              "lied size", str(d)[:140])
+    finally: p.terminate()
+
     print(f"RESTORE PROBES: {ok} passed, {fail} failed")
     return 1 if fail else 0
 

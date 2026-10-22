@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.33.0"
+APP_VERSION = "2.34.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -161,6 +161,14 @@ def _aesgcm():
 _ZIP_MAX_ENTRIES = 20000
 _ZIP_MAX_ENTRY = 200 * 1024 * 1024
 _ZIP_MAX_TOTAL = 512 * 1024 * 1024
+# v2.34: free-space prechecks keep 8 MB of slack so a
+# backup write or restore never takes the disk to
+# absolute zero mid-operation.
+_BK_SPACE_SLACK = 8 * 1024 * 1024
+
+
+def _space_ok(free_bytes, needed_bytes):
+    return free_bytes >= needed_bytes + _BK_SPACE_SLACK
 
 
 def _zipguard_clean(name):
@@ -251,7 +259,12 @@ def backup_decrypt(passphrase, text):
     ct = base64.b64decode(data_str)
     if len(ct) > _BK_DATA_MAX:
         raise ValueError("damaged backup (payload too large)")
-    enc_key, mac_key = _bk_keys(passphrase, salt, iters)
+    # v2.34: every envelope field is decoded and
+    # length-checked BEFORE key derivation, so a
+    # hostile file cannot make the server pay the
+    # PBKDF2 cost for a backup that was never valid.
+    iv = nonce = mac_want = None
+    AESGCM = None
     if v == 2:
         iv = base64.b64decode(env["iv"])
         if not (12 <= len(iv) <= 16):
@@ -263,13 +276,7 @@ def backup_decrypt(passphrase, text):
                 "this backup uses the v2 (AES-GCM) format; "
                 "the desktop build needs the 'cryptography' "
                 "package to restore it")
-        try:
-            return AESGCM(enc_key).decrypt(iv, ct, None)
-        except Exception:
-            raise ValueError(
-                "wrong passphrase or damaged backup "
-                "(integrity check failed)")
-    if v == 1:
+    elif v == 1:
         nonce = base64.b64decode(env["nonce"])
         if not (8 <= len(nonce) <= 32):
             raise ValueError(
@@ -278,14 +285,24 @@ def backup_decrypt(passphrase, text):
         if len(mac_want) != 32:
             raise ValueError(
                 "damaged backup (mac length out of bounds)")
-        mac = hmac.new(mac_key, salt + nonce + ct,
-                       hashlib.sha256).digest()
-        if not hmac.compare_digest(mac, mac_want):
+    else:
+        raise ValueError(
+            "unsupported backup version: %r" % (v,))
+    enc_key, mac_key = _bk_keys(passphrase, salt, iters)
+    if v == 2:
+        try:
+            return AESGCM(enc_key).decrypt(iv, ct, None)
+        except Exception:
             raise ValueError(
                 "wrong passphrase or damaged backup "
                 "(integrity check failed)")
-        return _bk_crypt(enc_key, nonce, ct)
-    raise ValueError("unsupported backup version: %r" % (v,))
+    mac = hmac.new(mac_key, salt + nonce + ct,
+                   hashlib.sha256).digest()
+    if not hmac.compare_digest(mac, mac_want):
+        raise ValueError(
+            "wrong passphrase or damaged backup "
+            "(integrity check failed)")
+    return _bk_crypt(enc_key, nonce, ct)
 
 
 MODEL_CATALOG = {
@@ -3632,6 +3649,17 @@ class Handler(SimpleHTTPRequestHandler):
                         z.write(p, str(rel))
                 env = backup_encrypt(pw, buf.getvalue(),
                                      count, total)
+                # v2.34: refuse up front when the disk
+                # cannot hold the envelope, instead of
+                # dying mid-write with a truncated
+                # .ghostbak left behind.
+                import shutil as _sh_create
+                if not _space_ok(
+                        _sh_create.disk_usage(WORKSPACE).free,
+                        len(env.encode("utf-8"))):
+                    raise ValueError(
+                        "not enough free space to write "
+                        "the backup file")
                 out_dir = WORKSPACE / "backups"
                 out_dir.mkdir(exist_ok=True)
                 name = ("ghostide-backup-"
@@ -3660,27 +3688,44 @@ class Handler(SimpleHTTPRequestHandler):
                     for info in z.infolist():
                         clean = _zipguard_clean(
                             info.filename)
-                        if clean is None or info.is_dir():
+                        if clean is None:
                             continue
                         if clean in seen:
                             raise ValueError(
                                 "backup has a duplicate "
                                 "entry: " + clean)
                         seen.add(clean)
-                        paths.append(clean)
-                        sizes.append(info.file_size)
-                        total += info.file_size
-                        if info.file_size > _ZIP_MAX_ENTRY:
+                        # v2.34: directory entries
+                        # count against the entry cap
+                        # too, and sizes are counted
+                        # from the actual stream, never
+                        # the header (a header can lie;
+                        # the preview must not
+                        # understate a restore).
+                        if len(seen) > _ZIP_MAX_ENTRIES:
                             raise ValueError(
-                                "backup entry too large: "
-                                + clean)
-                    if len(paths) > _ZIP_MAX_ENTRIES:
-                        raise ValueError(
-                            "backup has too many entries")
-                    if total > _ZIP_MAX_TOTAL:
-                        raise ValueError(
-                            "backup expands past the "
-                            "512 MB restore cap")
+                                "backup has too many "
+                                "entries")
+                        if info.is_dir():
+                            continue
+                        n = 0
+                        with z.open(info) as src:
+                            while True:
+                                chunk = src.read(65536)
+                                if not chunk:
+                                    break
+                                n += len(chunk)
+                                if n > _ZIP_MAX_ENTRY:
+                                    raise ValueError(
+                                        "backup entry too "
+                                        "large: " + clean)
+                        paths.append(clean)
+                        sizes.append(n)
+                        total += n
+                        if total > _ZIP_MAX_TOTAL:
+                            raise ValueError(
+                                "backup expands past the "
+                                "512 MB restore cap")
                 return self.send_json({
                     "ok": True,
                     "version": env.get("v", 0),
@@ -3698,6 +3743,52 @@ class Handler(SimpleHTTPRequestHandler):
                 import io
                 import shutil
                 import zipfile
+                # v2.34: count the archive first (real
+                # streamed bytes, directory entries
+                # included) and refuse before a single
+                # staging byte is written when the
+                # disk cannot hold the restore.
+                scan_total = 0
+                scan_seen = set()
+                with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                    for info in z.infolist():
+                        clean = _zipguard_clean(
+                            info.filename)
+                        if clean is None:
+                            continue
+                        if clean in scan_seen:
+                            raise ValueError(
+                                "backup has a duplicate "
+                                "entry: " + clean)
+                        scan_seen.add(clean)
+                        if len(scan_seen) > _ZIP_MAX_ENTRIES:
+                            raise ValueError(
+                                "backup has too many "
+                                "entries")
+                        if info.is_dir():
+                            continue
+                        n = 0
+                        with z.open(info) as src:
+                            while True:
+                                chunk = src.read(65536)
+                                if not chunk:
+                                    break
+                                n += len(chunk)
+                                if n > _ZIP_MAX_ENTRY:
+                                    raise ValueError(
+                                        "backup entry too "
+                                        "large: " + clean)
+                        scan_total += n
+                        if scan_total > _ZIP_MAX_TOTAL:
+                            raise ValueError(
+                                "backup expands past "
+                                "the 512 MB restore cap")
+                if not _space_ok(
+                        shutil.disk_usage(WORKSPACE).free,
+                        scan_total):
+                    raise ValueError(
+                        "not enough free space to restore "
+                        "this backup")
                 root = WORKSPACE / ".ghostide-restore"
                 stage = root / "stage"
                 roll = root / "rollback"
@@ -3721,7 +3812,11 @@ class Handler(SimpleHTTPRequestHandler):
                                     "backup has a duplicate "
                                     "entry: " + clean)
                             seen.add(clean)
-                            if len(paths) >= _ZIP_MAX_ENTRIES:
+                            # v2.34: seen holds every
+                            # entry (dirs included), so
+                            # the cap counts directories
+                            # too, like the scan pass.
+                            if len(seen) > _ZIP_MAX_ENTRIES:
                                 raise ValueError(
                                     "backup has too many "
                                     "entries")
