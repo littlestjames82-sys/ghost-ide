@@ -2811,6 +2811,15 @@ async function sendChat() {
 }
 
 let chatAbort = null;
+// R18: a reload or close mid-stream throws the
+// in-flight answer away; warn where the platform
+// surfaces beforeunload.
+window.addEventListener("beforeunload", (e) => {
+  if (chatAbort) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
 $("chatSend").onclick = sendChat;
 $("chatText").addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || e.shiftKey) return;
