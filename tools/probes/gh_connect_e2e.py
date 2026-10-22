@@ -112,9 +112,16 @@ def main():
         cfg = (wsB / ".git" / "config").read_text()
         check("dummy-token-123" not in cfg,
               "token NOT written to .git/config")
-        ap = pathlib.Path("/tmp/ghostide-askpass.sh")
-        check(ap.exists() and "GHOSTIDE_GH_TOKEN" in ap.read_text(),
-              "askpass script created outside workspace")
+        # R2: the askpass file is per-process unique
+        # (ghostide-askpass-*.sh in the temp dir); find
+        # the one this run's servers created.
+        import glob as _glob
+        aps = [pathlib.Path(x) for x in
+               _glob.glob("/tmp/ghostide-askpass-*.sh")]
+        check(bool(aps) and all(
+            "GHOSTIDE_GH_TOKEN" in a.read_text()
+            and str(wsA) not in str(a) for a in aps[-1:]),
+            "askpass script created outside workspace")
         # Upstream moves; fetch + pull through the endpoints.
         # The seed syncs to the pushed v2 first so its v3
         # is a clean fast-forward.
