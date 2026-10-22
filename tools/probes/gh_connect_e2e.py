@@ -34,16 +34,26 @@ def call(port, path, payload=None, method=None):
 def start_server(ws, port):
     env = dict(os.environ, GHOST_IDE_WORKSPACE=str(ws),
                GHOST_IDE_PORT=str(port))
+    log = open(BASE / f"server-{port}.log", "wb")
     p = subprocess.Popen([sys.executable, str(SRV)], env=env,
-                         stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
-    for _ in range(50):
+                         stdout=log, stderr=log)
+    last = None
+    for _ in range(150):
         time.sleep(0.2)
+        if p.poll() is not None:
+            break
         try:
             call(port, "/api/git/status"); return p
-        except Exception:
+        except Exception as e:
+            last = e
             continue
-    raise RuntimeError("server did not start on " + str(port))
+    log.flush()
+    tail = (BASE / f"server-{port}.log").read_text(
+        errors="replace")[-1500:]
+    raise RuntimeError(
+        "server did not start on " + str(port)
+        + f" (exit={p.poll()}, last poll error={last!r})\n"
+        + tail)
 
 def main():
     shutil.rmtree(BASE, ignore_errors=True)
