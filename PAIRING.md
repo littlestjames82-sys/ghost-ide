@@ -27,12 +27,20 @@ who is allowed to talk to the host at all.
   contain no workspace data; every data route is behind the gate.
 - Restarting the host rotates the code and invalidates all tokens.
   There is no persistent guest list to manage or leak.
+- Tokens expire 12 hours after issue (v2.32). An expired token is
+  forgotten by the host; the guest's next request is refused and
+  the IDE prompts for the code again, so expiry costs a re-typing,
+  not a lockout.
+- The host can revoke every guest at once from the pair panel
+  ("Revoke all guests", `POST /api/pair/revoke`, loopback-only).
+  Revoked guests re-join with the code the same way.
 
 ## What this does not do
 
 - Traffic is plain HTTP on the LAN: a token stops casual access
   and scripts, it does not encrypt anything, and anyone who can
-  sniff the network can replay a token until the host restarts.
+  sniff the network can replay a token for up to 12 hours (its
+  lifetime), or until the host revokes all guests or restarts.
   Pair on networks you trust; use the GitHub connect or a USB
   transfer for hostile networks.
 - The code is 6 digits by design (typed once, on a phone). Join

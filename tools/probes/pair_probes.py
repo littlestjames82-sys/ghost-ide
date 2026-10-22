@@ -54,7 +54,7 @@ check(h._pair_gate("/") is True
       and h._pair_gate("/app.js") is True,
       "LAN: IDE shell assets open")
 tok = "deadbeef" * 4
-mod.PAIR_TOKENS[tok] = "editor"
+mod.PAIR_TOKENS[tok] = ("editor", time.time())
 h2 = fake_handler(LAN, token=tok)
 check(h2._pair_gate("/api/git/status") is True,
       "LAN: valid token admitted")
@@ -79,7 +79,7 @@ check(h6._sent.get("status") == 200
 
 # --- R12 role matrix on the real gate helpers ---
 vtok = "cafe" * 8
-mod.PAIR_TOKENS[vtok] = "viewer"
+mod.PAIR_TOKENS[vtok] = ("viewer", time.time())
 hv = fake_handler(LAN, vtok)
 check(hv._pair_gate("/api/file") is True,
       "viewer: token still admitted by the gate")
@@ -115,6 +115,42 @@ for i in range(5):
     mod.pair_join_record("198.51.100.2", False, 0.0)
 check(not mod.pair_join_locked("198.51.100.2", 10000.0),
       "stale window does not lock later")
+
+# --- v2.32: token TTL + revoke on the real helpers ---
+now0 = time.time()
+ttok = "beef" * 8
+mod.PAIR_TOKENS[ttok] = ("editor", now0)
+check(mod.pair_token_valid(ttok, now0 + 60),
+      "TTL: fresh token valid")
+check(not mod.pair_token_valid(
+        ttok, now0 + mod.PAIR_TOKEN_TTL + 1),
+      "TTL: token past 12h refused")
+check(ttok not in mod.PAIR_TOKENS,
+      "TTL: expired token forgotten")
+check(not mod.pair_token_valid("nosuch", now0),
+      "TTL: unknown token refused")
+otok = "f00d" * 8
+mod.PAIR_TOKENS[otok] = ("viewer",
+                         now0 - mod.PAIR_TOKEN_TTL - 5)
+ho = fake_handler(LAN, otok)
+check(ho._pair_gate("/api/file") is False,
+      "TTL: expired token fails the gate")
+check(ho._pair_role_denied("/api/file") is False,
+      "TTL: expired viewer is not role-denied "
+      "(the gate refuses it first)")
+rtok = "aa" * 16
+mod.PAIR_TOKENS[rtok] = ("editor", time.time())
+hr = fake_handler(LAN, rtok)
+hr._pair_revoke()
+check(hr._sent.get("status") == 403
+      and rtok in mod.PAIR_TOKENS,
+      "revoke: LAN refused, tokens intact")
+hh = fake_handler("127.0.0.1")
+hh._pair_revoke()
+check(hh._sent.get("status") == 200
+      and hh._sent["obj"].get("ok") is True
+      and len(mod.PAIR_TOKENS) == 0,
+      "revoke: host clears every guest token")
 
 # --- live loopback against a real server ---
 env = dict(os.environ, GHOST_IDE_WORKSPACE=str(FIX),
@@ -185,6 +221,22 @@ try:
     stj, dj = join(str(d.get("code")))
     check(dj.get("role") == "editor",
           "policy off: new token is an editor", str(dj))
+    def revoke():
+        r = urllib.request.Request(
+            "http://127.0.0.1:5271/api/pair/revoke",
+            data=b"{}", method="POST",
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return resp.status, json.loads(
+                    resp.read().decode() or "{}")
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(
+                e.read().decode() or "{}")
+    strv, drv = revoke()
+    check(strv == 200 and drv.get("ok") is True,
+          "live loopback: revoke-all answers ok",
+          str(drv))
     wrong = "000000" if str(d.get("code")) != "000000" else "111111"
     codes = [join(wrong)[0] for _ in range(5)]
     check(codes == [401] * 5, "5 wrong joins get 401", str(codes))

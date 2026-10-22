@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.31.0"
+APP_VERSION = "2.32.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -89,6 +89,23 @@ def pair_join_record(ip, ok, now):
     if rec[0] >= PAIR_MAX_FAILS:
         rec[2] = now + PAIR_LOCK
     PAIR_FAILS[ip] = rec
+
+
+PAIR_TOKEN_TTL = 12 * 3600.0
+
+
+def pair_token_valid(tok, now):
+    """True while tok names a live guest token.
+    v2.32: tokens expire PAIR_TOKEN_TTL after
+    issue; an expired token is forgotten, and the
+    guest re-joins through the normal 401 path."""
+    rec = PAIR_TOKENS.get(tok)
+    if rec is None:
+        return False
+    if now - rec[1] > PAIR_TOKEN_TTL:
+        PAIR_TOKENS.pop(tok, None)
+        return False
+    return True
 
 
 
@@ -2923,8 +2940,9 @@ class Handler(SimpleHTTPRequestHandler):
             return True
         if self.client_address[0] in ("127.0.0.1", "::1"):
             return True
-        return (self.headers.get("X-Pair-Token")
-                or "") in PAIR_TOKENS
+        import time as _time
+        tok = self.headers.get("X-Pair-Token") or ""
+        return pair_token_valid(tok, _time.time())
 
     def _pair_role_denied(self, path):
         # R12: viewer guests may read and heartbeat,
@@ -2935,7 +2953,10 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/pair/heartbeat":
             return False
         tok = self.headers.get("X-Pair-Token") or ""
-        return PAIR_TOKENS.get(tok) == "viewer"
+        import time as _time
+        if not pair_token_valid(tok, _time.time()):
+            return False
+        return PAIR_TOKENS[tok][0] == "viewer"
 
     def _pair_policy(self, method):
         if self.client_address[0] not in ("127.0.0.1",
@@ -2949,6 +2970,18 @@ class Handler(SimpleHTTPRequestHandler):
                 data.get("viewOnly"))
         return self.send_json(
             {"viewOnly": PAIR_POLICY["viewOnly"]})
+
+    def _pair_revoke(self):
+        # v2.32: the host ejects every guest at
+        # once; their next request hits the gate
+        # and they re-join with the code.
+        if self.client_address[0] not in ("127.0.0.1",
+                                          "::1"):
+            return self.send_json(
+                {"error": "guests are revoked "
+                          "on the host"}, status=403)
+        PAIR_TOKENS.clear()
+        return self.send_json({"ok": True})
 
     def _pair_code(self):
         if self.client_address[0] not in ("127.0.0.1",
@@ -3396,6 +3429,8 @@ class Handler(SimpleHTTPRequestHandler):
                     status=403)
             if parsed.path == "/api/pair/policy":
                 return self._pair_policy("POST")
+            if parsed.path == "/api/pair/revoke":
+                return self._pair_revoke()
             if parsed.path == "/api/pair/join":
                 import time as _time
                 ip = self.client_address[0]
@@ -3415,7 +3450,8 @@ class Handler(SimpleHTTPRequestHandler):
                 token = _secrets.token_hex(16)
                 role = ("viewer" if PAIR_POLICY["viewOnly"]
                         else "editor")
-                PAIR_TOKENS[token] = role
+                PAIR_TOKENS[token] = (role,
+                                      _time.time())
                 return self.send_json(
                     {"ok": True, "token": token,
                      "role": role})

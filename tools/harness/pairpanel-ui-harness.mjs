@@ -9,5 +9,8 @@ check(src.includes("localStorage.removeItem(PAIR_TOKEN_KEY)"), "unpair forgets t
 check(src.includes("storedPairToken()"), "status reads the stored token");
 check((src.match(/PAIR_TOKEN_KEY = /g) || []).length === 1, "one token key definition");
 check(src.includes("Unpaired. Reload"), "unpair feedback text");
+check(src.includes('localStorage.removeItem(\n            "ghostide-pair-role:" + location.host)'), "unpair also forgets the role (v2.32)");
+check(src.includes('postJson("/api/pair/revoke", {})'), "host revoke-all row wired (v2.32)");
+check(src.includes("Revoke all guests"), "revoke row labelled");
 console.log(`RESULT ${ok} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
