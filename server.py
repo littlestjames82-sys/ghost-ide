@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.08.0"
+APP_VERSION = "2.09.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -55,6 +55,7 @@ def pair_snapshot():
 # and the MAC covers salt || nonce || ciphertext
 # (encrypt-then-MAC). A wrong passphrase fails the MAC.
 BACKUP_ITER = 200000
+MAX_BODY_BYTES = 64 * 1024 * 1024
 
 
 def _bk_keys(passphrase, salt, iters):
@@ -82,11 +83,55 @@ def _bk_crypt(enc_key, nonce, data):
     return bytes(out)
 
 
+_BK_ITER_MIN = 10000
+_BK_ITER_MAX = 2000000
+_BK_DATA_MAX = 512 * 1024 * 1024
+
+
+def _bk_check_kdf(salt, iters):
+    if not (8 <= len(salt) <= 64):
+        raise ValueError(
+            "damaged backup (salt length out of bounds)")
+    if not (_BK_ITER_MIN <= iters <= _BK_ITER_MAX):
+        raise ValueError("backup KDF parameters out of bounds")
+
+
+def _aesgcm():
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead \
+            import AESGCM
+        return AESGCM
+    except Exception:
+        return None
+
+
 def backup_encrypt(passphrase, zip_bytes, files, nbytes):
     import base64
     import hashlib
     import hmac
     import os
+    AESGCM = _aesgcm()
+    if AESGCM is not None:
+        # v2: standard AES-256-GCM (AEAD), the format the
+        # phone build writes. Needs the cryptography
+        # package; without it the desktop keeps writing
+        # v1 (see HARDENING_PLAN.md for the tradeoff).
+        salt = os.urandom(16)
+        iv = os.urandom(12)
+        enc_key, _mac = _bk_keys(passphrase, salt, BACKUP_ITER)
+        ct = AESGCM(enc_key).encrypt(iv, zip_bytes, None)
+        env = {
+            "app": "ghostide-backup", "v": 2,
+            "cipher": "AES-256-GCM",
+            "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "files": files, "bytes": nbytes,
+            "kdf": {"algo": "PBKDF2-HMAC-SHA256",
+                    "iter": BACKUP_ITER,
+                    "salt": base64.b64encode(salt).decode()},
+            "iv": base64.b64encode(iv).decode(),
+            "data": base64.b64encode(ct).decode(),
+        }
+        return json.dumps(env, indent=1)
     salt = os.urandom(16)
     nonce = os.urandom(16)
     enc_key, mac_key = _bk_keys(passphrase, salt, BACKUP_ITER)
@@ -111,21 +156,57 @@ def backup_decrypt(passphrase, text):
     import hashlib
     import hmac
     env = json.loads(text)
-    if env.get("app") != "ghostide-backup" or env.get("v") != 1:
+    if env.get("app") != "ghostide-backup":
         raise ValueError("not a GhostIDE backup file")
+    v = env.get("v")
     salt = base64.b64decode(env["kdf"]["salt"])
     iters = int(env["kdf"]["iter"])
-    nonce = base64.b64decode(env["nonce"])
-    ct = base64.b64decode(env["data"])
+    # Bounds BEFORE key derivation (audit P0: a hostile
+    # file once controlled the iteration count).
+    _bk_check_kdf(salt, iters)
+    data_str = env["data"]
+    if len(data_str) > _BK_DATA_MAX * 2:
+        raise ValueError("damaged backup (payload too large)")
+    ct = base64.b64decode(data_str)
+    if len(ct) > _BK_DATA_MAX:
+        raise ValueError("damaged backup (payload too large)")
     enc_key, mac_key = _bk_keys(passphrase, salt, iters)
-    mac = hmac.new(mac_key, salt + nonce + ct,
-                   hashlib.sha256).digest()
-    if not hmac.compare_digest(
-            mac, base64.b64decode(env["mac"])):
-        raise ValueError(
-            "wrong passphrase or damaged backup "
-            "(integrity check failed)")
-    return _bk_crypt(enc_key, nonce, ct)
+    if v == 2:
+        iv = base64.b64decode(env["iv"])
+        if not (12 <= len(iv) <= 16):
+            raise ValueError(
+                "damaged backup (iv length out of bounds)")
+        AESGCM = _aesgcm()
+        if AESGCM is None:
+            raise ValueError(
+                "this backup uses the v2 (AES-GCM) format; "
+                "the desktop build needs the 'cryptography' "
+                "package to restore it")
+        try:
+            return AESGCM(enc_key).decrypt(iv, ct, None)
+        except Exception:
+            raise ValueError(
+                "wrong passphrase or damaged backup "
+                "(integrity check failed)")
+    if v == 1:
+        nonce = base64.b64decode(env["nonce"])
+        if not (8 <= len(nonce) <= 32):
+            raise ValueError(
+                "damaged backup (nonce length out of bounds)")
+        mac_want = base64.b64decode(env["mac"])
+        if len(mac_want) != 32:
+            raise ValueError(
+                "damaged backup (mac length out of bounds)")
+        mac = hmac.new(mac_key, salt + nonce + ct,
+                       hashlib.sha256).digest()
+        if not hmac.compare_digest(mac, mac_want):
+            raise ValueError(
+                "wrong passphrase or damaged backup "
+                "(integrity check failed)")
+        return _bk_crypt(enc_key, nonce, ct)
+    raise ValueError("unsupported backup version: %r" % (v,))
+
+
 MODEL_CATALOG = {
     "7b": {
         "file": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
@@ -2722,6 +2803,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def read_json(self):
         n = int(self.headers.get("Content-Length") or 0)
+        if n < 0 or n > MAX_BODY_BYTES:
+            raise ValueError("request body too large")
         return json.loads(self.rfile.read(n) or b"{}")
 
     def proxy(self, path, payload, stream=False):
