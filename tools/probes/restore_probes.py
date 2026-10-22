@@ -44,6 +44,20 @@ def restore(port, path):
     except urllib.error.HTTPError as e:
         return json.loads(e.read().decode())
 
+
+def inspect(port, path, pw="pw-123"):
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/backup/inspect",
+        data=json.dumps({"passphrase": pw,
+                         "path": path}).encode(),
+        method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        return json.loads(e.read().decode())
+
 def fresh_ws(name):
     ws = BASE / name
     shutil.rmtree(ws, ignore_errors=True)
@@ -145,6 +159,65 @@ def main():
         check((ws / "c").read_text()
               == "i am a file, not a folder",
               "blocking file untouched")
+    finally: p.terminate()
+
+
+    # R6: inspect reports without touching anything
+    ws = fresh_ws("inspect")
+    (ws / "a.txt").write_text("orig A")
+    bk = make_backup(ws, [("a.txt", "new A"),
+                          ("sub/b.txt", "B!")], "i.ghostbak")
+    p = start(ws, 5266)
+    try:
+        d = inspect(5266, bk)
+        check(d.get("ok") is True and d.get("files") == 2,
+              "inspect: ok + file count", str(d))
+        check(d.get("bytes") == 7,
+              "inspect: byte total", str(d))
+        check(isinstance(d.get("created"), str)
+              and d.get("version") in (1, 2),
+              "inspect: created + version fields", str(d))
+        check((ws / "a.txt").read_text() == "orig A",
+              "inspect: workspace untouched")
+        check(not (ws / ".ghostide-restore").exists(),
+              "inspect: no staging left behind")
+        d = inspect(5266, bk, pw="wrong-pw")
+        check("error" in d, "inspect: wrong passphrase fails",
+              str(d)[:100])
+    finally: p.terminate()
+
+    # audit addendum: symlink entries + truncated zip
+    ws = fresh_ws("links")
+    def make_link_backup(ws):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            info = zipfile.ZipInfo("link.txt")
+            info.external_attr = (0o120777 << 16)
+            z.writestr(info, "/etc/passwd")
+            z.writestr("real.txt", "real")
+        env = mod.backup_encrypt("pw-123", buf.getvalue(),
+                                 2, buf.tell())
+        bk = ws / "backups"; bk.mkdir(exist_ok=True)
+        f = bk / "l.ghostbak"
+        f.write_text(env)
+        return "backups/l.ghostbak"
+    bk = make_link_backup(ws)
+    p = start(ws, 5267)
+    try:
+        d = restore(5267, bk)
+        check(d.get("ok") is True, "symlink-entry backup restores",
+              str(d))
+        lf = ws / "link.txt"
+        check(lf.is_file() and not lf.is_symlink()
+              and lf.read_text() == "/etc/passwd",
+              "symlink entry lands as a plain file, not a link")
+        # truncated archive: cut the envelope short
+        raw_env = (ws / bk).read_text()
+        (ws / bk).write_text(raw_env[:len(raw_env) // 2])
+        d = restore(5267, bk)
+        check("error" in d, "truncated backup refused", str(d)[:100])
+        check((ws / "real.txt").read_text() == "real",
+              "earlier good restore survives the bad one")
     finally: p.terminate()
 
     print(f"RESTORE PROBES: {ok} passed, {fail} failed")

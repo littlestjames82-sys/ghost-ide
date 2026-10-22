@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.16.0"
+APP_VERSION = "2.17.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -3457,6 +3457,51 @@ class Handler(SimpleHTTPRequestHandler):
                     "ok": True, "path": "backups/" + name,
                     "files": count, "bytes": total,
                     "size": len(env)})
+            if parsed.path == "/api/backup/inspect":
+                data = self.read_json()
+                pw = str(data.get("passphrase", ""))
+                p = safe_path(str(data.get("path", "")))
+                if not p.is_file():
+                    raise ValueError("backup file not found")
+                env = json.loads(p.read_text())
+                raw = backup_decrypt(pw, p.read_text())
+                import io
+                import zipfile
+                paths = []
+                sizes = []
+                total = 0
+                with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                    seen = set()
+                    for info in z.infolist():
+                        clean = _zipguard_clean(
+                            info.filename)
+                        if clean is None or info.is_dir():
+                            continue
+                        if clean in seen:
+                            raise ValueError(
+                                "backup has a duplicate "
+                                "entry: " + clean)
+                        seen.add(clean)
+                        paths.append(clean)
+                        sizes.append(info.file_size)
+                        total += info.file_size
+                        if info.file_size > _ZIP_MAX_ENTRY:
+                            raise ValueError(
+                                "backup entry too large: "
+                                + clean)
+                    if len(paths) > _ZIP_MAX_ENTRIES:
+                        raise ValueError(
+                            "backup has too many entries")
+                    if total > _ZIP_MAX_TOTAL:
+                        raise ValueError(
+                            "backup expands past the "
+                            "512 MB restore cap")
+                return self.send_json({
+                    "ok": True,
+                    "version": env.get("v", 0),
+                    "files": len(paths),
+                    "bytes": total,
+                    "created": env.get("created", "")})
             if parsed.path == "/api/backup/restore":
                 data = self.read_json()
                 pw = str(data.get("passphrase", ""))
