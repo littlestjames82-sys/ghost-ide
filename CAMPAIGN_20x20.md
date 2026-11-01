@@ -38,14 +38,17 @@ Rules of the campaign (standing GhostIDE gates, unchanged):
 - [x] I10 Board cards open their source report in the editor
       (substituted: chat file attach already exists as the
       @ File mention picker; the gap was board -> report).
-- [ ] I11 Indexed search results open the file at the match line.
-- [ ] I12 Git panel shows the latest Scope verdict line when a
+- [x] I11 Replay panel: a Re-run button seeds the recorded task
+      back into the chat box with Agent mode on (substituted:
+      indexed search already opens at the hit line - that
+      shipped with E3).
+- [x] I12 Git panel shows the latest Scope verdict line when a
       scope pack exists.
-- [ ] I13 Ecosystem panel shows each wired tool's board state
+- [x] I13 Ecosystem panel shows each wired tool's board state
       (ok / attention / no report) beside its Run button.
-- [ ] I14 Data pane gains a Pack button (full GhostData pack:
+- [x] I14 Data pane gains a Pack button (full GhostData pack:
       schema + bounded redacted sample as files in .ghostide).
-- [ ] I15 Agent CONTEXT action: on-demand repo map (GhostAtlas
+- [x] I15 Agent CONTEXT action: on-demand repo map (GhostAtlas
       form) the model can request mid-task.
 - [ ] I16 Agent priming names the workspace's worktrees.
 - [ ] I17 MCP panel keeps one session per server while open

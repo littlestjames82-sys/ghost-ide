@@ -2982,6 +2982,10 @@ async function refreshGit() {
       return;
     }
     $("gitBranch").textContent = d.branch || "";
+    const scopeEl = $("gitScopeLine");
+    if (scopeEl)
+      scopeEl.textContent = d.scope_line
+        ? "Last Scope: " + d.scope_line : "";
     renderWorktrees();
     $("gitAiMsg").disabled = false;
     if (d.branch) {
@@ -4886,9 +4890,11 @@ const toolBoardBtn = $("toolBoard");
 if (toolBoardBtn)
   toolBoardBtn.onclick = () => { hideTools(); openBoardPanel(); };
 
+let dataPanePath = "";
 async function maybeDataView(path, content) {
   const pane = $("dataPane");
   if (!pane) return;
+  dataPanePath = path;
   const lower = (path || "").toLowerCase();
   let tool = null;
   if (/\.(csv|tsv)$/.test(lower)) tool = "ghostdata";
@@ -4927,6 +4933,24 @@ if (dataAskBtn)
   dataAskBtn.onclick = () => askGhostWith(
     "Explain this data report and anything unusual in it:",
     $("dataOut").textContent);
+const dataPackBtn = $("dataPack");
+if (dataPackBtn)
+  dataPackBtn.onclick = async () => {
+    if (!dataPanePath) return;
+    dataPackBtn.disabled = true;
+    try {
+      const d = await postJson("/api/eco/datapack",
+        { path: dataPanePath });
+      $("dataTitle").textContent =
+        "📦 GhostData pack - " + dataPanePath;
+      $("dataOut").textContent = d.error ||
+        d.output || "(no output)";
+    } catch (e) {
+      $("dataOut").textContent =
+        "The pack failed to reach the server.";
+    }
+    dataPackBtn.disabled = false;
+  };
 const runSliceBtn = $("runSlice");
 if (runSliceBtn)
   runSliceBtn.onclick = async () => {
@@ -5123,6 +5147,20 @@ async function openReplayPanel() {
       String(s.task || "").slice(0, 60) + " (" + s.steps +
       " steps)";
     row.appendChild(label);
+    const rerun = document.createElement("button");
+    rerun.className = "ghostbtn";
+    rerun.textContent = "Re-run";
+    rerun.title = "Put this task back in the chat box " +
+      "with Agent mode on - you tap Send";
+    rerun.onclick = () => {
+      $("todoPanel").classList.add("hidden");
+      const ta = $("chatText");
+      if (ta) ta.value = s.task || "";
+      const tg = $("agentToggle");
+      if (tg) tg.checked = true;
+      if (ta) ta.focus();
+    };
+    row.appendChild(rerun);
     const open = document.createElement("button");
     open.className = "ghostbtn";
     open.textContent = "Open";
@@ -5222,6 +5260,32 @@ if (termAskBtn)
     $("termOut").textContent);
 /*@@CAMPAIGN2-END@@*/
 
+/*@@CAMPAIGN3@@*/
+/* Campaign batch 3 (v2.49): board-state chips in the
+   Ecosystem panel (I13). The replay Re-run button (I11),
+   the Git panel's Last Scope line (I12), the data Pack
+   button (I14) and the agent CONTEXT action (I15) live
+   in their own blocks. */
+async function annotateEcoStates() {
+  let d;
+  try { d = await postJson("/api/eco/board", {}); }
+  catch (e) { return; }
+  const proj = (d.projects || [])[0];
+  if (!proj) return;
+  const norm = (s) => String(s || "").toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  for (const s of proj.sections || []) {
+    const chip = $("ecoState-" + norm(s.tool));
+    if (!chip) continue;
+    const state = s.state === "ok" ? "board: verified"
+      : s.state === "absent" ? "board: no report"
+      : "board: attention";
+    if (!chip.textContent.includes("board:"))
+      chip.textContent += " · " + state;
+  }
+}
+/*@@CAMPAIGN3-END@@*/
+
 async function openEco() {
   hideTools();
   $("todoTitle").textContent = "Ecosystem tools";
@@ -5245,6 +5309,7 @@ async function openEco() {
     row.appendChild(label);
     const chip = document.createElement("span");
     chip.className = "symkind";
+    chip.id = "ecoState-" + t.id;
     chip.textContent = t.state === "ready" ? "ready" :
       t.state === "bundled" ? ("on-device" +
         (t.tests ? " · " + t.tests + " tests" : "")) :
@@ -5293,6 +5358,7 @@ async function openEco() {
     }
     $("todoResults").appendChild(row);
   }
+  annotateEcoStates();
 }
 
 /*@@I18N@@*/
@@ -9048,6 +9114,8 @@ const AGENT_RULES = [
   "REVERSE <path> - inspect a file or binary with GhostRE",
   "ECO <tool> - run an ecosystem tool (ghostindex, ghostdeps)",
   "VERIFY - run the full verify pipeline (checks + tests)",
+  "CONTEXT - fetch the repo map (GhostAtlas) when you need",
+  "  the project's shape mid-task",
   "TEST [path] - run the project tests (one file, or all)",
   "GIT status / GIT diff / GIT log - repository state",
   "MCP <server> <tool> <json-args> - call a tool on a",
@@ -9289,6 +9357,7 @@ function parseAgent3Action(reply) {
   m = text.match(/^\s*ECO\s+(\S+)\s*$/m);
   if (m) return { type: "eco", tool: m[1].toLowerCase() };
   if (/^\s*VERIFY\s*$/m.test(text)) return { type: "verify" };
+  if (/^\s*CONTEXT\s*$/m.test(text)) return { type: "context" };
   m = text.match(/^\s*TEST(?:\s+(\S+))?\s*$/m);
   if (m) return { type: "test", path: m[1] || "" };
   m = text.match(/^\s*GIT\s+(status|diff|log)\s*$/im);
@@ -9311,7 +9380,7 @@ function parseAgentActionFull(reply) {
   return parseAgent3Action(reply) || parseAgent2Action(reply);
 }
 const AGENT_BATCHABLE = ["read", "search", "list", "todo",
-  "stepdone", "reverse", "eco", "git"];
+  "stepdone", "reverse", "eco", "git", "context"];
 const AGENT_BATCH_BLOCK = /^\s*(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST|MCP)\b/;
 function parseAgentLine(line) {
   const t = (line || "").trim();
@@ -9334,6 +9403,7 @@ function parseAgentLine(line) {
     return { type: "eco", tool: m[1].toLowerCase() };
   if ((m = t.match(/^GIT\s+(status|diff|log)$/i)))
     return { type: "git", what: m[1].toLowerCase() };
+  if (/^CONTEXT$/.test(t)) return { type: "context" };
   return null;
 }
 function parseAgentBatch(reply, allowed) {
@@ -9353,6 +9423,13 @@ function parseAgentBatch(reply, allowed) {
 }
 async function agentToolText(act) {
   try {
+    if (act.type === "context") {
+      let map = "";
+      try { map = await getRepoMap(); } catch (e) { }
+      return "Repo map (GhostAtlas):\n" +
+        (map ? map.slice(0, 8000)
+          : "(no repo map available for this workspace)");
+    }
     if (act.type === "mcp") {
       if (act.argsError)
         return "MCP " + act.server + " " + act.tool +

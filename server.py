@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.48.0"
+APP_VERSION = "2.49.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2972,6 +2972,32 @@ def replay_get(ws, rid):
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def eco_datapack(path, ws):
+    """I14: build a full GhostData pack for a data file
+    (manifest + PROMPT.md + bounded sample under
+    .ghostide/data-pack-<stem>) and return the pack's
+    PROMPT.md, the human summary of the pack."""
+    target = safe_path(path)
+    if not target.is_file():
+        raise ValueError("not a file in the workspace: "
+                         + path)
+    stem = _re_mod.sub(r"[^A-Za-z0-9_.-]", "_",
+                       target.stem) or "data"
+    out_dir = ws / ".ghostide" / ("data-pack-" + stem)
+    rc, text = _eco_cli("ghostdata",
+                        ["pack", str(target), "-o",
+                         str(out_dir)], ws)
+    if rc != 0:
+        raise ValueError("GhostData could not pack it: "
+                         + text.strip()[:300])
+    prompt = out_dir / "PROMPT.md"
+    if prompt.is_file():
+        return ("Pack built at .ghostide/" + out_dir.name +
+                "\n\n" + prompt.read_text(
+                    encoding="utf-8")[:40000])
+    return text.strip()[:40000]
+
+
 def eco_slicelog(text, ws):
     """E13: slice run output into a GhostLogs incident
     pack. The text is saved as a workspace log file first
@@ -4527,8 +4553,23 @@ class Handler(SimpleHTTPRequestHandler):
                     elif len(ln) > 3:
                         changes.append({"index": ln[0], "worktree": ln[1],
                                         "path": ln[3:].strip()})
+                scope_line = ""
+                pack_md = (WORKSPACE / ".ghostide" / "scope-pack"
+                           / "REVIEW.md")
+                if pack_md.is_file():
+                    try:
+                        for ln in pack_md.read_text(
+                                encoding="utf-8",
+                                errors="replace").splitlines():
+                            if ln.strip():
+                                scope_line = ln.strip().lstrip(
+                                    "# ").strip()[:160]
+                                break
+                    except OSError:
+                        scope_line = ""
                 return self.send_json({"repo": True, "branch": branch,
-                                       "changes": changes})
+                                       "changes": changes,
+                                       "scope_line": scope_line})
             if parsed.path == "/api/git/remote":
                 rc, out, err, _ = git_out(["remote"])
                 if rc != 0:
@@ -5403,6 +5444,16 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json(replay_save(
                         data.get("task"),
                         data.get("trail"), WORKSPACE))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/datapack":
+                # I14: full GhostData pack for a data file.
+                data = self.read_json()
+                try:
+                    out = eco_datapack(
+                        str(data.get("path") or ""), WORKSPACE)
+                    return self.send_json({"ok": True,
+                                           "output": out})
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/eco/slicelog":
