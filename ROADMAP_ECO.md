@@ -125,7 +125,7 @@ match the tool's output on a fixture slice.
 
 ## Arc 3 - Proof and review
 
-**E7. GhostVerify evidence contract.**
+**E7. GhostVerify evidence contract.** BUILT v2.44.0 (both servers: VERIFY_REPORT.md + the verify response carry Executed / Claimed, not executed / Gaps; caps, unchecked types, missing tests and the phone build's desktop-only test stage all report as gaps, never passes).
 The verify pipeline's report adopts Verify's
 contract: what was executed, what was only claimed,
 gaps named as gaps.
@@ -134,14 +134,14 @@ sections and a planted unexecuted claim reports as
 a gap, never a pass. (GhostBench stays an explicit
 opt-in run from the same panel.)
 
-**E8. GhostReview in the Git panel.**
+**E8. GhostReview in the Git panel.** BUILT v2.44.0 (Verdict button runs GhostReview over the working-tree diff on both servers; fixture proof: planted secret-shaped line flagged, value never shown, panel verdict matched the CLI).
 The pre-commit review runs Review's verdict layer
 (REVIEW verdict + risk rules, secret-shaped lines
 flagged with values never shown).
 Done when: the panel verdict matches the CLI
 verdict on the review fixture.
 
-**E9. GhostScope + GhostExposure.** GhostExposure RUNNER WIRED v2.43.0 (generic tool runner; GhostScope still pending).
+**E9. GhostScope + GhostExposure.** GhostExposure RUNNER WIRED v2.43.0; GhostScope WIRED v2.44.0 (Scope button in the Git panel runs the pack over the working-tree diff on both servers).
 Before commit: "what this change touches" (Scope)
 and the exposure evidence pack, in the Git panel.
 Done when: a fixture diff's scope lists the same

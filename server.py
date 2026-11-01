@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.43.0"
+APP_VERSION = "2.44.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -1042,7 +1042,11 @@ def _context_stats():
 def _check_all():
     results = []
     checked = 0
+    seen = 0
+    skipped_type = 0
+    capped = 0
     for rel, p in iter_text_files():
+        seen += 1
         ext = p.suffix.lower()
         if ext == ".py":
             argv = [py_cmd()[0], "-c",
@@ -1056,17 +1060,21 @@ def _check_all():
                     "import json,sys; "
                     "json.load(open(sys.argv[1]))", str(p)]
         else:
+            skipped_type += 1
+            continue
+        if checked >= 100:
+            capped += 1
             continue
         checked += 1
-        if checked > 100:
-            break
         rc, out, err, ms = run_cmd(argv, cwd=str(WORKSPACE))
         if rc != 0:
             output = (out + err).strip()
             ln, msg = check_output_info(output)
             results.append({"path": str(rel), "line": ln,
                             "message": msg})
-    return {"problems": results, "checked": checked}
+    return {"problems": results, "checked": checked,
+            "seen": seen, "skippedType": skipped_type,
+            "capped": capped}
 
 
 def _verify_run():
@@ -1141,6 +1149,62 @@ def _verify_run():
                      str(f["tokens"]) + " tokens")
     lines.append("")
     lines.append("Method: " + stats["method"])
+    # E7: the GhostVerify evidence contract. Executed = work
+    # this run actually performed; Claimed = statements the
+    # report makes without executing anything; Gaps = what
+    # was not covered, named as gaps, never as passes.
+    contract_executed = [
+        "Syntax checks executed on %d file(s) "
+        "(python ast, node --check, json parse)." % checks["checked"],
+    ]
+    if targets:
+        contract_executed.append(
+            "Tests executed: %d test(s) in %d file(s): "
+            "%d passed, %d failed."
+            % (len(test_results), len(targets), t_passed, t_failed))
+    else:
+        contract_executed.append(
+            "Test discovery executed: no test files found.")
+    contract_claimed = [
+        "Slice report figures (%d text files, %d bytes, "
+        "~%d tokens) are measurements of the workspace, "
+        "not checks of those files' correctness."
+        % (stats["fileCount"], stats["totalBytes"],
+           stats["totalTokens"]),
+        "Evidence level %s is derived only from the "
+        "executed items above." % level,
+    ]
+    contract_gaps = [
+        "Checks are syntax-only: imports, types and runtime "
+        "behavior are not verified by this pipeline.",
+    ]
+    if checks["capped"]:
+        contract_gaps.append(
+            "%d checkable file(s) were NOT checked: the "
+            "pipeline caps at 100 files per run."
+            % checks["capped"])
+    if checks["skippedType"]:
+        contract_gaps.append(
+            "%d text file(s) have no syntax checker (only "
+            ".py, .js, .mjs and .json are checked); they "
+            "were counted, not verified."
+            % checks["skippedType"])
+    if not targets:
+        contract_gaps.append(
+            "No tests exist in this workspace, so no "
+            "behavior was executed; the level cannot "
+            "exceed L1.")
+    lines.append("")
+    lines.append("## Evidence contract (GhostVerify)")
+    lines.append("Executed:")
+    for item in contract_executed:
+        lines.append("- " + item)
+    lines.append("Claimed, not executed:")
+    for item in contract_claimed:
+        lines.append("- " + item)
+    lines.append("Gaps:")
+    for item in contract_gaps:
+        lines.append("- " + item)
     report = "\n".join(lines) + "\n"
     (WORKSPACE / "VERIFY_REPORT.md").write_text(
         report, encoding="utf-8")
@@ -1156,6 +1220,9 @@ def _verify_run():
                   "totalBytes": stats["totalBytes"],
                   "top": stats["files"][:5]},
         "evidence": {"level": level, "label": label},
+        "contract": {"executed": contract_executed,
+                     "claimed": contract_claimed,
+                     "gaps": contract_gaps},
         "reportPath": "VERIFY_REPORT.md",
         "report": report,
     }
@@ -2570,6 +2637,7 @@ ECO_CATALOG = [
     ("ghostconsole", "GhostConsole", "E17", "Read-only ecosystem board"),
     ("ghostledger", "GhostLedger", "E17", "Session token ledger"),
     ("ghostmcpdoctor", "GhostMCP Doctor", "E17", "Read-only MCP diagnostics"),
+    ("ghostmcp", "GhostMCP", "MCP", "MCP client - servers, tools, calls (MCP panel)"),
     ("ghostrecipes", "GhostRecipes", "E18", "Data-only project recipes"),
     ("ghostleads", "GhostLeads", "E19", "Offline lead drafts, drafts only"),
     ("quoteshot", "QuoteShot", "E19", "Offline quotes from a price book"),
@@ -2749,6 +2817,137 @@ def eco_toolrun(tool_id, ws, rel=""):
             return incident.read_text(
                 encoding="utf-8", errors="replace")[:60000]
     return text.rstrip()[:60000]
+
+
+# ---------------- Git proof: GhostReview + GhostScope (E8/E9) ----
+def _eco_cli(tool_id, args, ws, timeout=120):
+    """Run one bundled eco tool CLI, eco_toolrun discipline.
+    Returns (returncode, stdout+stderr text)."""
+    src = eco_src_dir(tool_id)
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(src)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", tool_id] + args,
+            cwd=str(ws), env=env, capture_output=True,
+            text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise ValueError("the tool ran past %d seconds and "
+                         "was stopped" % timeout)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+def git_review(ws):
+    """E8: GhostReview's verdict over the working tree diff.
+    The tool writes REVIEW.md + review.json into
+    .ghostide/review; the panel shows its own words."""
+    out_dir = ws / ".ghostide" / "review"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rc, text = _eco_cli(
+        "ghostreview",
+        ["review", str(ws), "-o", str(out_dir), "--json"], ws)
+    if rc not in (0, 1):
+        raise ValueError("GhostReview could not run: "
+                         + text.strip()[:300])
+    md = out_dir / "REVIEW.md"
+    body = ""
+    if md.is_file():
+        body = md.read_text(encoding="utf-8",
+                            errors="replace")[:60000]
+    if not body:
+        body = text.strip()[:60000]
+    return {"ok": True, "output": body}
+
+
+def git_scope(ws):
+    """E9: GhostScope pack for the working tree diff vs HEAD:
+    changed files in full, neighbours, covering tests, and
+    its REVIEW.md reading order."""
+    rc, diff, _err, _ms = git_out(["diff", "HEAD"])
+    if rc != 0:
+        raise ValueError("git diff failed in this workspace")
+    if not diff.strip():
+        raise ValueError("no changes against HEAD to scope - "
+                         "edit something first")
+    gi_dir = ws / ".ghostide"
+    gi_dir.mkdir(parents=True, exist_ok=True)
+    diff_file = gi_dir / "scope-diff.patch"
+    diff_file.write_text(diff, encoding="utf-8")
+    out_dir = gi_dir / "scope-pack"
+    rc, text = _eco_cli(
+        "ghostscope",
+        ["pack", str(ws), "-o", str(out_dir),
+         "--diff", str(diff_file), "--json"], ws)
+    if rc not in (0, 1):
+        raise ValueError("GhostScope could not run: "
+                         + text.strip()[:300])
+    md = out_dir / "REVIEW.md"
+    body = ""
+    if md.is_file():
+        body = md.read_text(encoding="utf-8",
+                            errors="replace")[:60000]
+    if not body:
+        body = text.strip()[:60000]
+    return {"ok": True, "output": body}
+
+
+# ---------------- GhostMCP client (v2.44) ----------------
+def mcp_config_path():
+    """Workspace .mcp.json / mcp.json first, then the user's
+    ~/.ghostide/mcp.json (desktop only by nature)."""
+    for cand in (WORKSPACE / ".mcp.json", WORKSPACE / "mcp.json",
+                 Path.home() / ".ghostide" / "mcp.json"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _mcp_cli(args, timeout=50):
+    cfg = mcp_config_path()
+    if cfg is None:
+        raise ValueError("no MCP config found - add a "
+                         ".mcp.json to the workspace")
+    rc, text = _eco_cli("ghostmcp",
+                        args + ["--config", str(cfg)],
+                        WORKSPACE, timeout=timeout)
+    obj = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                pass
+    if obj is None:
+        raise ValueError("GhostMCP could not run: "
+                         + text.strip()[:300])
+    if obj.get("error"):
+        raise ValueError(str(obj["error"]))
+    return obj
+
+
+def mcp_servers():
+    cfg = mcp_config_path()
+    if cfg is None:
+        return {"config": None, "servers": []}
+    out = _mcp_cli(["servers"])
+    out["config"] = str(cfg)
+    return out
+
+
+def mcp_tools(server):
+    return _mcp_cli(["tools", "--server", server])
+
+
+def mcp_call(server, tool, arguments):
+    return _mcp_cli(["call", "--server", server,
+                     "--tool", tool,
+                     "--args", json.dumps(arguments or {})])
 
 
 # ---------------- REA bridge (Waves 1+3) ----------------
@@ -3663,6 +3862,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"tools": eco_tools_state()})
             if parsed.path == "/api/rea/status":
                 return self.send_json(rea_status())
+            if parsed.path == "/api/mcp/servers":
+                try:
+                    return self.send_json(mcp_servers())
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/files":
                 out = []
                 for p in sorted(WORKSPACE.rglob("*")):
@@ -4749,6 +4953,37 @@ class Handler(SimpleHTTPRequestHandler):
                     out = rea_run(str(data.get("command") or ""),
                                   str(data.get("path") or ""),
                                   WORKSPACE)
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/git/review":
+                # E8: GhostReview verdict over the diff.
+                try:
+                    return self.send_json(git_review(WORKSPACE))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/git/scope":
+                # E9: GhostScope pack for the diff.
+                try:
+                    return self.send_json(git_scope(WORKSPACE))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/mcp/tools":
+                data = self.read_json()
+                try:
+                    out = mcp_tools(str(data.get("server") or ""))
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/mcp/call":
+                data = self.read_json()
+                try:
+                    args = data.get("arguments")
+                    if not isinstance(args, dict):
+                        args = {}
+                    out = mcp_call(str(data.get("server") or ""),
+                                   str(data.get("tool") or ""),
+                                   args)
                     return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)

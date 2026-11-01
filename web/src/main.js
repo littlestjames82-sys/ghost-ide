@@ -4256,6 +4256,142 @@ const ECO_TOOLRUN = {
 };
 /*@@ECORUN-END@@*/
 
+/*@@MCPGIT@@*/
+/* v2.44: the MCP panel and the Git proof buttons.
+   MCP: servers come from the workspace .mcp.json (standard
+   format) through GhostMCP; the panel lists servers, then
+   their tools, and calls a tool with JSON arguments.
+   Git proof: the Verdict button runs GhostReview over the
+   working-tree diff (E8) and Scope runs GhostScope's pack
+   summary (E9); both render the tools' own words. */
+async function openMcpPanel() {
+  hideTools();
+  $("todoTitle").textContent = "MCP servers";
+  $("todoResults").textContent = "Loading MCP servers…";
+  $("todoPanel").classList.remove("hidden");
+  let sd;
+  try { sd = await (await fetch("/api/mcp/servers")).json(); }
+  catch (e) {
+    $("todoResults").textContent =
+      "Could not reach the server.";
+    return;
+  }
+  const box = $("todoResults");
+  box.textContent = "";
+  const head = document.createElement("div");
+  head.className = "dim";
+  head.textContent = sd.error
+    ? sd.error
+    : !sd.config
+      ? "No MCP config found. Add a .mcp.json to this " +
+        "workspace (standard mcpServers format) and MCP " +
+        "servers will appear here - and in the agent's " +
+        "briefing."
+      : "Config: " + sd.config + " - " +
+        (sd.servers || []).length + " server(s). Pick one " +
+        "to see its tools.";
+  box.appendChild(head);
+  for (const s of sd.servers || []) {
+    const row = document.createElement("div");
+    row.className = "todorow";
+    const label = document.createElement("span");
+    label.textContent = s.name + " - " + s.transport +
+      " - " + s.target;
+    row.appendChild(label);
+    const b = document.createElement("button");
+    b.className = "ghostbtn";
+    b.textContent = "Tools";
+    b.onclick = async () => {
+      b.disabled = true; b.textContent = "Calling…";
+      try {
+        const td = await postJson("/api/mcp/tools",
+          { server: s.name });
+        if (td.error) {
+          box.textContent = td.error;
+          return;
+        }
+        box.textContent = "";
+        const th = document.createElement("div");
+        th.className = "dim";
+        th.textContent = s.name + ": " +
+          (td.tools || []).length + " tool(s).";
+        box.appendChild(th);
+        for (const t of td.tools || []) {
+          const tr = document.createElement("div");
+          tr.className = "todorow";
+          const tl = document.createElement("span");
+          tl.textContent = t.name +
+            (t.description
+              ? " - " + String(t.description).slice(0, 120)
+              : "");
+          tr.appendChild(tl);
+          const cb = document.createElement("button");
+          cb.className = "ghostbtn";
+          cb.textContent = "Call";
+          cb.onclick = async () => {
+            const raw = prompt(t.name +
+              " - arguments as a JSON object:", "{}");
+            if (raw === null) return;
+            let args;
+            try { args = JSON.parse(raw); }
+            catch (e) {
+              box.textContent =
+                "That was not valid JSON - nothing was called.";
+              return;
+            }
+            cb.disabled = true; cb.textContent = "Calling…";
+            try {
+              const cd = await postJson("/api/mcp/call",
+                { server: s.name, tool: t.name,
+                  arguments: args });
+              box.textContent = cd.error ||
+                (s.name + "." + t.name +
+                 (cd.isError ? " returned an error" : "") +
+                 ":\n\n" + (cd.text || "(no text output)"));
+            } catch (e) {
+              box.textContent =
+                "The call failed to reach the server.";
+            }
+            cb.disabled = false; cb.textContent = "Call";
+          };
+          tr.appendChild(cb);
+          box.appendChild(tr);
+        }
+      } catch (e) {
+        box.textContent = "Could not reach the server.";
+      }
+      b.disabled = false; b.textContent = "Tools";
+    };
+    row.appendChild(b);
+    box.appendChild(row);
+  }
+}
+const toolMcpBtn = $("toolMcp");
+if (toolMcpBtn)
+  toolMcpBtn.onclick = () => { hideTools(); openMcpPanel(); };
+async function gitProofRun(url, btn, busyText) {
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = busyText;
+  try {
+    const d = await postJson(url, {});
+    $("gitLog").textContent = d.error ||
+      (d.output || "(no output)");
+  } catch (e) {
+    $("gitLog").textContent =
+      "The run failed to reach the server.";
+  }
+  btn.disabled = false; btn.textContent = old;
+}
+const gitGhostReviewBtn = $("gitGhostReview");
+if (gitGhostReviewBtn)
+  gitGhostReviewBtn.onclick = () =>
+    gitProofRun("/api/git/review", gitGhostReviewBtn, "…");
+const gitGhostScopeBtn = $("gitGhostScope");
+if (gitGhostScopeBtn)
+  gitGhostScopeBtn.onclick = () =>
+    gitProofRun("/api/git/scope", gitGhostScopeBtn, "…");
+/*@@MCPGIT-END@@*/
+
 async function openEco() {
   hideTools();
   $("todoTitle").textContent = "Ecosystem tools";
@@ -8084,6 +8220,9 @@ const AGENT_RULES = [
   "VERIFY - run the full verify pipeline (checks + tests)",
   "TEST [path] - run the project tests (one file, or all)",
   "GIT status / GIT diff / GIT log - repository state",
+  "MCP <server> <tool> <json-args> - call a tool on a",
+  "  configured MCP server; your briefing lists the servers",
+  "  and tools available, if any",
   "DONE <one-line summary> - the task is complete",
   "ASK <question> - you need the user to decide something",
   "You may BATCH several read-only actions in one reply, one",
@@ -8289,6 +8428,10 @@ window.__ghostApplyEdit = applyEditPatch;
      VERIFY           the verify pipeline (checks+tests+evidence)
      TEST [path]      the project test runner
      GIT status|diff|log
+     MCP <server> <tool> <json>   call a tool on a configured
+     MCP server (.mcp.json); the run briefing lists what is
+     available. Act mode only: a tool can have side effects,
+     so Plan mode refuses MCP calls.
    Read-only actions may be BATCHED: several action lines in
    one reply run together and their results come back as one
    message, which cuts model round trips on a slow local
@@ -8317,6 +8460,18 @@ function parseAgent3Action(reply) {
   if (m) return { type: "test", path: m[1] || "" };
   m = text.match(/^\s*GIT\s+(status|diff|log)\s*$/im);
   if (m) return { type: "git", what: m[1].toLowerCase() };
+  m = text.match(/^\s*MCP\s+(\S+)\s+(\S+)(?:\s+(\{[\s\S]*\}))?\s*$/m);
+  if (m) {
+    let args = {};
+    if (m[3]) {
+      try { args = JSON.parse(m[3]); }
+      catch (e) {
+        return { type: "mcp", server: m[1], tool: m[2],
+                 argsError: true };
+      }
+    }
+    return { type: "mcp", server: m[1], tool: m[2], args };
+  }
   return null;
 }
 function parseAgentActionFull(reply) {
@@ -8324,7 +8479,7 @@ function parseAgentActionFull(reply) {
 }
 const AGENT_BATCHABLE = ["read", "search", "list", "todo",
   "stepdone", "reverse", "eco", "git"];
-const AGENT_BATCH_BLOCK = /^\s*(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST)\b/;
+const AGENT_BATCH_BLOCK = /^\s*(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST|MCP)\b/;
 function parseAgentLine(line) {
   const t = (line || "").trim();
   if (!t) return null;
@@ -8365,6 +8520,21 @@ function parseAgentBatch(reply, allowed) {
 }
 async function agentToolText(act) {
   try {
+    if (act.type === "mcp") {
+      if (act.argsError)
+        return "MCP " + act.server + " " + act.tool +
+          ": the arguments were not valid JSON. Reply with " +
+          "MCP <server> <tool> followed by one JSON object.";
+      const d = await postJson("/api/mcp/call",
+        { server: act.server, tool: act.tool,
+          arguments: act.args || {} });
+      if (d.error)
+        return "MCP " + act.server + "." + act.tool +
+          " failed: " + d.error;
+      return "MCP " + act.server + "." + act.tool +
+        (d.isError ? " returned an error" : " result") +
+        ":\n" + (d.text || JSON.stringify(d)).slice(0, 6000);
+    }
     if (act.type === "reverse") {
       const d = await postJson("/api/ghostre/run",
         { path: act.path });
@@ -8676,6 +8846,31 @@ async function runAgent(task, opts) {
           (v && v.fix ? v.fix : JSON.stringify(v).slice(0, 200)))
           .join("\n");
   } catch (e) { /* optional */ }
+  /* MCP briefing (v2.44): when the workspace configures MCP
+     servers, tell the agent exactly which tools it can call
+     before it starts, so MCP is discoverable, not guessed. */
+  try {
+    const sd = await (await fetch("/api/mcp/servers")).json();
+    const servers = (sd && sd.servers) || [];
+    if (servers.length) {
+      const lines = [];
+      for (const s of servers.slice(0, 3)) {
+        try {
+          const td = await postJson("/api/mcp/tools",
+            { server: s.name });
+          for (const t of (td.tools || []).slice(0, 10))
+            lines.push("- MCP " + s.name + " " + t.name +
+              (t.description
+                ? " - " + String(t.description).slice(0, 100)
+                : ""));
+        } catch (e) { /* server may be down; skip it */ }
+      }
+      if (lines.length)
+        memText += "\n\nMCP tools available in this " +
+          "workspace (call with the MCP action):\n" +
+          lines.join("\n");
+    }
+  } catch (e) { /* optional */ }
   if (memText)
     addMsg("SYSTEM", "📚 Agent primed with project memory " +
       "(GhostRecall + error memory).");
@@ -8846,8 +9041,8 @@ async function runAgent(task, opts) {
         notes.join("\n") +
         "\nFix any problems with another WRITE or EDIT, or " +
         "finish with DONE." });
-    } else if (["reverse", "eco", "git", "verify", "test"]
-        .includes(act.type)) {
+    } else if (["reverse", "eco", "git", "verify", "test",
+        "mcp"].includes(act.type)) {
       addMsg("SYSTEM", "🧰 " + act.type.toUpperCase() +
         (act.path ? " " + act.path : "") +
         (act.tool ? " " + act.tool : "") +
@@ -8874,8 +9069,8 @@ async function runAgent(task, opts) {
         "no action. Reply with exactly one action: READ, " +
         "SEARCH, LIST, WRITE, EDIT, RUN, DELETE, TODO, " +
         "STEP_DONE, CHECK, REVERSE, ECO, VERIFY, TEST, GIT, " +
-        "DONE, or ASK - or a batch of read-only actions, " +
-        "one per line." });
+        "MCP, DONE, or ASK - or a batch of read-only " +
+        "actions, one per line." });
     }
   }
   sendBtn.textContent = "Send";
@@ -9059,7 +9254,7 @@ async function runPlan(task) {
       messages.push({ role: "user",
         content: (await agentToolText(act)) + "\nContinue." });
     } else if (["write", "edit", "run", "delete", "verify",
-        "test"].includes(act.type)) {
+        "test", "mcp"].includes(act.type)) {
       messages.push({ role: "user", content: "Plan mode is " +
         "read-only: " + act.type.toUpperCase() + " is not " +
         "allowed here. Record it as a TODO step instead, and " +

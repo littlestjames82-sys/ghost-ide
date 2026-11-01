@@ -32,11 +32,11 @@ ck("batching exists and fences disqualify a batch",
    block.includes('if (text.includes("```")) return [];'));
 ck("writes block a batch",
    block.includes("AGENT_BATCH_BLOCK") &&
-   block.includes("(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST)"));
+   block.includes("(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST|MCP)"));
 ck("ACT loop runs batches and the toolbelt",
    src.includes("const batch = parseAgentBatch(reply);") &&
    src.includes("await runBatch(batch)") &&
-   src.includes('["reverse", "eco", "git", "verify", "test"]'));
+   src.includes('["reverse", "eco", "git", "verify", "test",'));
 ck("plan loop batches read-only research",
    src.includes("const pBatch = parseAgentBatch(reply,"));
 ck("agent memory primes ACT runs with recall + error memory",

@@ -38,6 +38,7 @@ BUNDLED = [
     "ghostenv", "ghostmcpdoctor", "ghostleads", "quoteshot",
     "ghostreplay", "ghostconsole", "ghosthandoff",
     "ghostrecall", "ghostatlas", "ghostre",
+    "ghostreview", "ghostscope", "ghostmcp",
 ]
 LIBRARY = ["ghostslice"]
 SCRATCH = HOME / "test-fixtures" / "eco-vendored"

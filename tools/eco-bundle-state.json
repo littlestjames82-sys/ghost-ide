@@ -181,6 +181,27 @@
    "src_bytes": 46394,
    "tests_passed": 33,
    "tests_failed": 0
+  },
+  "ghostreview": {
+   "version": "0.1.0",
+   "files": 11,
+   "src_bytes": 79117,
+   "tests_passed": 104,
+   "tests_failed": 0
+  },
+  "ghostscope": {
+   "version": "0.1.0",
+   "files": 15,
+   "src_bytes": 114578,
+   "tests_passed": 74,
+   "tests_failed": 0
+  },
+  "ghostmcp": {
+   "version": "0.1.0",
+   "files": 4,
+   "src_bytes": 20696,
+   "tests_passed": 10,
+   "tests_failed": 0
   }
  },
  "bundled": [
@@ -208,7 +229,10 @@
   "ghosthandoff",
   "ghostrecall",
   "ghostatlas",
-  "ghostre"
+  "ghostre",
+  "ghostreview",
+  "ghostscope",
+  "ghostmcp"
  ],
  "library": [
   "ghostslice"
