@@ -11574,6 +11574,84 @@ $("apiSaveBtn").onclick = async () => {
     "\" to " + API_SAVE_PATH;
 };
 
+/* ---------------- REA bridge + GhostRE ----------------
+/*@@REA@@*/
+/* Reverse engineering panel. Two engines, one panel:
+   GhostRE is the built-in Ghost-native inspector (stdlib
+   Python, bundled on the phone, runs everywhere) and REA
+   is a locally installed REA CLI on the desktop, driven
+   through the bridge allowlist (read-only analysis only).
+   Full REA Evidence JSON is saved by the server under
+   .ghostide/rea/; the panel shows the summary. */
+async function reaLoadStatus() {
+  const el = $("reaStatus");
+  el.textContent = "checking…";
+  try {
+    const r = await fetch("/api/rea/status");
+    const d = await r.json();
+    if (!d.found) {
+      el.textContent = "REA: not installed on this machine. " +
+        (d.hint || "GhostRE below still works.");
+      return;
+    }
+    const prov = d.providers || {};
+    const parts = Object.keys(prov).map((k) =>
+      k + ": " + (prov[k] ? "ready" : "missing"));
+    el.textContent = "REA " + (d.version || "") + " at " +
+      d.path + (d.healthy === false
+        ? " · doctor: providers missing" : "") +
+      (parts.length ? " · " + parts.join(" · ") : "");
+  } catch (e) {
+    el.textContent = "REA status unavailable on this build; " +
+      "GhostRE below still works.";
+  }
+}
+function openReverse() {
+  hideTools();
+  $("reversePanel").classList.remove("hidden");
+  if (!$("reaPath").value && currentFile)
+    $("reaPath").value = currentFile;
+  reaLoadStatus();
+  $("reversePanel").scrollIntoView({ block: "nearest" });
+}
+$("toolReverse").onclick = openReverse;
+$("reaClose").onclick = () =>
+  $("reversePanel").classList.add("hidden");
+$("reaRefresh").onclick = reaLoadStatus;
+$("reaRun").onclick = async () => {
+  const tool = $("reaTool").value;
+  const path = $("reaPath").value.trim() || currentFile || "";
+  const out = $("reaOut"), msg = $("reaMsg");
+  if (!path) {
+    msg.textContent = "Open a file or type a workspace path first.";
+    return;
+  }
+  msg.textContent = "Analyzing " + path + "…";
+  out.textContent = "";
+  try {
+    if (tool === "ghostre") {
+      const d = await postJson("/api/ghostre/run", { path });
+      if (d.error) { msg.textContent = d.error; return; }
+      msg.textContent = "GhostRE · " + (d.output
+        ? "done" : "done");
+      out.textContent = d.output || "";
+      return;
+    }
+    const d = await postJson("/api/rea/run",
+      { command: tool, path });
+    if (d.error) { msg.textContent = d.error; return; }
+    const s = d.summary || {};
+    msg.textContent = "REA · " + (s.operation || tool) +
+      (s.format ? " · format: " + s.format : "") +
+      (s.provider ? " · " + s.provider : "") +
+      " · full Evidence saved to " + d.evidenceFile;
+    out.textContent = (d.output || "").slice(0, 12000);
+  } catch (e) {
+    msg.textContent = "Analysis failed: " + e;
+  }
+};
+/*@@REA-END@@*/
+
 /* ---------------- Roadmap G22: SQLite studio ----------------
    Opening a .db/.sqlite file opens this studio instead of
    the text editor. Read-only by default; the write toggle

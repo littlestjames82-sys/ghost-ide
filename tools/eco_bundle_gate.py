@@ -37,7 +37,7 @@ BUNDLED = [
     "ghostdata", "ghostapprove", "ghostledger", "ghostrecipes",
     "ghostenv", "ghostmcpdoctor", "ghostleads", "quoteshot",
     "ghostreplay", "ghostconsole", "ghosthandoff",
-    "ghostrecall", "ghostatlas",
+    "ghostrecall", "ghostatlas", "ghostre",
 ]
 LIBRARY = ["ghostslice"]
 SCRATCH = HOME / "test-fixtures" / "eco-vendored"

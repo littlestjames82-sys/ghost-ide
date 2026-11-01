@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.41.0"
+APP_VERSION = "2.42.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2581,6 +2581,9 @@ ECO_CATALOG = [
     ("ghostport", "GhostPort", "listed", "Migration CLI - stays a CLI"),
     ("ghostproxy", "GhostProxy", "listed",
      "Live-traffic proxy - out of scope for an offline IDE"),
+    ("ghostre", "GhostRE", "RE1",
+     "Reverse engineering inspector - REA's provider-free "
+     "core, Ghost-native (Reverse panel)"),
 ]
 ECO_RUNNABLE = {"ghostindex", "ghostdeps"}
 
@@ -2656,6 +2659,182 @@ def eco_run(tool_id, ws):
                              + text.strip()[:300])
         parts.append(text.rstrip())
     return "\n".join(parts)[:60000]
+
+
+# ---------------- REA bridge (Waves 1+3) ----------------
+import datetime as _rea_dt
+
+# GhostIDE does not ship REA (Ryan's internal-use rule stands);
+# on the desktop it drives a locally installed REA CLI the way
+# it drives a locally installed formatter: detect, run an
+# allowlisted read-only command, save the full Evidence JSON
+# under .ghostide/rea/, and hand the panel a compact summary.
+# Provider engines (Ghidra, JADX, Rizin, ...) are REA's own
+# installs; the status route surfaces `rea doctor` verbatim
+# lines for the known providers so the panel can show what is
+# actually available instead of guessing.
+REA_COMMANDS = {
+    "inspect-artifact", "inspect-byte-entropy",
+    "inspect-binary-layout", "analyze-javascript-application",
+    "inspect-android-package", "inspect-apk-signature",
+    "inspect-sqlite-database", "inspect-python-pyc",
+    "inspect-wasm-artifact", "inspect-macho",
+    "inspect-pe-imports", "inspect-elf-notes",
+    "inspect-go-binary", "inspect-rust-binary",
+    "inspect-managed-artifact", "inspect-plist",
+    "decompile",
+}
+REA_PROVIDERS = ["hopper", "ghidra", "ida-registration", "jadx",
+                 "kuna-installation"]
+
+
+def rea_path():
+    env = os.environ.get("REA_PATH")
+    if env and Path(env).is_file():
+        return env
+    found = shutil.which("rea")
+    if found:
+        return found
+    for cand in ("/usr/bin/rea", "/usr/local/bin/rea",
+                 str(Path.home() / ".local/bin/rea")):
+        if Path(cand).is_file():
+            return cand
+    return None
+
+
+def rea_status():
+    rp = rea_path()
+    if not rp:
+        return {"found": False,
+                "hint": "REA is not installed on this machine. "
+                        "GhostRE (built in) still works below. "
+                        "To add REA itself: npm install -g "
+                        "rea-agents, then reopen this panel."}
+    version = ""
+    try:
+        r = subprocess.run([rp, "--version"], capture_output=True,
+                           text=True, timeout=20)
+        version = (r.stdout or "").strip().splitlines()[0] \
+            if r.stdout.strip() else ""
+    except Exception:
+        version = ""
+    providers = {}
+    healthy = None
+    try:
+        r = subprocess.run([rp, "doctor"], capture_output=True,
+                           text=True, timeout=60)
+        text = (r.stdout or "") + (r.stderr or "")
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("healthy:"):
+                healthy = s.split(":", 1)[1].strip() == "true"
+        for name in REA_PROVIDERS:
+            providers[name] = None
+            # doctor prints "- name: <provider>" blocks, each
+            # followed by an "ok: true/false" line.
+            idx = text.find("name: " + name)
+            if idx >= 0:
+                seg = text[idx:idx + 400]
+                for ln in seg.splitlines():
+                    ls = ln.strip()
+                    if ls.startswith("ok:"):
+                        providers[name] = \
+                            ls.split(":", 1)[1].strip() == "true"
+                        break
+    except Exception:
+        pass
+    return {"found": True, "path": rp, "version": version,
+            "healthy": healthy, "providers": providers}
+
+
+def rea_run(command, rel, ws):
+    if command not in REA_COMMANDS:
+        raise ValueError("that REA command is not in the "
+                         "bridge allowlist (read-only analysis "
+                         "only; live capture, debugging and "
+                         "instrumentation stay out of the IDE)")
+    rp = rea_path()
+    if not rp:
+        raise ValueError("REA is not installed on this machine")
+    target = safe_path(rel)
+    if target is None or not target.exists():
+        raise ValueError("target not found in the workspace: "
+                         + str(rel))
+    out_dir = ws / ".ghostide" / "rea"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        r = subprocess.run(
+            [rp, command, str(target), "--format", "json"],
+            cwd=str(ws), capture_output=True, text=True,
+            timeout=180)
+    except subprocess.TimeoutExpired:
+        raise ValueError("REA ran past 180 seconds and was "
+                         "stopped")
+    raw = (r.stdout or "").strip()
+    if not raw:
+        raise ValueError("REA produced no output: "
+                         + (r.stderr or "").strip()[:300])
+    stamp = _rea_dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = target.name.replace("/", "_") or "target"
+    ev_name = "%s-%s-%s.json" % (stamp, command, base)
+    (out_dir / ev_name).write_text(raw, encoding="utf-8")
+    summary = {}
+    try:
+        doc = json.loads(raw)
+        subj = doc.get("subject") or {}
+        prov = doc.get("provider") or {}
+        summary = {
+            "evidence_id": doc.get("evidence_id"),
+            "operation": doc.get("operation"),
+            "format": subj.get("format"),
+            "name": subj.get("name"),
+            "sha256": (subj.get("digest") or {}).get("sha256"),
+            "provider": prov.get("name"),
+            "error": doc.get("message") if doc.get("code") else None,
+        }
+    except Exception:
+        summary = {"error": "REA output was not JSON"}
+    return {"ok": True, "command": command, "path": rel,
+            "evidenceFile": ".ghostide/rea/" + ev_name,
+            "summary": summary,
+            "output": raw[:12000]}
+
+
+def ghostre_run(rel, ws):
+    """Wave 2: run the Ghost-native GhostRE inspector (eco
+    tool, stdlib Python) on one workspace target and return
+    its JSON report text."""
+    src = eco_src_dir("ghostre")
+    if src is None:
+        raise ValueError(
+            "GhostRE source not found - place ghostre in "
+            "~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    target = safe_path(rel)
+    if target is None or not target.exists():
+        raise ValueError("target not found in the workspace: "
+                         + str(rel))
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(src)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "ghostre", "inspect",
+             str(target)],
+            cwd=str(ws), env=env, capture_output=True,
+            text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise ValueError("GhostRE ran past 120 seconds and was "
+                         "stopped")
+    text = (r.stdout or "").strip()
+    if r.returncode != 0 or not text:
+        raise ValueError("GhostRE could not inspect that "
+                         "target: " + ((r.stderr or "")
+                                        .strip()[:300] or
+                                        "no output"))
+    try:
+        return json.dumps(json.loads(text), indent=1)[:60000]
+    except Exception:
+        return text[:60000]
 
 
 def eco_search(query, ws, limit=10, max_tokens=2000):
@@ -3363,6 +3542,8 @@ class Handler(SimpleHTTPRequestHandler):
                      "workspace": str(WORKSPACE)})
             if parsed.path == "/api/eco/tools":
                 return self.send_json({"tools": eco_tools_state()})
+            if parsed.path == "/api/rea/status":
+                return self.send_json(rea_status())
             if parsed.path == "/api/files":
                 out = []
                 for p in sorted(WORKSPACE.rglob("*")):
@@ -4427,6 +4608,24 @@ class Handler(SimpleHTTPRequestHandler):
                 try:
                     out = eco_run(str(data.get("tool") or ""),
                                   WORKSPACE)
+                    return self.send_json({"ok": True,
+                                           "output": out})
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/rea/run":
+                data = self.read_json()
+                try:
+                    out = rea_run(str(data.get("command") or ""),
+                                  str(data.get("path") or ""),
+                                  WORKSPACE)
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/ghostre/run":
+                data = self.read_json()
+                try:
+                    out = ghostre_run(str(data.get("path") or ""),
+                                      WORKSPACE)
                     return self.send_json({"ok": True,
                                            "output": out})
                 except ValueError as e:
