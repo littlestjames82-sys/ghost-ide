@@ -172,16 +172,39 @@ Rules of the campaign (standing GhostIDE gates, unchanged):
       phone now returns a 400 {error} when nothing was
       written (write-tracking stream wrapper). Desktop
       fix verified live; Java fix compiles into v2.53.
-- [ ] A16 Timeouts: every eco/agent subprocess bounded; a hung
-      tool cannot wedge a server thread forever.
-- [ ] A17 Concurrency: terminal session, REPL, approve store and
-      watch polling under parallel requests.
-- [ ] A18 Error contract: routes answer {error} JSON with the
-      right status; the UI surfaces them plainly.
-- [ ] A19 New-panel accessibility: titles/labels on icon buttons,
-      focus order, tap targets on the phone layout.
-- [ ] A20 Docs truth: ROADMAP_ECO, BUILD_NOTES, changelog claims
-      re-checked against the code they describe.
+- [x] A16 PASS (v2.54): timeout census - every desktop
+      subprocess.run carries an explicit bound (20-180s;
+      helpers default eco 120 / mcp 50 / git 30 / term 30);
+      the Java runProcess enforces a deadline loop and
+      destroys on expiry with capped output buffers. The
+      long-lived processes (model server, terminal, REPL)
+      are supervised sessions by design, not one-shots.
+- [x] A17 PASS (v2.54): live probe - 14 enqueues fired in
+      parallel batches all landed as 14 unique pending
+      records, zero corrupt files (the approve store is
+      file-per-record + append ledger by construction);
+      mixed parallel /api/files reads unaffected. Desktop
+      terminal and REPL sessions hold dedicated locks.
+- [x] A18 PASS (v2.54, incl. A15's fixes): API routes on
+      both servers answer {error} JSON with sane statuses
+      (400 validation, 404 unknown route, 429 pair lock);
+      Java sendText is used only for static assets. The UI
+      surfaces errors plainly (postJson throws Error with
+      the server's message; panels show it inline).
+- [x] A19 PASS + 1 fix (v2.54): campaign panels' buttons
+      all carry visible text labels (no icon-only buttons
+      in the new code; older icon buttons carry title
+      attributes). FINDING: the .ghostbtn class used by
+      dozens of panel buttons was never defined - they
+      fell back to the generic button rule (~29px tall).
+      It now sets a 36px minimum tap target app-wide.
+- [x] A20 PASS + 1 fix (v2.54): ROADMAP_ECO statuses match
+      the shipped code (E18/E19 BUILT v2.47, E20 lite-
+      wired, E21 pending its host gate). FINDING:
+      KNOWN_ISSUES still claimed 'LAN mode has NO
+      authentication' - stale since pairing shipped;
+      rewritten to describe the token/role reality and
+      the ungated static shell honestly.
 
 ## Found during Cycle 1 (fixed in passing)
 

@@ -43,9 +43,13 @@ we know about, stated plainly - most are trade-offs, not surprises.
 ## Sync and LAN
 - LAN sync is whole-workspace overwrite by filename - no merge, no
   conflict detection. Pull/push deliberately, not casually.
-- LAN mode has NO authentication. Anyone on the same network who
-  can reach the port can read/write the workspace while it runs.
-  Trusted networks only; it is off by default.
+- LAN guests authenticate with the pairing code: tokens
+  expire after 12 hours, viewers are read-only (writes are
+  refused), and host-only controls stay on loopback
+  (audited again in the v2.51 campaign round). The static
+  app shell itself is served without a token, so treat the
+  IDE's *data* as gated, not its existence; trusted
+  networks only, and LAN serving is off by default.
 
 ## Phone build
 - arm64-v8a only. Older 32-bit phones cannot load the engine.
