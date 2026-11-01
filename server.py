@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.44.0"
+APP_VERSION = "2.45.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2950,6 +2950,217 @@ def mcp_call(server, tool, arguments):
                      "--args", json.dumps(arguments or {})])
 
 
+# ---------------- GhostApprove queue (E10) ----------------
+# GhostApprove records decisions and never executes; the
+# IDE is the producer that asked, so after a recorded
+# approval the IDE itself carries out exactly the queued
+# action. Decisions are hash-bound by the tool: the IDE
+# reads the exact hash from the record at decide time.
+def _approve_store_dir():
+    return WORKSPACE / ".ghostide" / "approve-store"
+
+
+def _approve_parse(text, rc):
+    t = (text or "").strip()
+    if rc != 0:
+        raise ValueError(t[:300] or "GhostApprove failed")
+    try:
+        return json.loads(t)
+    except ValueError:
+        raise ValueError("GhostApprove returned unreadable "
+                         "output: " + t[:200])
+
+
+def approve_enqueue(kind, command="", path="", summary=""):
+    if kind == "run":
+        if not command:
+            raise ValueError("a run request needs a command")
+        action = "Run command: " + command
+        payload = {"kind": "run", "command": command}
+    elif kind == "delete":
+        target = safe_path(path)
+        if not target.is_file():
+            raise ValueError("delete target is not a file in "
+                             "the workspace: " + path)
+        action = "Delete file: " + path
+        payload = {"kind": "delete", "path": path}
+    else:
+        raise ValueError("unknown queue kind: " + kind)
+    req = {
+        "action": action,
+        "summary": summary or "Raised by the GhostIDE agent.",
+        "source": "ghostide-agent",
+        "risk": "high",
+        "payload": payload,
+        "requested_by": "GhostIDE agent",
+    }
+    inbox = WORKSPACE / ".ghostide" / "approve-inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+    fpath = inbox / ("req-%d.json" % int(time.time() * 1000))
+    fpath.write_text(json.dumps(req), encoding="utf-8")
+    try:
+        rc, text = _eco_cli(
+            "ghostapprove",
+            ["ingest", str(fpath), "--store",
+             str(_approve_store_dir()), "--json"], WORKSPACE)
+    finally:
+        try:
+            fpath.unlink()
+        except OSError:
+            pass
+    obj = _approve_parse(text, rc)
+    return {"id": obj.get("id"), "hash": obj.get("hash"),
+            "status": "pending"}
+
+
+def approve_list():
+    rc, text = _eco_cli(
+        "ghostapprove",
+        ["list", "--store", str(_approve_store_dir()),
+         "--status", "pending", "--json"], WORKSPACE)
+    items = _approve_parse(text, rc)
+    results = []
+    rp = WORKSPACE / ".ghostide" / "approve-results.jsonl"
+    if rp.is_file():
+        for line in rp.read_text(
+                encoding="utf-8", errors="replace") \
+                .splitlines()[-15:]:
+            try:
+                results.append(json.loads(line))
+            except ValueError:
+                pass
+    return {"items": items if isinstance(items, list)
+            else [], "results": results}
+
+
+def approve_decide(req_id, decision):
+    if decision not in ("approve", "deny"):
+        raise ValueError("decision must be approve or deny")
+    if not req_id:
+        raise ValueError("no request id")
+    rc, text = _eco_cli(
+        "ghostapprove",
+        ["show", req_id, "--store", str(_approve_store_dir()),
+         "--json"], WORKSPACE)
+    rec = _approve_parse(text, rc)
+    if rec.get("status") != "pending":
+        raise ValueError("that request is no longer pending")
+    rc, text = _eco_cli(
+        "ghostapprove",
+        [decision, req_id, "--hash", str(rec.get("hash")),
+         "--by", "ghostide-panel", "--store",
+         str(_approve_store_dir()), "--json"], WORKSPACE)
+    _approve_parse(text, rc)
+    result = {"id": req_id, "decision": decision,
+              "executed": False, "output": ""}
+    if decision == "approve":
+        payload = ((rec.get("content") or {})
+                   .get("payload") or {})
+        kind = payload.get("kind")
+        if kind == "run":
+            r = _term_run(str(payload.get("command") or ""))
+            result["executed"] = True
+            result["code"] = r["code"]
+            result["output"] = ((r["stdout"] or "")
+                                + (r["stderr"] or ""))[-2000:]
+        elif kind == "delete":
+            target = safe_path(str(payload.get("path") or ""))
+            if target.is_file():
+                target.unlink()
+                result["executed"] = True
+                result["output"] = ("Deleted "
+                                    + str(payload.get("path")))
+            else:
+                result["output"] = ("The file no longer "
+                                    "exists - nothing was "
+                                    "deleted.")
+        else:
+            result["output"] = ("Unknown payload kind - "
+                                "nothing was executed.")
+    rp = WORKSPACE / ".ghostide" / "approve-results.jsonl"
+    rp.parent.mkdir(parents=True, exist_ok=True)
+    with rp.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(
+            {"ts": int(time.time()), "id": req_id,
+             "decision": decision,
+             "executed": result["executed"],
+             "output": result["output"][:500]}) + "\n")
+    return result
+
+
+def approve_audit():
+    rc, text = _eco_cli(
+        "ghostapprove",
+        ["verify", "--store", str(_approve_store_dir())],
+        WORKSPACE)
+    if rc != 0:
+        raise ValueError((text or "").strip()[:300])
+    return {"output": (text or "").strip()[:4000]}
+
+
+# ---------------- GhostWorktree (E15) ----------------
+def git_worktrees():
+    rc, out, err, _ms = git_out(["worktree", "list",
+                                 "--porcelain"])
+    if rc != 0:
+        raise ValueError("git worktree list failed: "
+                         + (err or "").strip()[:200])
+    trees = []
+    cur = None
+    for line in (out or "").splitlines():
+        if line.startswith("worktree "):
+            cur = {"path": line[9:].strip(), "branch": "",
+                   "head": ""}
+            trees.append(cur)
+        elif cur is not None and line.startswith("HEAD "):
+            cur["head"] = line[5:].strip()[:12]
+        elif cur is not None and line.startswith("branch "):
+            cur["branch"] = line[7:].strip().replace(
+                "refs/heads/", "")
+        elif cur is not None and line.strip() == "detached":
+            cur["branch"] = "(detached)"
+    return {"worktrees": trees}
+
+
+def git_worktree_add(name, branch=""):
+    if not _re_mod.fullmatch(r"[A-Za-z0-9._-]+", name or "") \
+            or name in (".", ".."):
+        raise ValueError("worktree name may use letters, "
+                         "digits, dot, dash and underscore")
+    dest = WORKSPACE.parent / (WORKSPACE.name + "-" + name)
+    if dest.exists():
+        raise ValueError("that worktree path already "
+                         "exists: " + str(dest))
+    args = ["worktree", "add"]
+    if branch:
+        if not _re_mod.fullmatch(r"[A-Za-z0-9._/-]+", branch):
+            raise ValueError("branch name has unsupported "
+                             "characters")
+        args += ["-b", branch]
+    args.append(str(dest))
+    rc, out, err, _ms = git_out(args)
+    if rc != 0:
+        raise ValueError("git worktree add failed: "
+                         + (err or out or "").strip()[:300])
+    return {"path": str(dest)}
+
+
+def git_worktree_remove(path):
+    trees = git_worktrees()["worktrees"]
+    known = [t["path"] for t in trees]
+    if path not in known:
+        raise ValueError("that path is not a worktree of "
+                         "this repo")
+    if Path(path) == WORKSPACE:
+        raise ValueError("the main workspace cannot be "
+                         "removed")
+    rc, out, err, _ms = git_out(["worktree", "remove", path])
+    if rc != 0:
+        raise ValueError("git worktree remove failed: "
+                         + (err or out or "").strip()[:300])
+    return {"ok": True}
+
+
 # ---------------- REA bridge (Waves 1+3) ----------------
 import datetime as _rea_dt
 
@@ -3867,6 +4078,21 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json(mcp_servers())
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/approve/list":
+                try:
+                    return self.send_json(approve_list())
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/approve/audit":
+                try:
+                    return self.send_json(approve_audit())
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/git/worktrees":
+                try:
+                    return self.send_json(git_worktrees())
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/files":
                 out = []
                 for p in sorted(WORKSPACE.rglob("*")):
@@ -3879,10 +4105,16 @@ class Handler(SimpleHTTPRequestHandler):
                     if entry["type"] == "file":
                         # Roadmap G25: sizes power the asset
                         # browser's heaviest-first sort.
+                        # E16 (v2.45): mtime powers the watch
+                        # feed - changes made outside the IDE.
                         try:
-                            entry["size"] = p.stat().st_size
+                            _st = p.stat()
+                            entry["size"] = _st.st_size
+                            entry["mtime"] = int(
+                                _st.st_mtime * 1000)
                         except OSError:
                             entry["size"] = 0
+                            entry["mtime"] = 0
                     out.append(entry)
                 return self.send_json({"files": out})
             if parsed.path == "/api/history":
@@ -4984,6 +5216,43 @@ class Handler(SimpleHTTPRequestHandler):
                     out = mcp_call(str(data.get("server") or ""),
                                    str(data.get("tool") or ""),
                                    args)
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/approve/enqueue":
+                data = self.read_json()
+                try:
+                    out = approve_enqueue(
+                        str(data.get("kind") or ""),
+                        str(data.get("command") or ""),
+                        str(data.get("path") or ""),
+                        str(data.get("summary") or ""))
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/approve/decide":
+                data = self.read_json()
+                try:
+                    out = approve_decide(
+                        str(data.get("id") or ""),
+                        str(data.get("decision") or ""))
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/git/worktree/add":
+                data = self.read_json()
+                try:
+                    out = git_worktree_add(
+                        str(data.get("name") or ""),
+                        str(data.get("branch") or ""))
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/git/worktree/remove":
+                data = self.read_json()
+                try:
+                    out = git_worktree_remove(
+                        str(data.get("path") or ""))
                     return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)

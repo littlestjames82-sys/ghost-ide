@@ -147,7 +147,7 @@ and the exposure evidence pack, in the Git panel.
 Done when: a fixture diff's scope lists the same
 files and symbols as the CLI.
 
-**E10. GhostApprove queue for agent mode.**
+**E10. GhostApprove queue for agent mode.** BUILT v2.45.0 (GhostApprove store under .ghostide/approve-store on both servers; the agent RUN policy pack gains a queue policy sending RUN + DELETE to the queue; Tools > Approve queue decides; decisions are hash-bound by the tool, and only a recorded approval makes the IDE execute exactly that action - fixture-proven end to end: queued delete stayed on disk until approved, denied run never executed, store audit verifies).
 Agent actions with consequences (deletes, writes
 outside the open file set, pushes) enqueue for
 one-tap approve / deny; nothing executes from the
@@ -187,14 +187,14 @@ reachability.
 Done when: fixture files render with the same
 schema, sample, and redactions as the tools.
 
-**E15. GhostWorktree.**
+**E15. GhostWorktree.** BUILT v2.45.0 (Git panel Worktrees section: list / add / remove on both servers; Open switches the workspace on desktop - the phone workspace is fixed by design, so Open there reports that plainly; switch the desktop workspace to a worktree and the agent works that tree).
 Create, switch, and remove git worktrees from the
 Git panel, so the agent can work a second tree
 while the main one stays untouched.
 Done when: a worktree opens as a workspace, an
 agent edit lands only there, and removal is clean.
 
-**E16. GhostWatch + GhostReplay.** GhostReplay RUNNER WIRED v2.43.0 (generic tool runner; GhostWatch still pending).
+**E16. GhostWatch + GhostReplay.** GhostReplay RUNNER WIRED v2.43.0; WATCH FEED BUILT v2.45.0 (lite: /api/files carries mtimes on both servers and the Files panel polls and names files changed on disk, tap to refresh; the scrubbable session-replay timeline is still pending).
 A freshness feed (changes made outside the IDE
 appear live) and session replay: a scrubbable
 timeline of the session's edits and runs.
