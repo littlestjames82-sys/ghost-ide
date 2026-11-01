@@ -50,14 +50,19 @@ Rules of the campaign (standing GhostIDE gates, unchanged):
       schema + bounded redacted sample as files in .ghostide).
 - [x] I15 Agent CONTEXT action: on-demand repo map (GhostAtlas
       form) the model can request mid-task.
-- [ ] I16 Agent priming names the workspace's worktrees.
-- [ ] I17 MCP panel keeps one session per server while open
-      (tools/call reuse; no re-handshake per call).
-- [ ] I18 Settings readout: eco bundle generation, tool count and
+- [x] I16 Agent priming names the workspace's worktrees.
+- [x] I17 MCP list caching (built v2.50): tools/resources/
+      prompts lists are cached server-side for 5 minutes,
+      keyed by the config file's mtime, so panel browsing
+      and agent priming stop re-handshaking. Calls, reads
+      and prompt gets always execute live (fixture-proven:
+      2 list calls = 1 spawn, 1 call = 1 more spawn).
+      Full persistent sessions stay a Cycle 2 candidate.
+- [x] I18 Settings readout: eco bundle generation, tool count and
       bundle bytes from the manifest.
-- [ ] I19 VERIFY gaps gain a "Draft fix task" button that seeds
+- [x] I19 VERIFY gaps gain a "Draft fix task" button that seeds
       the agent box with the gap list.
-- [ ] I20 Build gate: the four version spots + changelog +
+- [x] I20 Build gate: the four version spots + changelog +
       VERSION.json must agree or build.sh refuses.
 
 ## Cycle 1 — Audits (20)

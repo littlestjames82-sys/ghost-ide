@@ -5286,6 +5286,60 @@ async function annotateEcoStates() {
 }
 /*@@CAMPAIGN3-END@@*/
 
+/*@@CAMPAIGN4@@*/
+/* Campaign batch 4 (v2.50): the Settings bundle readout
+   (I18) and the Verify Draft fix task button (I19). The
+   worktree briefing (I16), the MCP list cache (I17,
+   server-side) and the version build gate (I20,
+   build-side) live in their own places. */
+let lastVerify = null;
+const settingsBtnEl = $("settingsBtn");
+if (settingsBtnEl)
+  settingsBtnEl.addEventListener("click", async () => {
+    const el = $("setEcoInfo");
+    if (!el) return;
+    try {
+      const d = await (await fetch("/api/eco/info")).json();
+      el.textContent = "generation " + d.generation +
+        " · " + d.tools + " tools · " +
+        Math.round((d.bytes || 0) / 1024) + " KB of code";
+    } catch (e) {
+      el.textContent = "unavailable";
+    }
+  });
+const runFixBtn = $("runFix");
+if (runFixBtn)
+  runFixBtn.onclick = () => {
+    if (!lastVerify) {
+      alert("Run Verify first (Tools > Verify pipeline) - " +
+        "the draft is built from its gaps.");
+      return;
+    }
+    const problems = (lastVerify.checks &&
+      lastVerify.checks.problems) || [];
+    const tests = lastVerify.tests || {};
+    const lines = problems.slice(0, 20).map(
+      (p) => "- " + (typeof p === "string" ? p
+        : JSON.stringify(p)));
+    if (tests.failed)
+      lines.push("- Tests: " + tests.passed + "/" +
+        tests.total + " passed - fix the failures");
+    const task = "Fix the gaps from the last Verify run " +
+      "(evidence level " +
+      (lastVerify.evidence
+        ? lastVerify.evidence.level : "?") + "):\n" +
+      (lines.length ? lines.join("\n")
+        : "- (verify reported no itemized problems; read " +
+          "its report and fix what it flags)") +
+      "\nWork through them one at a time, then VERIFY.";
+    const ta = $("chatText");
+    if (ta) ta.value = task;
+    const tg = $("agentToggle");
+    if (tg) tg.checked = true;
+    if (ta) ta.focus();
+  };
+/*@@CAMPAIGN4-END@@*/
+
 async function openEco() {
   hideTools();
   $("todoTitle").textContent = "Ecosystem tools";
@@ -9782,6 +9836,17 @@ async function runAgent(task, opts) {
           lines.join("\n");
     }
   } catch (e) { /* optional */ }
+  /* Worktree briefing (I16): name the workspace's git
+     worktrees so the agent knows the layout it is in. */
+  try {
+    const wd = await (await fetch("/api/git/worktrees"))
+      .json();
+    const wts = (wd && wd.worktrees) || [];
+    if (wts.length > 1)
+      memText += "\n\nGit worktrees in this workspace: " +
+        wts.map((w) => w.name + " (" +
+          (w.branch || "detached") + ")").join(", ") + ".";
+  } catch (e) { /* optional */ }
   if (memText)
     addMsg("SYSTEM", "📚 Agent primed with project memory " +
       "(GhostRecall + error memory).");
@@ -11834,6 +11899,7 @@ $("toolVerify").onclick = async () => {
     $("runOut").textContent = d.error;
     return;
   }
+  lastVerify = d;
   $("runTitle").textContent = "Verify: " + d.evidence.level +
     " · " + d.checks.checked + " checked, " +
     d.checks.problems.length + " problem(s) · tests " +

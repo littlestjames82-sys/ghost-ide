@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.49.0"
+APP_VERSION = "2.50.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -3135,8 +3135,35 @@ def mcp_servers():
     return out
 
 
+# I17: MCP list results (tools/resources/prompts are
+# near-static per server) are cached for 5 minutes, keyed
+# by the config file's mtime so a config edit invalidates
+# immediately. Calls, resource reads and prompt gets
+# always execute live - the cache removes re-handshakes
+# for browsing and agent priming, never for acting.
+_MCP_LIST_CACHE = {}
+_MCP_LIST_TTL = 300
+
+
+def _mcp_list_cached(verb, server, argv):
+    cfg = mcp_config_path()
+    try:
+        mt = cfg.stat().st_mtime if cfg else 0
+    except OSError:
+        mt = 0
+    key = (str(cfg), verb, server)
+    hit = _MCP_LIST_CACHE.get(key)
+    if (hit and hit[0] == mt
+            and time.time() - hit[1] < _MCP_LIST_TTL):
+        return hit[2]
+    obj = _mcp_cli(argv)
+    _MCP_LIST_CACHE[key] = (mt, time.time(), obj)
+    return obj
+
+
 def mcp_tools(server):
-    return _mcp_cli(["tools", "--server", server])
+    return _mcp_list_cached(
+        "tools", server, ["tools", "--server", server])
 
 
 def mcp_call(server, tool, arguments):
@@ -3146,7 +3173,9 @@ def mcp_call(server, tool, arguments):
 
 
 def mcp_resources(server):
-    return _mcp_cli(["resources", "--server", server])
+    return _mcp_list_cached(
+        "resources", server,
+        ["resources", "--server", server])
 
 
 def mcp_resource(server, uri):
@@ -3155,7 +3184,9 @@ def mcp_resource(server, uri):
 
 
 def mcp_prompts(server):
-    return _mcp_cli(["prompts", "--server", server])
+    return _mcp_list_cached(
+        "prompts", server,
+        ["prompts", "--server", server])
 
 
 def mcp_prompt(server, name, arguments):
@@ -4285,6 +4316,27 @@ class Handler(SimpleHTTPRequestHandler):
                      "workspace": str(WORKSPACE)})
             if parsed.path == "/api/eco/tools":
                 return self.send_json({"tools": eco_tools_state()})
+            if parsed.path == "/api/eco/info":
+                # I18: bundle readout for Settings - on
+                # desktop the source of truth is the gate's
+                # state file (the phone reads its manifest).
+                info = {"generation": "source checkouts",
+                        "tools": 0, "bytes": 0}
+                state_f = (ROOT / "tools"
+                           / "eco-bundle-state.json")
+                if state_f.is_file():
+                    try:
+                        st = json.loads(state_f.read_text(
+                            encoding="utf-8"))
+                        tools = st.get("tools") or {}
+                        info["tools"] = len(st.get(
+                            "bundled") or tools)
+                        info["bytes"] = sum(
+                            int(v.get("src_bytes") or 0)
+                            for v in tools.values())
+                    except (ValueError, OSError):
+                        pass
+                return self.send_json(info)
             if parsed.path == "/api/rea/status":
                 return self.send_json(rea_status())
             if parsed.path == "/api/mcp/servers":
