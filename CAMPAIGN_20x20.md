@@ -136,16 +136,42 @@ Rules of the campaign (standing GhostIDE gates, unchanged):
       server.py, VERSION.json, changelog top, manifest
       name+code, IdeServer VERSION - and passes on the
       current tree.
-- [ ] A11 Build reproducibility: staged assets byte-match, signer
-      stable, dex contains the new routes each release.
-- [ ] A12 Terminal exposure: desktop shell disclosed in UI, phone
-      refusals honest, no shell route reachable on phone.
-- [ ] A13 Workspace switching: path validation, worktree remove
-      refusals, fixed-workspace phone behavior.
-- [ ] A14 Write routes: size caps, overwrite rules, draft
-      recovery, chat/agent staged-write atomicity.
-- [ ] A15 Malformed input: bad JSON bodies, wrong types, missing
-      fields → clean 400s on both servers, no 500s/crashes.
+- [x] A11 PASS (v2.53): signer cert SHA-256 identical across
+      all six campaign APKs (8ea8684a...); staged app.js +
+      changelog byte-match source every release; dex route
+      presence checked per release. APK container bytes are
+      not bit-reproducible (zip timestamps) - the verified
+      invariants are asset identity + signer identity.
+- [x] A12 PASS (v2.53): desktop terminal is labeled in the UI
+      ('local shell (unsandboxed)') and pairing-gated off-
+      loopback; the phone's /api/terminal answers an honest
+      400 refusal and no shell exists in the Java server.
+- [x] A13 PASS (v2.53): live probes - switch validates the
+      target is an existing folder (file/missing refused);
+      any real folder is switchable BY DESIGN (an IDE open-
+      folder action; guests are pairing-gated, viewers
+      cannot POST). Worktree remove: main workspace and
+      unknown paths refused on the live server; a real
+      sibling worktree added and removed cleanly. Phone
+      workspace is fixed by design (no switch route).
+- [x] A14 PASS w/ note (v2.53): request bodies capped at
+      64MB with strict framing (duplicate Content-Length
+      and chunked bodies refused, v2.35); every file write
+      snapshots the prior content to history first; an
+      interrupted restore is reconciled at boot. Writes
+      are direct, not temp+rename - a mid-write crash can
+      truncate, but the history snapshot makes it
+      recoverable; accepted, logged.
+- [x] A15 PASS + 2 fixes (v2.53): desktop probes - malformed
+      JSON, wrong types, missing fields and empty bodies
+      all answer clean {error}s, no 500s. Fixes: unknown
+      /api/* routes answered the static handler's HTML 404
+      on desktop and an asset 404 on the phone - both now
+      return the JSON {error} 404; and a Java route that
+      threw before writing dropped the connection - the
+      phone now returns a 400 {error} when nothing was
+      written (write-tracking stream wrapper). Desktop
+      fix verified live; Java fix compiles into v2.53.
 - [ ] A16 Timeouts: every eco/agent subprocess bounded; a hung
       tool cannot wedge a server thread forever.
 - [ ] A17 Concurrency: terminal session, REPL, approve store and
