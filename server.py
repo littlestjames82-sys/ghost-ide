@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.51.0"
+APP_VERSION = "2.52.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -4359,8 +4359,13 @@ class Handler(SimpleHTTPRequestHandler):
                         st = json.loads(state_f.read_text(
                             encoding="utf-8"))
                         tools = st.get("tools") or {}
-                        info["tools"] = len(st.get(
-                            "bundled") or tools)
+                        # A9: count LIBRARY + BUNDLED like
+                        # the phone's manifest does (the
+                        # library ships in the bundle too).
+                        info["tools"] = len(
+                            (st.get("bundled") or [])
+                            + (st.get("library") or [])) \
+                            or len(tools)
                         info["bytes"] = sum(
                             int(v.get("src_bytes") or 0)
                             for v in tools.values())

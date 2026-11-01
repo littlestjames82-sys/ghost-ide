@@ -9844,8 +9844,9 @@ async function runAgent(task, opts) {
     const wts = (wd && wd.worktrees) || [];
     if (wts.length > 1)
       memText += "\n\nGit worktrees in this workspace: " +
-        wts.map((w) => w.name + " (" +
-          (w.branch || "detached") + ")").join(", ") + ".";
+        wts.map((w) => (w.path || "").split("/").pop() +
+          " (" + (w.branch || "detached") + ")").join(", ") +
+        ".";
   } catch (e) { /* optional */ }
   if (memText)
     addMsg("SYSTEM", "📚 Agent primed with project memory " +

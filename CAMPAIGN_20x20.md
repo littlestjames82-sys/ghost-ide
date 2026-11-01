@@ -93,16 +93,49 @@ Rules of the campaign (standing GhostIDE gates, unchanged):
       refused at decide time (GhostApprove re-derives the
       content hash) and the audit/verify flags the tamper
       by id with both hashes.
-- [ ] A6  Java/Python parity on the newest routes (approve,
-      worktrees, board, slicelog, files mtime, MCP).
-- [ ] A7  Secret leakage: MCP env values, scope/review outputs,
-      error strings echoing file contents.
-- [ ] A8  XSS sweep: every innerHTML sink fed by workspace or
-      tool strings; textContent used where data is untrusted.
-- [ ] A9  Eco bundle integrity: gate BUNDLED == eco.zip ==
-      manifest == Java ECO_BUNDLED/ECO_CATALOG, stamp rules.
-- [ ] A10 Version-source consistency (4 spots + changelog +
-      VERSION.json) — feeds I20's build gate.
+- [x] A6  PASS + 1 fix (v2.52): route/key parity verified on
+      the newest routes (approve incl. kind mcp, worktrees
+      {path, branch, head} both sides, board, slicelog,
+      studio, replay, datapack, eco/info, MCP verbs; files
+      mtime both - seconds on desktop, ms on phone, only
+      ever diffed). FINDING (from I16): the agent worktree
+      briefing read w.name, a key the API never sends - it
+      would have primed 'undefined' names; now derives the
+      name from the path like the Git panel does. Known
+      divergences, by design: desktop MCP list cache;
+      phone RUN approvals record without executing.
+- [x] A7  PASS (v2.52): canary probes - MCP server lists
+      expose env NAMES only (never values), including on
+      error paths ('could not start server' names the
+      command, no env). The canary appeared only in
+      same-user reads of the canary file itself (schema/
+      pack treat its first line as a CSV header) - no
+      cross-boundary leak. Observation logged: GhostData
+      sample redaction does not scan header names when a
+      KEY=VALUE file is parsed as CSV (the pack sample
+      itself stayed clean).
+- [x] A8  PASS (v2.52): sink census (~100 innerHTML touches)
+      - dynamic HTML routes through renderMarkdown, which
+      escapes the whole source first, quote-escapes
+      attribute interpolation, and renders non-http(s)
+      link schemes inert (the v2.36 hardening); mermaid
+      labels are escHtml'd at emission; panels built in
+      this campaign use textContent throughout; remaining
+      assignments are static strings or clears.
+- [x] A9  PASS + 1 alignment (v2.52): cross-checked the
+      shipped APK - gate LIBRARY+BUNDLED (29) == eco.zip
+      tools == eco-manifest keys == Java ECO_BUNDLED;
+      ECO_CATALOG (36) covers the ship set (catalog is the
+      full ecosystem by design). Stamp rule held: no bundle
+      content changed since e9, stamp untouched. Desktop
+      /api/eco/info counted only BUNDLED (28) vs the
+      phone's 29 - now counts LIBRARY+BUNDLED like the
+      manifest.
+- [x] A10 PASS (v2.52): the I20 gate (check_versions.py, run
+      first by build.sh) covers exactly this audit's list -
+      server.py, VERSION.json, changelog top, manifest
+      name+code, IdeServer VERSION - and passes on the
+      current tree.
 - [ ] A11 Build reproducibility: staged assets byte-match, signer
       stable, dex contains the new routes each release.
 - [ ] A12 Terminal exposure: desktop shell disclosed in UI, phone
