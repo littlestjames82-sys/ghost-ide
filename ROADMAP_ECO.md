@@ -166,20 +166,20 @@ Done when: the fixture audit matches the CLI and a
 planted secret value appears nowhere in the UI or
 any exported report.
 
-**E12. GhostDeps panel.**
+**E12. GhostDeps panel.** COVERED by the E1 runner + Track B (the Ecosystem panel runs GhostDeps itself and renders its own report, which is the panel the goal asks for; no separate deps-only surface).
 Declared vs actually-imported dependencies for the
 workspace, evidence only, no network.
 Done when: panel output matches the CLI on the
 mixed-language fixture.
 
-**E13. GhostLogs in the Run pane.** RUNNER WIRED v2.43.0 (Ecosystem panel runner form; run-pane embed still pending).
+**E13. GhostLogs in the Run pane.** BUILT v2.46.0 (Run pane gains Slice log: the output is saved as .ghostide/run-output.log and packed by GhostLogs into an incident pack in place, plus Ask Ghost buttons that drop pane text into the chat box; the Ecosystem panel runner form from v2.43.0 stands).
 "Slice this log": error windows plus deduped
 repeats become an incident pack, attachable to a
 chat message ("explain this failure").
 Done when: a planted 5,000-line log slices to the
 same incident pack the CLI produces, redactions on.
 
-**E14. GhostData + GhostSchema openers.** RUNNER WIRED v2.43.0 (Ecosystem panel runner form; file-opener form still pending).
+**E14. GhostData + GhostSchema openers.** BUILT v2.46.0 (CSV/TSV/JSON files open with a data pane above the editor showing the tool's own report - schema, bounded sample, redactions - and OpenAPI/JSON Schema files get GhostSchema's outline; Ask Ghost hands the report to chat).
 CSV / TSV / JSON files open with schema + bounded
 sample (sensitive columns redacted); OpenAPI files
 open as an endpoint outline sliced by $ref
@@ -204,7 +204,7 @@ steps in order.
 
 ## Arc 5 - The board and the studio
 
-**E17. GhostConsole board.** RUNNER WIRED v2.43.0 (console summary + Ledger + MCP Doctor via the generic tool runner; board cards still pending).
+**E17. GhostConsole board.** BUILT v2.46.0 (Tools > Ecosystem board renders GhostConsole's own board model - project column + reason, sections grouped as Verified / Attention / Stale cards; the IDE's verify, review, scope and slice features write the reports the console reads, so the board fills in as work happens).
 A read-only board in the IDE aggregating every
 ecosystem tool's latest report for this workspace
 in Ryan's kanban form (Verified / Attention /

@@ -711,7 +711,11 @@ async function openFile(path, skipGuard) {
     return;
   }
   stashTab();
-  if (tabStates.has(path)) { activateTab(path); return; }
+  if (tabStates.has(path)) {
+    activateTab(path);
+    maybeDataView(path, null);
+    return;
+  }
   const r = await fetch("/api/file?path=" + encodeURIComponent(path));
   const d = await r.json();
   if (d.error) { alert(d.error); return; }
@@ -725,6 +729,7 @@ async function openFile(path, skipGuard) {
   tabDirty.set(path, false);
   pairNoteOpened(path, d.content);
   activateTab(path);
+  maybeDataView(path, d.content);
   checkDraft(path, d.content);
   checkQuiet();
 }
@@ -4579,6 +4584,142 @@ async function watchTick() {
 }
 setInterval(watchTick, 8000);
 /*@@QUEUEWT-END@@*/
+
+/*@@BOARDDATA@@*/
+/* v2.46: the Ecosystem board (E17), data openers (E14),
+   and run-pane log slicing (E13).
+   Board: GhostConsole's own model for this workspace,
+   rendered as Verified / Attention / Stale cards; the
+   console reads the reports the IDE's other features
+   already write, so the board fills in as you work.
+   Data openers: CSV/TSV/JSON files open with the
+   GhostData report (schema + bounded, redacted sample)
+   above the editor; OpenAPI / JSON Schema files get
+   GhostSchema's outline. The report text is the tool's
+   own output, verbatim.
+   Slice: the Run pane's output becomes a GhostLogs
+   incident pack, and Ask Ghost drops any pane's text
+   into the chat box ready to send. */
+function askGhostWith(lead, text) {
+  const box = $("chatText");
+  if (!box) return;
+  box.value = lead + "\n\n" + (text || "").slice(0, 6000);
+  box.focus();
+}
+async function openBoardPanel() {
+  hideTools();
+  $("todoTitle").textContent = "Ecosystem board";
+  $("todoResults").textContent = "Building the board…";
+  $("todoPanel").classList.remove("hidden");
+  const box = $("todoResults");
+  let d;
+  try { d = await postJson("/api/eco/board", {}); }
+  catch (e) { box.textContent = "Could not reach the server."; return; }
+  if (d.error) { box.textContent = d.error; return; }
+  const proj = (d.projects || [])[0];
+  box.textContent = "";
+  if (!proj) {
+    box.textContent = "No board model for this workspace.";
+    return;
+  }
+  const head = document.createElement("div");
+  head.className = "dim";
+  head.textContent = proj.name + " - board column: " +
+    proj.column + ". " + (proj.column_reason || "");
+  box.appendChild(head);
+  const groups = { "Verified": [], "Attention": [],
+                   "Stale": [] };
+  for (const s of proj.sections || []) {
+    const g = s.state === "ok" ? "Verified"
+      : s.state === "absent" ? "Stale" : "Attention";
+    groups[g].push(s);
+  }
+  for (const g of ["Verified", "Attention", "Stale"]) {
+    if (!groups[g].length) continue;
+    const h = document.createElement("div");
+    h.textContent = g + " (" + groups[g].length + ")";
+    box.appendChild(h);
+    for (const s of groups[g]) {
+      const row = document.createElement("div");
+      row.className = "todorow";
+      const label = document.createElement("span");
+      label.textContent = s.tool + " - " +
+        (s.state === "absent" ? "no report yet"
+          : (s.summary || s.state)) +
+        (s.when ? " (" + String(s.when).slice(0, 10) + ")"
+          : "");
+      row.appendChild(label);
+      box.appendChild(row);
+    }
+  }
+}
+const toolBoardBtn = $("toolBoard");
+if (toolBoardBtn)
+  toolBoardBtn.onclick = () => { hideTools(); openBoardPanel(); };
+
+async function maybeDataView(path, content) {
+  const pane = $("dataPane");
+  if (!pane) return;
+  const lower = (path || "").toLowerCase();
+  let tool = null;
+  if (/\.(csv|tsv)$/.test(lower)) tool = "ghostdata";
+  else if (/\.json$/.test(lower)) {
+    let c = content;
+    if (c == null) {
+      try {
+        const r = await fetch("/api/file?path=" +
+          encodeURIComponent(path));
+        const dd = await r.json();
+        c = dd.content || "";
+      } catch (e) { c = ""; }
+    }
+    tool = (/"openapi"|"swagger"|"\$schema"|"jsonschema"/
+        .test(c.slice(0, 4000)) || /schema/.test(lower))
+      ? "ghostschema" : "ghostdata";
+  }
+  if (!tool) { pane.classList.add("hidden"); return; }
+  try {
+    const d = await postJson("/api/eco/toolrun",
+      { tool, path });
+    if (d.error) { pane.classList.add("hidden"); return; }
+    $("dataTitle").textContent =
+      (tool === "ghostdata" ? "📊 GhostData - "
+        : "🧩 GhostSchema - ") + path;
+    $("dataOut").textContent = d.output || "(no output)";
+    pane.classList.remove("hidden");
+  } catch (e) { pane.classList.add("hidden"); }
+}
+const dataCloseBtn = $("dataClose");
+if (dataCloseBtn)
+  dataCloseBtn.onclick = () =>
+    $("dataPane").classList.add("hidden");
+const dataAskBtn = $("dataAsk");
+if (dataAskBtn)
+  dataAskBtn.onclick = () => askGhostWith(
+    "Explain this data report and anything unusual in it:",
+    $("dataOut").textContent);
+const runSliceBtn = $("runSlice");
+if (runSliceBtn)
+  runSliceBtn.onclick = async () => {
+    const text = $("runOut").textContent || "";
+    runSliceBtn.disabled = true;
+    try {
+      const d = await postJson("/api/eco/slicelog", { text });
+      if (d.error) { alert(d.error); return; }
+      $("runTitle").textContent =
+        "Incident pack (GhostLogs)";
+      $("runOut").textContent = d.output || "(no output)";
+    } catch (e) {
+      alert("The slice failed to reach the server.");
+    }
+    runSliceBtn.disabled = false;
+  };
+const runAskBtn = $("runAsk");
+if (runAskBtn)
+  runAskBtn.onclick = () => askGhostWith(
+    "Explain this output and what to do about it:",
+    $("runOut").textContent);
+/*@@BOARDDATA-END@@*/
 
 async function openEco() {
   hideTools();

@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.45.0"
+APP_VERSION = "2.46.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2819,6 +2819,40 @@ def eco_toolrun(tool_id, ws, rel=""):
     return text.rstrip()[:60000]
 
 
+# ---------------- Ecosystem board (E17) + log slicing (E13) ----
+def eco_board(ws):
+    """E17: GhostConsole's board model for this workspace,
+    as JSON. The console reads the tools' own latest
+    reports (verify, review, scope packs, slices) - the
+    IDE's report-producing features already feed it."""
+    rc, text = _eco_cli("ghostconsole",
+                        ["summary", str(ws), "--json"], ws)
+    if rc != 0:
+        raise ValueError("GhostConsole could not run: "
+                         + text.strip()[:300])
+    try:
+        return json.loads(text.strip())
+    except ValueError:
+        raise ValueError("GhostConsole returned unreadable "
+                         "output")
+
+
+def eco_slicelog(text, ws):
+    """E13: slice run output into a GhostLogs incident
+    pack. The text is saved as a workspace log file first
+    (GhostLogs packs files), then the tool's own INCIDENT
+    report comes back."""
+    if not (text or "").strip():
+        raise ValueError("nothing to slice - run something "
+                         "first")
+    gi = ws / ".ghostide"
+    gi.mkdir(parents=True, exist_ok=True)
+    log = gi / "run-output.log"
+    log.write_text(text[:2000000], encoding="utf-8")
+    return eco_toolrun("ghostlogs", ws,
+                       ".ghostide/run-output.log")
+
+
 # ---------------- Git proof: GhostReview + GhostScope (E8/E9) ----
 def _eco_cli(tool_id, args, ws, timeout=120):
     """Run one bundled eco tool CLI, eco_toolrun discipline.
@@ -5175,6 +5209,22 @@ class Handler(SimpleHTTPRequestHandler):
                     out = eco_toolrun(str(data.get("tool") or ""),
                                       WORKSPACE,
                                       str(data.get("path") or ""))
+                    return self.send_json({"ok": True,
+                                           "output": out})
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/board":
+                # E17: GhostConsole board model.
+                try:
+                    return self.send_json(eco_board(WORKSPACE))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/slicelog":
+                # E13: run output -> GhostLogs incident pack.
+                data = self.read_json()
+                try:
+                    out = eco_slicelog(
+                        str(data.get("text") or ""), WORKSPACE)
                     return self.send_json({"ok": True,
                                            "output": out})
                 except ValueError as e:
