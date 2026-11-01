@@ -804,6 +804,10 @@ function postJson(url, obj) {
     body: JSON.stringify(obj) }).then((r) => r.json());
 }
 
+function getJson(url) {
+  return fetch(url).then((r) => r.json());
+}
+
 async function saveFile() {
   if (!currentFile) return;
   if (settings.trimOnSave) {
@@ -10346,14 +10350,26 @@ paneDrag($("dragChat"), $("chat"), "right");
   try {
     const p = JSON.parse(
       localStorage.getItem("ghostide-panes") || "{}");
-    if (p.files) $("files").style.width = p.files;
-    if (p.chat) $("chat").style.width = p.chat;
+    /* Phone widths ignore saved pane widths: an inline width
+       from a desktop / big-screen drag used to override the
+       mobile stylesheet and squeeze the editor + chat into a
+       fixed-width column with dead space beside it. */
+    if (window.innerWidth > 900) {
+      if (p.files) $("files").style.width = p.files;
+      if (p.chat) $("chat").style.width = p.chat;
+    }
     const bs = localStorage.getItem("ghostide-bigscreen");
     if (bs === "1") document.body.classList.add("bigscreen");
     else if (bs === null && window.innerWidth >= 1280)
       document.body.classList.add("bigscreen");
   } catch (e) {}
 })();
+window.addEventListener("resize", () => {
+  if (window.innerWidth <= 900) {
+    $("files").style.width = "";
+    $("chat").style.width = "";
+  }
+});
 
 /* A hardware keyboard announces itself with modifier-key
    chords a touchscreen never sends; when one pairs, offer
