@@ -4590,6 +4590,35 @@ async function openApprovePanel() {
     }
     box.appendChild(row);
   }
+  if ((d.items || []).length >= 2) {
+    const bulk = document.createElement("div");
+    for (const dec of ["approve", "deny"]) {
+      const b = document.createElement("button");
+      b.className = "ghostbtn";
+      b.textContent = dec === "approve" ? "Approve all"
+        : "Deny all";
+      b.onclick = async () => {
+        b.disabled = true; b.textContent = "Working…";
+        const lines = [];
+        for (const it of d.items) {
+          try {
+            const r = await postJson("/api/approve/decide",
+              { id: it.id, decision: dec });
+            lines.push(it.id + ": " + (r.error ||
+              (r.executed ? "carried out - " + r.output
+                : dec === "approve"
+                  ? "recorded - " + (r.output || "")
+                  : "denied, not executed")));
+          } catch (e) {
+            lines.push(it.id + ": could not reach the server");
+          }
+        }
+        box.textContent = lines.join("\n");
+      };
+      bulk.appendChild(b);
+    }
+    box.appendChild(bulk);
+  }
   const auditB = document.createElement("button");
   auditB.className = "ghostbtn";
   auditB.textContent = "Audit the store";
@@ -4674,10 +4703,29 @@ function watchSnapshot(files) {
       m.set(f.path, (f.mtime || 0) + ":" + (f.size || 0));
   return m;
 }
+let watchNote = "";
 function watchObserve(files) {
   watchBase = watchSnapshot(files);
   const feed = $("watchFeed");
-  if (feed) feed.textContent = "";
+  if (feed) {
+    feed.textContent = watchNote;
+    watchNote = "";
+  }
+}
+async function reloadOpenTab(p) {
+  /* I7: an open, unmodified tab whose file changed on
+     disk reloads in place. Dirty tabs are never touched. */
+  try {
+    const r = await fetch("/api/file?path=" +
+      encodeURIComponent(p));
+    const d = await r.json();
+    if (d.error || d.content == null) return false;
+    tabStates.set(p, EditorState.create({
+      doc: d.content, extensions: baseExtensions(p) }));
+    tabDirty.set(p, false);
+    if (p === currentFile) activateTab(p);
+    return true;
+  } catch (e) { return false; }
 }
 async function watchTick() {
   if (!watchBase || document.visibilityState !== "visible")
@@ -4687,12 +4735,26 @@ async function watchTick() {
     const d = await r.json();
     const now = watchSnapshot(d.files || []);
     const changed = [];
+    const modified = [];
     for (const [p, sig] of now)
       if (watchBase.has(p) && watchBase.get(p) !== sig)
-        changed.push(p);
+        modified.push(p);
       else if (!watchBase.has(p)) changed.push(p + " (new)");
     for (const p of watchBase.keys())
       if (!now.has(p)) changed.push(p + " (gone)");
+    const reloaded = [];
+    for (const p of modified) {
+      const isOpen = tabStates.has(p);
+      const isDirty = p === currentFile ? dirty
+        : !!tabDirty.get(p);
+      if (isOpen && !isDirty && await reloadOpenTab(p))
+        reloaded.push(p);
+      else changed.push(p);
+    }
+    if (reloaded.length && reloaded.includes(currentFile))
+      watchNote = "↻ Reloaded " +
+        currentFile.split("/").pop() +
+        " (changed on disk)";
     const feed = $("watchFeed");
     if (feed && changed.length) {
       feed.textContent = "↻ Changed on disk: " +
@@ -4702,6 +4764,9 @@ async function watchTick() {
         " - tap to refresh";
       feed.style.cursor = "pointer";
       feed.onclick = () => loadFiles();
+    } else if (feed && watchNote) {
+      feed.textContent = watchNote;
+      watchNote = "";
     }
   } catch (e) { /* offline or busy; next tick retries */ }
 }
@@ -4772,9 +4837,50 @@ async function openBoardPanel() {
         (s.when ? " (" + String(s.when).slice(0, 10) + ")"
           : "");
       row.appendChild(label);
+      if (s.source) {
+        const open = document.createElement("button");
+        open.className = "ghostbtn";
+        open.textContent = "Open report";
+        open.onclick = () => {
+          $("todoPanel").classList.add("hidden");
+          openFile(s.source);
+        };
+        row.appendChild(open);
+      }
       box.appendChild(row);
     }
   }
+  const runRow = document.createElement("div");
+  const runNote = document.createElement("div");
+  runNote.className = "dim";
+  runNote.textContent = "Run a report now:";
+  runRow.appendChild(runNote);
+  for (const [label, url] of [
+      ["Verify", "/api/verify/run"],
+      ["Verdict", "/api/git/review"],
+      ["Scope", "/api/git/scope"]]) {
+    const b = document.createElement("button");
+    b.className = "ghostbtn";
+    b.textContent = label;
+    b.onclick = async () => {
+      b.disabled = true; b.textContent = "Running…";
+      try {
+        const d2 = await postJson(url, {});
+        if (d2.error) {
+          runNote.textContent = label + ": " + d2.error;
+          b.disabled = false; b.textContent = label;
+          return;
+        }
+        openBoardPanel();
+      } catch (e) {
+        runNote.textContent =
+          label + ": could not reach the server.";
+        b.disabled = false; b.textContent = label;
+      }
+    };
+    runRow.appendChild(b);
+  }
+  box.appendChild(runRow);
 }
 const toolBoardBtn = $("toolBoard");
 if (toolBoardBtn)
@@ -5077,6 +5183,44 @@ for (const [id, fn] of [["toolRecipes", openRecipesPanel],
   if (b) b.onclick = () => { hideTools(); fn(); };
 }
 /*@@CAMPAIGN1-END@@*/
+
+/*@@CAMPAIGN2@@*/
+/* Campaign batch 2 (v2.48): the queue badge (I8) and
+   terminal-pane slicing (I9). The board's run buttons
+   (I6), report openers (I10) and the watch auto-reload
+   (I7) live in their own blocks. */
+async function queueBadgeTick() {
+  const b = $("toolApprove");
+  if (!b || document.visibilityState !== "visible")
+    return;
+  try {
+    const d = await (await fetch("/api/approve/list")).json();
+    const n = (d.items || []).length;
+    b.textContent = n ? "Approve queue (" + n + ")"
+      : "Approve queue";
+  } catch (e) { /* offline; next tick retries */ }
+}
+setInterval(queueBadgeTick, 20000);
+const termSliceBtn = $("termSlice");
+if (termSliceBtn)
+  termSliceBtn.onclick = async () => {
+    const text = $("termOut").textContent || "";
+    termSliceBtn.disabled = true;
+    try {
+      const d = await postJson("/api/eco/slicelog", { text });
+      if (d.error) { alert(d.error); return; }
+      $("termOut").textContent = d.output || "(no output)";
+    } catch (e) {
+      alert("The slice failed to reach the server.");
+    }
+    termSliceBtn.disabled = false;
+  };
+const termAskBtn = $("termAsk");
+if (termAskBtn)
+  termAskBtn.onclick = () => askGhostWith(
+    "Explain this terminal output and what to do about it:",
+    $("termOut").textContent);
+/*@@CAMPAIGN2-END@@*/
 
 async function openEco() {
   hideTools();

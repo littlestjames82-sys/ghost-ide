@@ -26,17 +26,18 @@ Rules of the campaign (standing GhostIDE gates, unchanged):
       Replay panel lists sessions and scrubs the step timeline.
 - [x] I5  GhostMCP 0.2: resources + prompts verbs, panel tabs,
       rebundle (eco generation e9).
-- [ ] I6  Board: one tap runs the missing reports (verify /
+- [x] I6  Board: one tap runs the missing reports (verify /
       review / scope) from the board's Attention cards.
-- [ ] I7  Watch feed: an open, unmodified file that changes on
+- [x] I7  Watch feed: an open, unmodified file that changes on
       disk reloads in place with a banner (dirty files never
       touched).
-- [ ] I8  Approve queue: pending-count badge on the Tools entry
+- [x] I8  Approve queue: pending-count badge on the Tools entry
       plus Approve all / Deny all for the visible queue.
-- [ ] I9  Terminal pane gains Slice log + Ask Ghost, same as the
+- [x] I9  Terminal pane gains Slice log + Ask Ghost, same as the
       Run pane.
-- [ ] I10 Chat: attach a workspace file's contents to the chat
-      box (picker over /api/files).
+- [x] I10 Board cards open their source report in the editor
+      (substituted: chat file attach already exists as the
+      @ File mention picker; the gap was board -> report).
 - [ ] I11 Indexed search results open the file at the match line.
 - [ ] I12 Git panel shows the latest Scope verdict line when a
       scope pack exists.
