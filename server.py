@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.50.0"
+APP_VERSION = "2.51.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -3216,12 +3216,29 @@ def _approve_parse(text, rc):
                          "output: " + t[:200])
 
 
-def approve_enqueue(kind, command="", path="", summary=""):
+def approve_enqueue(kind, command="", path="", summary="",
+                    mcp=None):
     if kind == "run":
         if not command:
             raise ValueError("a run request needs a command")
         action = "Run command: " + command
         payload = {"kind": "run", "command": command}
+    elif kind == "mcp":
+        # A4 audit fix: agent MCP calls are actions on the
+        # outside world, so they queue like RUN/DELETE.
+        mcp = mcp or {}
+        server = str(mcp.get("server") or "")
+        tool = str(mcp.get("tool") or "")
+        arguments = mcp.get("arguments") or {}
+        if not server or not tool:
+            raise ValueError("an MCP request needs a server "
+                             "and a tool")
+        if not isinstance(arguments, dict):
+            raise ValueError("MCP arguments must be an object")
+        action = ("Call MCP " + server + "." + tool +
+                  " with " + json.dumps(arguments)[:200])
+        payload = {"kind": "mcp", "server": server,
+                   "tool": tool, "arguments": arguments}
     elif kind == "delete":
         target = safe_path(path)
         if not target.is_file():
@@ -3319,6 +3336,19 @@ def approve_decide(req_id, decision):
                 result["output"] = ("The file no longer "
                                     "exists - nothing was "
                                     "deleted.")
+        elif kind == "mcp":
+            try:
+                r = mcp_call(str(payload.get("server") or ""),
+                             str(payload.get("tool") or ""),
+                             payload.get("arguments") or {})
+                result["executed"] = True
+                result["output"] = (
+                    ("MCP error: " if r.get("isError")
+                     else "MCP result: ")
+                    + str(r.get("text") or ""))[-2000:]
+            except ValueError as e:
+                result["output"] = ("The approved MCP call "
+                                    "could not run: " + str(e))
         else:
             result["output"] = ("Unknown payload kind - "
                                 "nothing was executed.")
@@ -5602,7 +5632,8 @@ class Handler(SimpleHTTPRequestHandler):
                         str(data.get("kind") or ""),
                         str(data.get("command") or ""),
                         str(data.get("path") or ""),
-                        str(data.get("summary") or ""))
+                        str(data.get("summary") or ""),
+                        data.get("mcp"))
                     return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)

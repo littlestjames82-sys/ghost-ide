@@ -36,7 +36,8 @@ ck("writes block a batch",
 ck("ACT loop runs batches and the toolbelt",
    src.includes("const batch = parseAgentBatch(reply);") &&
    src.includes("await runBatch(batch)") &&
-   src.includes('["reverse", "eco", "git", "verify", "test",'));
+   src.includes('["reverse", "eco", "git", "verify", "test"') &&
+   src.includes('} else if (act.type === "mcp") {'));
 ck("plan loop batches read-only research",
    src.includes("const pBatch = parseAgentBatch(reply,"));
 ck("agent memory primes ACT runs with recall + error memory",

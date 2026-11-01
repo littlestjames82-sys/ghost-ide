@@ -67,17 +67,32 @@ Rules of the campaign (standing GhostIDE gates, unchanged):
 
 ## Cycle 1 — Audits (20)
 
-- [ ] A1  Pairing/auth coverage: every route behind the pair gate
-      off-loopback; no route leaks by method mismatch.
-- [ ] A2  safe_path traversal sweep across all file routes
-      (.., absolute paths, symlink escape, dotfile policy).
-- [ ] A3  Eco toolrun allowlist: only the wired verbs reachable;
-      argument injection via path fields probed.
-- [ ] A4  Agent rails: batch blockers complete (RUN/WRITE/EDIT/
-      DELETE/MCP never batched), policy packs honored at every
-      branch, plan mode cannot write.
-- [ ] A5  Approve queue integrity: hash binding, forged-decide
-      probes, results log tamper evidence via verify.
+- [x] A1  PASS (v2.51): gate on both methods; join exempt +
+      rate-limited (5 fails/10 min -> 10 min lock); host-only
+      routes recheck loopback; tokens expire 12h; viewers
+      read-only on every POST. LAN listener not provable in
+      the sandbox (no LAN interface); static shell is public
+      by design, every data route is /api/.
+- [x] A2  PASS (v2.51): live probes - plain .., %2e%2e, ..%2F,
+      absolute /etc/passwd, symlink file + dir escapes and a
+      write escape all refused with 'path escapes workspace';
+      resolve/canonicalize-then-contain on both servers.
+- [x] A3  PASS (v2.51): unwired tools and name tricks refused;
+      '--help' as a path is a filename, not a flag (paths go
+      absolute through safe_path before argv); REA bridge
+      same pattern (allowlist + safe_path + list argv).
+- [x] A4  FIXED (v2.51): batch parser probed 14/14 against the
+      shipped code (every mutating verb + fences void a
+      batch; CONTEXT batches as read-only). FINDING: agent
+      MCP calls bypassed the RUN rails - they now honor the
+      queue policy (new queue kind 'mcp', executed on
+      approval by both servers; desktop fixture-proven) and
+      per-call approval under the other policies.
+- [x] A5  PASS (v2.51): forged id, double decide and bad
+      decision words refused; a tampered store payload was
+      refused at decide time (GhostApprove re-derives the
+      content hash) and the audit/verify flags the tamper
+      by id with both hashes.
 - [ ] A6  Java/Python parity on the newest routes (approve,
       worktrees, board, slicelog, files mtime, MCP).
 - [ ] A7  Secret leakage: MCP env values, scope/review outputs,

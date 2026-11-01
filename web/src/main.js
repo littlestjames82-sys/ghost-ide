@@ -10057,8 +10057,58 @@ async function runAgent(task, opts) {
         notes.join("\n") +
         "\nFix any problems with another WRITE or EDIT, or " +
         "finish with DONE." });
-    } else if (["reverse", "eco", "git", "verify", "test",
-        "mcp"].includes(act.type)) {
+    } else if (act.type === "mcp") {
+      /* A4 audit fix: MCP calls act on the outside world,
+         so they honor the same rails as RUN - queued under
+         the queue policy, approved per call under the
+         others (unless this task already has auto-approve
+         for actions). */
+      if (act.argsError) {
+        messages.push({ role: "user",
+          content: await agentToolText(act) });
+      } else if (policy === "queue") {
+        const q = await postJson("/api/approve/enqueue",
+          { kind: "mcp",
+            mcp: { server: act.server, tool: act.tool,
+              arguments: act.args || {} },
+            summary: "Agent task: " + task.slice(0, 200) });
+        if (q.error) {
+          messages.push({ role: "user", content: "Queueing " +
+            "that MCP call failed: " + q.error +
+            " Continue without it." });
+        } else {
+          addMsg("SYSTEM", "📥 MCP call queued for approval (" +
+            q.id + "): " + act.server + "." + act.tool);
+          messages.push({ role: "user", content: "That MCP " +
+            "call went to the Approve queue (" + q.id +
+            ") and has NOT run. The user decides in Tools " +
+            "> Approve queue. Continue without its result, " +
+            "or finish with DONE." });
+        }
+      } else if (!runAllowAll) {
+        const verdict = await agentApproveRunUi("MCP " +
+          act.server + "." + act.tool + " " +
+          JSON.stringify(act.args || {}).slice(0, 300));
+        if (verdict === "all") runAllowAll = true;
+        if (agentStop) { outcome = "stopped"; break; }
+        if (verdict === "deny") {
+          addMsg("SYSTEM", "⛔ MCP call denied by you: " +
+            act.server + "." + act.tool);
+          messages.push({ role: "user", content: "The user " +
+            "denied that MCP call. Do not retry it; find " +
+            "another way or finish with DONE." });
+        } else {
+          const t = await agentToolText(act);
+          messages.push({ role: "user",
+            content: t + "\nContinue." });
+        }
+      } else {
+        const t = await agentToolText(act);
+        messages.push({ role: "user",
+          content: t + "\nContinue." });
+      }
+    } else if (["reverse", "eco", "git", "verify", "test"
+        ].includes(act.type)) {
       addMsg("SYSTEM", "🧰 " + act.type.toUpperCase() +
         (act.path ? " " + act.path : "") +
         (act.tool ? " " + act.tool : "") +
