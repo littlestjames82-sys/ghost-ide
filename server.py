@@ -2702,6 +2702,35 @@ def rea_path():
     return None
 
 
+def rea_env():
+    """Environment for REA subprocesses. Starts from the
+    server's own environment and fills in the Wave 3 engine
+    installs under ~/workspace/re-engines/ when they exist
+    and the variables are not already set, so the desktop
+    server does not have to be launched from a shell that
+    sourced re-engines/env.sh for the providers to light up."""
+    env = dict(os.environ)
+    re_root = Path.home() / "workspace" / "re-engines"
+    ghidra = re_root / "ghidra_12.1.4_PUBLIC"
+    if "GHIDRA_INSTALL_DIR" not in env and ghidra.is_dir():
+        env["GHIDRA_INSTALL_DIR"] = str(ghidra)
+    jadx_jar = re_root / "jadx" / "jadx-headless-mcp-0.7.1-all.jar"
+    if "REA_JADX_MCP_JAR" not in env and jadx_jar.is_file():
+        env["REA_JADX_MCP_JAR"] = str(jadx_jar)
+    jdk = re_root / "jdk-21.0.13+9"
+    if jdk.is_dir():
+        if "JAVA_HOME" not in env:
+            env["JAVA_HOME"] = str(jdk)
+        extra = [str(jdk / "bin"), str(re_root / "rizin" / "bin"),
+                 str(re_root / "bin"),
+                 str(re_root / "frida-venv" / "bin")]
+        have = env.get("PATH", "")
+        env["PATH"] = ":".join(
+            [p for p in extra if Path(p).is_dir()]
+            + ([have] if have else []))
+    return env
+
+
 def rea_status():
     rp = rea_path()
     if not rp:
@@ -2713,7 +2742,7 @@ def rea_status():
     version = ""
     try:
         r = subprocess.run([rp, "--version"], capture_output=True,
-                           text=True, timeout=20)
+                           text=True, timeout=20, env=rea_env())
         version = (r.stdout or "").strip().splitlines()[0] \
             if r.stdout.strip() else ""
     except Exception:
@@ -2722,7 +2751,7 @@ def rea_status():
     healthy = None
     try:
         r = subprocess.run([rp, "doctor"], capture_output=True,
-                           text=True, timeout=60)
+                           text=True, timeout=60, env=rea_env())
         text = (r.stdout or "") + (r.stderr or "")
         for line in text.splitlines():
             s = line.strip()
@@ -2766,7 +2795,7 @@ def rea_run(command, rel, ws):
         r = subprocess.run(
             [rp, command, str(target), "--format", "json"],
             cwd=str(ws), capture_output=True, text=True,
-            timeout=180)
+            timeout=180, env=rea_env())
     except subprocess.TimeoutExpired:
         raise ValueError("REA ran past 180 seconds and was "
                          "stopped")
