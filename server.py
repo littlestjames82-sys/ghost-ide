@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.46.0"
+APP_VERSION = "2.47.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2837,6 +2837,141 @@ def eco_board(ws):
                          "output")
 
 
+def eco_studio(tool, verb, arg, arg2, ws):
+    """Studio tools (E18/E19): GhostRecipes, GhostLeads and
+    QuoteShot behind one strict allowlist. Every verb maps
+    to a fixed argv shape; user input only ever fills the
+    marked slots. Returns the tool's text (or the file a
+    render verb wrote)."""
+    gi = ws / ".ghostide"
+    gi.mkdir(parents=True, exist_ok=True)
+
+    def run(tool_name, argv):
+        rc, text = _eco_cli(tool_name, argv, ws)
+        if rc != 0:
+            raise ValueError(text.strip()[:300] or
+                             (tool_name + " failed"))
+        return text.strip()
+
+    if tool == "ghostrecipes":
+        lib = str(ws / "recipes")
+        if verb == "list":
+            return run(tool, ["list", "--library", lib,
+                              "--json"])
+        if verb in ("show", "validate"):
+            if not arg:
+                raise ValueError("a recipe id is required")
+            return run(tool, [verb, arg, "--library", lib])
+        if verb == "render":
+            if not arg:
+                raise ValueError("a recipe id is required")
+            slug = _re_mod.sub(r"[^A-Za-z0-9_.-]", "_", arg)
+            out_file = gi / ("recipe-" + slug + ".md")
+            run(tool, ["render", arg, "--library", lib,
+                       "-o", str(out_file)])
+            return ("Rendered to .ghostide/" + out_file.name +
+                    "\n\n" + out_file.read_text(
+                        encoding="utf-8")[:40000])
+        raise ValueError("unknown recipes verb: " + verb)
+    if tool == "ghostleads":
+        store = ws / "leads.json"
+        if verb == "import":
+            src = safe_path(arg)
+            if not src.is_file():
+                raise ValueError("import source not found: "
+                                 + arg)
+            return run(tool, ["import", str(src),
+                              "--store", str(store)])
+        if not store.is_file():
+            raise ValueError("no leads store yet - import a "
+                             "CSV or JSON list first")
+        if verb in ("list", "score"):
+            return run(tool, [verb, "--store", str(store),
+                              "--json"])
+        if verb == "pack":
+            if not arg:
+                raise ValueError("a lead name is required")
+            out_dir = gi / "lead-packs"
+            run(tool, ["pack", "--store", str(store),
+                       "--lead", arg, "--out", str(out_dir)])
+            packs = sorted(out_dir.glob("*.md"))
+            if not packs:
+                raise ValueError("the pack was not written")
+            return ("Pack written under .ghostide/lead-packs"
+                    "\n\n" + packs[-1].read_text(
+                        encoding="utf-8")[:40000])
+        raise ValueError("unknown leads verb: " + verb)
+    if tool == "quoteshot":
+        job = safe_path(arg)
+        if not job.is_dir():
+            raise ValueError("job folder not found: " + arg)
+        if verb in ("show", "items"):
+            return run(tool, [verb, str(job)])
+        if verb == "render":
+            run(tool, ["render", str(job), "--out", str(job)])
+            txt = job / "quote.txt"
+            if not txt.is_file():
+                raise ValueError("the quote was not written")
+            return ("Quote rendered into " + arg +
+                    " (quote.html + quote.txt)\n\n" +
+                    txt.read_text(encoding="utf-8")[:40000])
+        raise ValueError("unknown quoteshot verb: " + verb)
+    raise ValueError("unknown studio tool: " + tool)
+
+
+def replay_save(task, trail, ws):
+    """E16: record one agent run's action trail for the
+    Replay panel. Entries are capped and trimmed here -
+    the store is IDE state, not a transcript dump."""
+    d = ws / ".ghostide" / "replay"
+    d.mkdir(parents=True, exist_ok=True)
+    clean = []
+    for e in (trail or [])[:200]:
+        if not isinstance(e, dict):
+            continue
+        clean.append({
+            "step": int(e.get("step") or 0),
+            "type": str(e.get("type") or "")[:40],
+            "target": str(e.get("target") or "")[:300]})
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    rec = {"task": str(task or "")[:500],
+           "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+           "trail": clean}
+    name = "run-" + stamp + ".json"
+    p = d / name
+    n = 1
+    while p.exists():
+        n += 1
+        p = d / ("run-" + stamp + "-" + str(n) + ".json")
+    p.write_text(json.dumps(rec, indent=1), encoding="utf-8")
+    return {"ok": True, "id": p.name, "steps": len(clean)}
+
+
+def replay_list(ws):
+    d = ws / ".ghostide" / "replay"
+    out = []
+    if d.is_dir():
+        for p in sorted(d.glob("*.json"), reverse=True)[:30]:
+            try:
+                rec = json.loads(p.read_text(encoding="utf-8"))
+            except ValueError:
+                continue
+            out.append({"id": p.name,
+                        "task": rec.get("task", ""),
+                        "saved_at": rec.get("saved_at", ""),
+                        "steps": len(rec.get("trail") or [])})
+    return {"sessions": out}
+
+
+def replay_get(ws, rid):
+    if "/" in rid or "\\" in rid or not rid.endswith(".json"):
+        raise ValueError("bad replay id")
+    p = ws / ".ghostide" / "replay" / rid
+    if not p.is_file():
+        raise ValueError("no such replay session")
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
 def eco_slicelog(text, ws):
     """E13: slice run output into a GhostLogs incident
     pack. The text is saved as a workspace log file first
@@ -2981,6 +3116,25 @@ def mcp_tools(server):
 def mcp_call(server, tool, arguments):
     return _mcp_cli(["call", "--server", server,
                      "--tool", tool,
+                     "--args", json.dumps(arguments or {})])
+
+
+def mcp_resources(server):
+    return _mcp_cli(["resources", "--server", server])
+
+
+def mcp_resource(server, uri):
+    return _mcp_cli(["resource", "--server", server,
+                     "--uri", uri])
+
+
+def mcp_prompts(server):
+    return _mcp_cli(["prompts", "--server", server])
+
+
+def mcp_prompt(server, name, arguments):
+    return _mcp_cli(["prompt", "--server", server,
+                     "--name", name,
                      "--args", json.dumps(arguments or {})])
 
 
@@ -4117,6 +4271,16 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json(approve_list())
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/replay/list":
+                return self.send_json(replay_list(WORKSPACE))
+            if parsed.path == "/api/eco/replay/get":
+                qs = urllib.parse.parse_qs(parsed.query)
+                try:
+                    return self.send_json(replay_get(
+                        WORKSPACE,
+                        (qs.get("id") or [""])[0]))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/approve/audit":
                 try:
                     return self.send_json(approve_audit())
@@ -5219,6 +5383,28 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json(eco_board(WORKSPACE))
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/studio":
+                # E18/E19: recipes / leads / quoteshot.
+                data = self.read_json()
+                try:
+                    out = eco_studio(
+                        str(data.get("tool") or ""),
+                        str(data.get("verb") or ""),
+                        str(data.get("arg") or ""),
+                        str(data.get("arg2") or ""), WORKSPACE)
+                    return self.send_json({"ok": True,
+                                           "output": out})
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/replay/save":
+                # E16: record an agent run's action trail.
+                data = self.read_json()
+                try:
+                    return self.send_json(replay_save(
+                        data.get("task"),
+                        data.get("trail"), WORKSPACE))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/eco/slicelog":
                 # E13: run output -> GhostLogs incident pack.
                 data = self.read_json()
@@ -5266,6 +5452,43 @@ class Handler(SimpleHTTPRequestHandler):
                     out = mcp_call(str(data.get("server") or ""),
                                    str(data.get("tool") or ""),
                                    args)
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/mcp/resources":
+                data = self.read_json()
+                try:
+                    out = mcp_resources(
+                        str(data.get("server") or ""))
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/mcp/resource":
+                data = self.read_json()
+                try:
+                    out = mcp_resource(
+                        str(data.get("server") or ""),
+                        str(data.get("uri") or ""))
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/mcp/prompts":
+                data = self.read_json()
+                try:
+                    out = mcp_prompts(
+                        str(data.get("server") or ""))
+                    return self.send_json(out)
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/mcp/prompt":
+                data = self.read_json()
+                try:
+                    args = data.get("arguments")
+                    if not isinstance(args, dict):
+                        args = {}
+                    out = mcp_prompt(
+                        str(data.get("server") or ""),
+                        str(data.get("name") or ""), args)
                     return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)

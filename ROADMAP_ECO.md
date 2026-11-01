@@ -194,7 +194,7 @@ while the main one stays untouched.
 Done when: a worktree opens as a workspace, an
 agent edit lands only there, and removal is clean.
 
-**E16. GhostWatch + GhostReplay.** GhostReplay RUNNER WIRED v2.43.0; WATCH FEED BUILT v2.45.0 (lite: /api/files carries mtimes on both servers and the Files panel polls and names files changed on disk, tap to refresh; the scrubbable session-replay timeline is still pending).
+**E16. GhostWatch + GhostReplay.** WATCH FEED BUILT v2.45.0; REPLAY TIMELINE BUILT v2.47.0 (agent + plan runs record their action trails to .ghostide/replay; Tools > Session replay lists runs and scrubs the step timeline; GhostReplay the tool stays the transcript-analysis engine for exported sessions).
 A freshness feed (changes made outside the IDE
 appear live) and session replay: a scrubbable
 timeline of the session's edits and runs.
@@ -215,7 +215,7 @@ Done when: the board renders real report files
 from a fixture workspace with the same states the
 Console CLI reports.
 
-**E18. GhostRecipes as packs.**
+**E18. GhostRecipes as packs.** BUILT v2.47.0 (Tools > Recipes shelf: library list / show / validate / render through /api/eco/studio; renders land as checklist files in .ghostide; registry-shelf install of third-party packs remains future work).
 Recipes ship as .ghostpack template packs (the
 G37 registry): install a recipe, get its scaffold
 plus its checks wired as the project's verify
@@ -224,7 +224,7 @@ Done when: a recipe pack installs from the
 registry shelf and the produced project passes its
 own wired checks.
 
-**E19. GhostLeads + QuoteShot (desktop-first).**
+**E19. GhostLeads + QuoteShot (desktop-first).** BUILT v2.47.0 (Tools > Leads: import / list / re-score / draft pack over the workspace leads.json; Tools > QuoteShot: show / items / render a job folder fully offline; both ride /api/eco/studio on both servers, phone included).
 A studio panel in the desktop IDE: offline lead
 drafts (drafts only, Ryan sends) and quote sheets
 generated from the studio price book.
