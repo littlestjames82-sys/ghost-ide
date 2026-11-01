@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.54.0"
+APP_VERSION = "2.55.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -3102,7 +3102,7 @@ def mcp_config_path():
     return None
 
 
-def _mcp_cli(args, timeout=50):
+def _mcp_cli_oneshot(args, timeout=50):
     cfg = mcp_config_path()
     if cfg is None:
         raise ValueError("no MCP config found - add a "
@@ -3124,6 +3124,158 @@ def _mcp_cli(args, timeout=50):
     if obj.get("error"):
         raise ValueError(str(obj["error"]))
     return obj
+
+
+class _McpDaemon:
+    """Cycle 2 I1: one persistent GhostMCP serve process
+    per config; it keeps a handshaken session per server,
+    so lists and calls stop paying a process spawn each.
+    Any failure drops back to the one-shot CLI."""
+
+    def __init__(self):
+        self.proc = None
+        self.cfg = None
+        self.lock = _threading.Lock()
+        self._lines = None
+        self._next = 0
+        self._dead_until = 0.0
+
+    def _stop(self):
+        if self.proc is not None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+            self.proc = None
+            self._lines = None
+
+    def _start(self, cfg):
+        src = eco_src_dir("ghostmcp")
+        if src is None:
+            raise ValueError("ghostmcp source not found")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(src)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        self.proc = subprocess.Popen(
+            [sys.executable, "-m", "ghostmcp", "serve",
+             "--config", str(cfg)],
+            cwd=str(WORKSPACE), env=env,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True)
+        self.cfg = str(cfg)
+        lines = _queue.Queue()
+        self._lines = lines
+        proc = self.proc
+
+        def pump():
+            try:
+                for line in proc.stdout:
+                    lines.put(line)
+            except Exception:
+                pass
+            lines.put(None)
+
+        t = _threading.Thread(target=pump, daemon=True)
+        t.start()
+
+    def request(self, req, timeout=50):
+        import time as _time
+        with self.lock:
+            cfg = mcp_config_path()
+            if cfg is None:
+                raise ValueError("no MCP config found - add "
+                                 "a .mcp.json to the workspace")
+            if _time.time() < self._dead_until:
+                raise ValueError("daemon cooling down")
+            if self.proc is None or self.cfg != str(cfg) \
+                    or self.proc.poll() is not None:
+                self._stop()
+                self._start(cfg)
+            self._next += 1
+            rid = self._next
+            req = dict(req)
+            req["id"] = rid
+            req.setdefault("timeout", timeout)
+            try:
+                self.proc.stdin.write(json.dumps(req) + "\n")
+                self.proc.stdin.flush()
+            except (OSError, ValueError):
+                self._stop()
+                self._dead_until = _time.time() + 30
+                raise ValueError("MCP daemon went away")
+            while True:
+                try:
+                    line = self._lines.get(timeout=timeout + 10)
+                except Exception:
+                    self._stop()
+                    self._dead_until = _time.time() + 30
+                    raise ValueError("MCP daemon stopped "
+                                     "answering")
+                if line is None:
+                    self._stop()
+                    self._dead_until = _time.time() + 30
+                    raise ValueError("MCP daemon exited")
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if obj.get("id") == rid:
+                    if obj.get("error"):
+                        raise ValueError(str(obj["error"]))
+                    obj.pop("id", None)
+                    return obj
+
+
+_MCP_DAEMON = _McpDaemon()
+
+
+def _mcp_cli(args, timeout=50):
+    """Translate the CLI-shaped call onto the daemon;
+    fall back to the one-shot CLI on any daemon failure
+    (the reply shapes are identical by construction)."""
+    verb = args[0] if args else ""
+    opts = {}
+    i = 1
+    while i < len(args):
+        if args[i].startswith("--") and i + 1 < len(args):
+            opts[args[i][2:]] = args[i + 1]
+            i += 2
+        else:
+            i += 1
+    req = None
+    if verb == "servers":
+        req = {"verb": "servers"}
+    elif verb in ("tools", "resources", "prompts"):
+        req = {"verb": verb, "server": opts.get("server")}
+    elif verb == "call":
+        try:
+            parsed = json.loads(opts.get("args") or "{}")
+        except ValueError:
+            parsed = {}
+        req = {"verb": "call", "server": opts.get("server"),
+               "tool": opts.get("tool"), "args": parsed}
+    elif verb == "resource":
+        req = {"verb": "resource", "server": opts.get("server"),
+               "uri": opts.get("uri")}
+    elif verb == "prompt":
+        try:
+            parsed = json.loads(opts.get("args") or "{}")
+        except ValueError:
+            parsed = {}
+        req = {"verb": "prompt", "server": opts.get("server"),
+               "name": opts.get("name"), "args": parsed}
+    if req is None:
+        return _mcp_cli_oneshot(args, timeout=timeout)
+    try:
+        return _MCP_DAEMON.request(req, timeout=timeout)
+    except ValueError as e:
+        if "no MCP config" in str(e):
+            raise
+        return _mcp_cli_oneshot(args, timeout=timeout)
 
 
 def mcp_servers():
@@ -5616,6 +5768,15 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/mcp/sessions":
+                # Cycle 2 I5: which servers the persistent
+                # daemon holds open + calls served.
+                try:
+                    out = _MCP_DAEMON.request(
+                        {"verb": "sessions"}, timeout=10)
+                    return self.send_json(out)
+                except Exception:
+                    return self.send_json({"sessions": []})
             if parsed.path == "/api/mcp/prompts":
                 data = self.read_json()
                 try:

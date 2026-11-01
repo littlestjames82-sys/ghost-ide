@@ -5260,6 +5260,24 @@ if (termAskBtn)
     $("termOut").textContent);
 /*@@CAMPAIGN2-END@@*/
 
+/*@@CAMPAIGN5@@*/
+/* Cycle 2 I5: after the MCP servers render, show which
+   servers the persistent daemon holds open (desktop;
+   the phone answers an empty list and the line hides). */
+const _openMcpPanelC2 = openMcpPanel;
+openMcpPanel = async function () {
+  await _openMcpPanelC2();
+  try {
+    const d = await postJson("/api/mcp/sessions", {});
+    if (!d.sessions || !d.sessions.length) return;
+    const note = document.createElement("div");
+    note.className = "dim";
+    note.textContent = "Live sessions: " + d.sessions.map(
+      (s) => s.server + " (" + s.calls + " calls)").join(", ");
+    todoResults.appendChild(note);
+  } catch (e) { /* the panel already explains errors */ }
+};
+
 /*@@CAMPAIGN3@@*/
 /* Campaign batch 3 (v2.49): board-state chips in the
    Ecosystem panel (I13). The replay Re-run button (I11),

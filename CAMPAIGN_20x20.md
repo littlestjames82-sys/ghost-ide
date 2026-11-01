@@ -225,3 +225,43 @@ improvements target whatever the audits surfaced plus the next
 roadmap tier; audits re-run A1–A20 against the changed surface
 and deepen the two thinnest areas. The cycle closes with a
 consolidated posture note in BUILD_NOTES.
+
+## Cycle 2 definition (set Nov 1, 2026, from Cycle 1 outcomes)
+
+Improvements (C2-I1..I20), releases of five:
+- Batch 1 (v2.55): C2-I1 persistent MCP sessions (GhostMCP
+  0.3.0 serve daemon + IDE daemon client, one-shot CLI
+  fallback), C2-I5 MCP sessions readout in the panel,
+  C2-I3 GhostConsole clock-relative fixtures (the durable
+  fix for the ~Nov 7 rot).
+- Batch 2 (v2.56): C2-I2 Java MCP list cache parity,
+  C2-I4 GhostData header-name redaction scan, C2-I6 agent
+  priming learns the board state, C2-I7 replay export to
+  a markdown transcript, C2-I8 approve queue kind filter.
+- Batch 3 (v2.57): C2-I9 watch rows jump to the file,
+  C2-I10 verify run history (client-persisted), C2-I11
+  eco panel search, C2-I12 studio render history,
+  C2-I13 data packs list + delete.
+- Batch 4 (v2.58): C2-I14 board cards show last commit,
+  C2-I15 settings MCP readout + restart sessions,
+  C2-I16 palette gains the panel openers, C2-I17 agent
+  trail auto-scroll toggle, C2-I18 file-tree external-
+  change dots, C2-I19 REPL slice/ask, C2-I20 staged-asset
+  self-check inside build.sh.
+Audits (v2.59-v2.62): A1-A20 re-run against the changed
+surface in the same four groupings, deepening A7
+(canary across board/studio outputs) and A17 (parallel
+hammer on the session daemon + approve store together).
+- [x] C2-I1 DONE (v2.55): ghostmcp serve daemon keeps one
+      handshaken session per server; server.py routes all
+      MCP verbs through it with the one-shot CLI as
+      fallback. Fixture-proven end to end: 3 requests,
+      exactly 1 server spawn (was 3).
+- [x] C2-I5 DONE (v2.55): /api/mcp/sessions + a "Live
+      sessions" line in the MCP panel (desktop daemon;
+      the phone answers empty and the line hides).
+- [x] C2-I3 DONE (v2.55): conftest fixture_iso() computes
+      stamps from today (offsets preserve the original
+      spacing); every pinned 2026-10 date in the suite
+      converted; GhostConsole 103/103 green. Eco bundle
+      generation e10 carries GhostMCP 0.3.0.
