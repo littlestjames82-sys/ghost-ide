@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.42.0"
+APP_VERSION = "2.43.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2661,6 +2661,96 @@ def eco_run(tool_id, ws):
     return "\n".join(parts)[:60000]
 
 
+# Track B: single-shot runners for the bundled eco tools
+# beyond the E1 proof pair. Each wired tool maps to the one
+# CLI verb that prints (or, for GhostLogs, writes) its own
+# workspace report; the verbs were picked from each tool's
+# own --help. File-level tools (ghostlogs, ghostdata,
+# ghostschema) take the request's workspace-contained file.
+# Every wired tool uses exit 2 for "could not run"; exit 1
+# is a normal findings-present result for ghostenv,
+# ghostledger, ghostmcpdoctor and ghostexposure, treated
+# the way eco_run treats ghostdeps' exit 1.
+ECO_TOOLRUN = {"ghostenv", "ghostlogs", "ghostdata",
+               "ghostschema", "ghostledger", "ghostmcpdoctor",
+               "ghostconsole", "ghostreplay", "ghostexposure"}
+ECO_TOOLRUN_FILES = {"ghostlogs", "ghostdata", "ghostschema"}
+
+
+def eco_toolrun(tool_id, ws, rel=""):
+    """Run one Track B tool's report verb and return its own
+    report text. Raises ValueError with a plain message for
+    anything not wired or not runnable."""
+    if tool_id not in ECO_TOOLRUN:
+        raise ValueError("that tool has no in-IDE runner yet - "
+                         "it lands with its roadmap goal")
+    src = eco_src_dir(tool_id)
+    if src is None:
+        raise ValueError(
+            "tool source not found - place the ecosystem tools "
+            "in ~/ghost-ecosystem or set GHOSTIDE_ECO_HOME")
+    target = None
+    if tool_id in ECO_TOOLRUN_FILES:
+        if not rel:
+            raise ValueError(tool_id + " inspects one file - "
+                             "pass the workspace path of the "
+                             "file to inspect")
+        target = safe_path(rel)
+        if not target.is_file():
+            raise ValueError("file not found in the workspace: "
+                             + rel)
+    pack_dir = None
+    if tool_id == "ghostenv":
+        args = ["check", str(ws)]
+    elif tool_id == "ghostlogs":
+        # pack writes INCIDENT.md + manifest.json into a
+        # directory; the incident file is the report text.
+        pack_dir = ws / ".ghostide" / "ghostlogs-pack"
+        args = ["pack", str(target), "-o", str(pack_dir)]
+    elif tool_id == "ghostdata":
+        args = ["schema", str(target)]
+    elif tool_id == "ghostschema":
+        args = ["inspect", str(target)]
+    elif tool_id == "ghostledger":
+        # summary reads ./.ghostledger.jsonl, so the run's
+        # cwd (the workspace) is the scope.
+        args = ["summary"]
+    elif tool_id == "ghostmcpdoctor":
+        # scan audits MCP client configs in their default
+        # locations (home-level plus this project's own
+        # .mcp.json / mcp.json, since cwd is the workspace);
+        # --no-report keeps it to the printed summary instead
+        # of writing report files into the workspace.
+        args = ["scan", "--no-report"]
+    elif tool_id == "ghostconsole":
+        args = ["summary", str(ws)]
+    elif tool_id == "ghostreplay":
+        args = ["trend", str(ws)]
+    else:  # ghostexposure: default built-in starter pack
+        args = ["scan", str(ws)]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(src)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", tool_id] + args,
+            cwd=str(ws), env=env, capture_output=True,
+            text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise ValueError("the tool ran past 120 seconds and "
+                         "was stopped")
+    text = (r.stdout or "") + (r.stderr or "")
+    if r.returncode == 2 or r.returncode < 0:
+        raise ValueError("the tool could not run: "
+                         + text.strip()[:300])
+    if pack_dir is not None:
+        incident = pack_dir / "INCIDENT.md"
+        if incident.is_file():
+            return incident.read_text(
+                encoding="utf-8", errors="replace")[:60000]
+    return text.rstrip()[:60000]
+
+
 # ---------------- REA bridge (Waves 1+3) ----------------
 import datetime as _rea_dt
 
@@ -4637,6 +4727,18 @@ class Handler(SimpleHTTPRequestHandler):
                 try:
                     out = eco_run(str(data.get("tool") or ""),
                                   WORKSPACE)
+                    return self.send_json({"ok": True,
+                                           "output": out})
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/toolrun":
+                # Track B: one-shot report runners for the
+                # bundled tools (see eco_toolrun).
+                data = self.read_json()
+                try:
+                    out = eco_toolrun(str(data.get("tool") or ""),
+                                      WORKSPACE,
+                                      str(data.get("path") or ""))
                     return self.send_json({"ok": True,
                                            "output": out})
                 except ValueError as e:

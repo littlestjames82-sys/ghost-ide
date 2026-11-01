@@ -141,7 +141,7 @@ flagged with values never shown).
 Done when: the panel verdict matches the CLI
 verdict on the review fixture.
 
-**E9. GhostScope + GhostExposure.**
+**E9. GhostScope + GhostExposure.** GhostExposure RUNNER WIRED v2.43.0 (generic tool runner; GhostScope still pending).
 Before commit: "what this change touches" (Scope)
 and the exposure evidence pack, in the Git panel.
 Done when: a fixture diff's scope lists the same
@@ -158,7 +158,7 @@ exactly the queued action.
 
 ## Arc 4 - Ops inside the IDE
 
-**E11. GhostEnv audit.**
+**E11. GhostEnv audit.** RUNNER WIRED v2.43.0 (generic tool runner, names-only as ever).
 Project health shows the .env audit: names only,
 missing / extra vs .env.example, values never
 rendered anywhere.
@@ -172,14 +172,14 @@ workspace, evidence only, no network.
 Done when: panel output matches the CLI on the
 mixed-language fixture.
 
-**E13. GhostLogs in the Run pane.**
+**E13. GhostLogs in the Run pane.** RUNNER WIRED v2.43.0 (Ecosystem panel runner form; run-pane embed still pending).
 "Slice this log": error windows plus deduped
 repeats become an incident pack, attachable to a
 chat message ("explain this failure").
 Done when: a planted 5,000-line log slices to the
 same incident pack the CLI produces, redactions on.
 
-**E14. GhostData + GhostSchema openers.**
+**E14. GhostData + GhostSchema openers.** RUNNER WIRED v2.43.0 (Ecosystem panel runner form; file-opener form still pending).
 CSV / TSV / JSON files open with schema + bounded
 sample (sensitive columns redacted); OpenAPI files
 open as an endpoint outline sliced by $ref
@@ -194,7 +194,7 @@ while the main one stays untouched.
 Done when: a worktree opens as a workspace, an
 agent edit lands only there, and removal is clean.
 
-**E16. GhostWatch + GhostReplay.**
+**E16. GhostWatch + GhostReplay.** GhostReplay RUNNER WIRED v2.43.0 (generic tool runner; GhostWatch still pending).
 A freshness feed (changes made outside the IDE
 appear live) and session replay: a scrubbable
 timeline of the session's edits and runs.
@@ -204,7 +204,7 @@ steps in order.
 
 ## Arc 5 - The board and the studio
 
-**E17. GhostConsole board.**
+**E17. GhostConsole board.** RUNNER WIRED v2.43.0 (console summary + Ledger + MCP Doctor via the generic tool runner; board cards still pending).
 A read-only board in the IDE aggregating every
 ecosystem tool's latest report for this workspace
 in Ryan's kanban form (Verified / Attention /
@@ -231,7 +231,7 @@ generated from the studio price book.
 Done when: a quote sheet generates fully offline
 from the price book and exports as a file.
 
-**E20. Seatbelt policy for agent mode (capstone).**
+**E20. Seatbelt policy for agent mode (capstone).** POLICY PACKS WIRED v2.43.0 (lite: approve-each / approved-plan / trusted-workspace RUN policies beside the Agent toggle; full Seatbelt pack enforcement still pending).
 Agent tool calls pass the released Agent Seatbelt
 core policy (allow / deny / approve), with the
 tamper-evident log viewable in the IDE.

@@ -176,10 +176,10 @@
    "tests_failed": 0
   },
   "ghostre": {
-   "version": "0.1.0",
+   "version": "0.2.0",
    "files": 4,
-   "src_bytes": 30907,
-   "tests_passed": 26,
+   "src_bytes": 46394,
+   "tests_passed": 33,
    "tests_failed": 0
   }
  },
