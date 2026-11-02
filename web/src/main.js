@@ -514,13 +514,40 @@ function isHiddenByCollapse(path) {
   return false;
 }
 
+/* Cycle 5 I7: tree order - the server's walk order
+   or a plain A-Z by path, remembered on-device. */
+let treeSortMode = (() => {
+  try {
+    return localStorage.getItem("ghostide.treeSort")
+      || "server";
+  } catch (e) { return "server"; }
+})();
+function treeOrder(files) {
+  if (treeSortMode !== "name") return files;
+  return files.slice().sort((a, b) =>
+    a.path.toLowerCase() < b.path.toLowerCase() ? -1
+    : a.path.toLowerCase() > b.path.toLowerCase() ? 1
+    : 0);
+}
+const treeSortBtn = $("treeSortBtn");
+if (treeSortBtn)
+  treeSortBtn.onclick = () => {
+    treeSortMode = treeSortMode === "name"
+      ? "server" : "name";
+    try {
+      localStorage.setItem("ghostide.treeSort",
+        treeSortMode);
+    } catch (e) { /* a nicety */ }
+    loadFiles();
+  };
+
 async function loadFiles() {
   const r = await fetch("/api/files");
   const d = await r.json();
   watchObserve(d.files || []);
   const tree = $("fileTree");
   tree.innerHTML = "";
-  for (const f of d.files) {
+  for (const f of treeOrder(d.files)) {
     if (fileFilterText) {
       /* Filter mode (Phase 10): matching files only, flat. */
       if (f.type !== "file") continue;
@@ -2959,6 +2986,10 @@ $("runBtn").onclick = async () => {
   $("runPane").classList.remove("hidden");
   $("runTitle").textContent = "Running " + currentFile + " …";
   $("runOut").textContent = "";
+  /* Cycle 5 I13: a plain run clears any Verify
+     problem rows left in the pane. */
+  const pb = $("runProblems");
+  if (pb) pb.textContent = "";
   const d = await postJson("/api/run", { path: currentFile });
   if (d.error) {
     $("runTitle").textContent = "Run unavailable";
@@ -2987,6 +3018,34 @@ $("runBtn").onclick = async () => {
 };
 $("runClose").onclick = () => $("runPane").classList.add("hidden");
 
+/* Cycle 5 I10: the last status payload, for the
+   copy-summary button in the Git panel head. */
+let lastGitStatus = null;
+const gitCopyBtn = $("gitCopyStatus");
+if (gitCopyBtn)
+  gitCopyBtn.onclick = async () => {
+    const d = lastGitStatus;
+    if (!d || !d.repo) {
+      alert("No git status loaded yet - open the " +
+        "Git panel first.");
+      return;
+    }
+    const line = "On branch " + (d.branch || "?") +
+      (d.ahead ? ", " + d.ahead + " ahead" : "") +
+      (d.behind ? ", " + d.behind + " behind" : "") +
+      ": " + ((d.changes || []).length) +
+      " uncommitted change(s).";
+    try {
+      await navigator.clipboard.writeText(line);
+      gitCopyBtn.textContent = "✓";
+      setTimeout(() => {
+        gitCopyBtn.textContent = "📋";
+      }, 1200);
+    } catch (e) {
+      alert("Clipboard was not available here.");
+    }
+  };
+
 async function refreshGit() {
   refreshGhRemote();
   const box = $("gitChanges");
@@ -2994,6 +3053,7 @@ async function refreshGit() {
   try {
     const r = await fetch("/api/git/status");
     const d = await r.json();
+    lastGitStatus = d;
     if (!d.repo) {
       $("gitBranch").textContent = "";
       $("gitLog").textContent = "";
@@ -4724,6 +4784,21 @@ async function openApprovePanel() {
       bar.appendChild(fb);
     }
     box.appendChild(bar);
+    /* Cycle 5 I9: free-text filter over the queue -
+       the kind buttons narrow by type; this narrows
+       by the words in the action itself. */
+    const search = document.createElement("input");
+    search.type = "search";
+    search.placeholder = "Filter by text…";
+    search.addEventListener("input", () => {
+      const q = search.value.trim().toLowerCase();
+      for (const r2 of box.querySelectorAll(
+          ".todorow[data-kind]"))
+        r2.style.display = !q ||
+          r2.textContent.toLowerCase().includes(q)
+          ? "" : "none";
+    });
+    box.appendChild(search);
   }
   for (const it of d.items || []) {
     const row = document.createElement("div");
@@ -5083,6 +5158,22 @@ async function openBoardPanel() {
   };
   gitRow.appendChild(gitB);
   box.appendChild(gitRow);
+  /* Cycle 5 I8: ask Ghost about the board, in the
+     same prefill-never-send shape as the other Ask
+     buttons. */
+  const askRow = document.createElement("div");
+  askRow.className = "todorow";
+  const askB = document.createElement("button");
+  askB.className = "ghostbtn";
+  askB.textContent = "💬 Ask Ghost about this board";
+  askB.onclick = () => {
+    $("todoPanel").classList.add("hidden");
+    askGhostWith("Board check",
+      "The studio board says: " + boardSummaryLine(d) +
+      ". What should I do next on this project?");
+  };
+  askRow.appendChild(askB);
+  box.appendChild(askRow);
   /* Cycle 2 I14: the project's last commit, so the board
      says how fresh the work is. */
   try {
@@ -6022,6 +6113,53 @@ if (healthDotEl)
     const sb = $("settingsBtn");
     if (sb) sb.click();
   };
+/* Cycle 5 I6: copy the settings JSON (preferences
+   only - no keys or tokens live in this object; those
+   stay in provider profiles and env names). */
+const copySettingsBtn = $("setCopySettings");
+if (copySettingsBtn)
+  copySettingsBtn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify(settings, null, 1));
+      copySettingsBtn.textContent = "✓ Copied";
+      setTimeout(() => {
+        copySettingsBtn.textContent = "Copy settings";
+      }, 1200);
+    } catch (e) {
+      alert("Clipboard was not available here.");
+    }
+  };
+/* Cycle 5 I12: one place to wipe the on-device
+   histories (eco runs, verify runs, terminal history,
+   recent files). Settings and chats are NOT touched. */
+const clearHistBtn = $("setClearHist");
+if (clearHistBtn)
+  clearHistBtn.onclick = () => {
+    if (!confirm("Clear the on-device histories? " +
+        "Eco runs, verify runs, terminal history and " +
+        "recent files. Settings and chats stay."))
+      return;
+    const keys = ["ghostide.ecoRuns",
+      "ghostide.verifyHistory", "ghostide.termHistory",
+      "ghostide-recent-files"];
+    /* The terminal's in-memory list would re-persist
+       itself on the next command - empty it too. */
+    try { termHistory.length = 0; } catch (e) {}
+    let n = 0;
+    for (const k of keys) {
+      try {
+        if (localStorage.getItem(k) !== null) n++;
+        localStorage.removeItem(k);
+      } catch (e) { /* counted as untouched */ }
+    }
+    clearHistBtn.textContent = "✓ Cleared " + n +
+      " store(s)";
+    setTimeout(() => {
+      clearHistBtn.textContent =
+        "Clear on-device histories";
+    }, 1500);
+  };
 /* Cycle 4 I10: What's new - the bundled changelog,
    readable in-app (until now only the newest entry
    ever surfaced, inside a chat answer). */
@@ -6144,6 +6282,19 @@ async function openEco() {
       rh.className = "dim";
       rh.textContent = "Recent runs: " + runs.map((r) =>
         r.tool + (r.ok ? "" : " (failed)")).join(", ");
+      /* Cycle 5 I11: the history can be cleared from
+         the same place it is shown. */
+      const clr = document.createElement("button");
+      clr.className = "ghostbtn";
+      clr.textContent = "Clear";
+      clr.onclick = () => {
+        try {
+          localStorage.removeItem("ghostide.ecoRuns");
+        } catch (e) { /* already gone */ }
+        rh.textContent = "Recent runs cleared.";
+      };
+      rh.appendChild(document.createTextNode(" "));
+      rh.appendChild(clr);
       $("todoResults").appendChild(rh);
     }
   } catch (e) { /* history is a nicety */ }
@@ -9099,6 +9250,16 @@ const COMMANDS = [
   { title: "Classroom view", run: () => $("toolClassroom").click() },
   { title: "Take the tour", run: () => $("toolTour").click() },
   { title: "What's new", run: () => $("toolChangelog").click() },
+  /* Cycle 5 I14/I15: this cycle's Settings and Files
+     actions join the palette, like the older ones. */
+  { title: "Toggle file tree order", run: () => {
+      const b = $("treeSortBtn");
+      if (b) b.click();
+    } },
+  { title: "Copy settings JSON", run: () => {
+      const b = $("setCopySettings");
+      if (b) b.click();
+    } },
   { title: "Add cursor on selected lines", run: () => cursorsOnSelectedLines(view) },
   { title: "Select all occurrences", run: () => selectAllOccurrences(view) },
   { title: "Encrypted backup", run: () => $("toolBackup").click() },
@@ -12869,6 +13030,24 @@ $("toolVerify").onclick = async () => {
     return;
   }
   lastVerify = d;
+  /* Cycle 5 I13: the problems are structured
+     (path, line, message) - render them as rows that
+     open the file at the line, not just report text. */
+  const probBox = $("runProblems");
+  if (probBox) {
+    probBox.textContent = "";
+    for (const p of d.checks.problems || []) {
+      const row = document.createElement("div");
+      row.className = "findRow";
+      row.textContent = "⚠ " + p.path + ":" +
+        (p.line || 1) + "  " + (p.message || "");
+      row.onclick = async () => {
+        await openFile(p.path);
+        jumpToLine(p.line || 1);
+      };
+      probBox.appendChild(row);
+    }
+  }
   $("runTitle").textContent = "Verify: " + d.evidence.level +
     " · " + d.checks.checked + " checked, " +
     d.checks.problems.length + " problem(s) · tests " +

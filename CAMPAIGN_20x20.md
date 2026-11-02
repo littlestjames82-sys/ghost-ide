@@ -623,3 +623,30 @@ upload is attempted unless he asks for a link.
       A20: verdicts here + Cycle 4 posture note in
       BUILD_NOTES. CYCLE 4 COMPLETE: improvements
       v2.71-v2.74, audits v2.75-v2.78.
+- [x] C5-I6 DONE (v2.80): Settings Copy settings -
+      the preferences JSON to the clipboard (the
+      object was read first: no keys or tokens live
+      in it, so the copy cannot leak a credential).
+- [x] C5-I7 DONE (v2.80): file tree order toggle
+      (server order / A-Z by path), persisted.
+- [x] C5-I8 DONE (v2.80): board panel Ask Ghost
+      button (prefill from the summary line).
+- [x] C5-I9 DONE (v2.80): approval queue free-text
+      filter beside the kind buttons.
+- [x] C5-I10 DONE (v2.80): Git panel copy-status
+      button (branch, distance, change count from
+      the last live payload).
+- [x] C5-I11 DONE (v2.81): eco Recent runs gains a
+      Clear button where the history is shown.
+- [x] C5-I12 DONE (v2.81): Settings Clear on-device
+      histories - eco runs, verify runs, terminal
+      history (store AND in-memory list, so it cannot
+      resurrect), recent files. Settings/chats stay.
+- [x] C5-I13 DONE (v2.81): Verify problems render as
+      clickable rows (the server's problems were
+      verified structured {path, line, message});
+      plain runs clear stale rows.
+- [x] C5-I14 DONE (v2.81): palette gains Toggle file
+      tree order (mirrors C5-I7).
+- [x] C5-I15 DONE (v2.81): palette gains Copy
+      settings JSON (mirrors C5-I6).
