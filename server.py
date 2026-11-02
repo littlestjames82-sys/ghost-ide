@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.63.0"
+APP_VERSION = "2.65.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -5075,7 +5075,22 @@ class Handler(SimpleHTTPRequestHandler):
                 p = safe_path(data["path"])
                 p.parent.mkdir(parents=True, exist_ok=True)
                 snapshot_history(p, data.get("content", ""))
-                p.write_text(data.get("content", ""))
+                # Cycle 3 I11: atomic write - temp file in
+                # the same folder, then os.replace, so a
+                # crash mid-save can never leave a torn
+                # file (the snapshot stays the recovery
+                # for everything else). Closes the A14
+                # residual noted since Cycle 1.
+                tmp = p.parent / (".%s.tmp-%d"
+                                  % (p.name, os.getpid()))
+                try:
+                    tmp.write_text(data.get("content", ""))
+                    os.replace(tmp, p)
+                finally:
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
                 return self.send_json({"ok": True, "path": data["path"]})
             if parsed.path == "/api/dir":
                 data = self.read_json()

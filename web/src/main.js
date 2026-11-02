@@ -533,6 +533,8 @@ async function loadFiles() {
          change on disk until they are opened. */
       if (watchChanged.has(f.path))
         el.textContent += " ●";
+      if (gitDirtyPaths.has(f.path))
+        el.textContent += " ◆";
       if (f.path === currentFile) el.classList.add("active");
       el.onclick = () => openFile(f.path);
     }
@@ -2987,6 +2989,10 @@ async function refreshGit() {
       return;
     }
     $("gitBranch").textContent = d.branch || "";
+    /* Cycle 3 I6: feed the tree's dirty markers. */
+    gitDirtyPaths.clear();
+    for (const c of d.changes || [])
+      if (c.path) gitDirtyPaths.add(c.path);
     const scopeEl = $("gitScopeLine");
     if (scopeEl)
       scopeEl.textContent = d.scope_line
@@ -4597,8 +4603,19 @@ async function openApprovePanel() {
     row.className = "todorow";
     row.dataset.kind = kindOf(it);
     const label = document.createElement("span");
+    /* Cycle 3 I14: how long the request has waited. */
+    let ageTxt = "";
+    if (it.ingested_at) {
+      const t = Date.parse(it.ingested_at);
+      if (!isNaN(t)) {
+        const m = Math.max(0,
+          Math.round((Date.now() - t) / 60000));
+        ageTxt = " - waiting " + (m < 60
+          ? m + "m" : Math.round(m / 60) + "h");
+      }
+    }
     label.textContent = it.action + " - risk " + it.risk +
-      " - " + (it.summary || "");
+      ageTxt + " - " + (it.summary || "");
     row.appendChild(label);
     for (const dec of ["approve", "deny"]) {
       const b = document.createElement("button");
@@ -4739,6 +4756,11 @@ let watchBase = null;
 /* Cycle 2 I18: paths the watcher saw change on disk and
    the user has not opened since; the tree dots them. */
 const watchChanged = new Set();
+/* Cycle 3 I6: paths git reports as changed but
+   uncommitted; the tree marks them with a diamond.
+   Filled by refreshGit, so markers land one refresh
+   behind the fetch - the watch cycle converges it. */
+const gitDirtyPaths = new Set();
 function watchSnapshot(files) {
   const m = new Map();
   for (const f of files)
@@ -5130,6 +5152,22 @@ if (runAskBtn)
   runAskBtn.onclick = () => askGhostWith(
     "Explain this output and what to do about it:",
     $("runOut").textContent);
+const runCopyBtn = $("runCopy");
+if (runCopyBtn)
+  runCopyBtn.onclick = async () => {
+    /* Cycle 3 I9: the pane title is the one-line verdict
+       (Verify writes its summary there); copy that. */
+    try {
+      await navigator.clipboard.writeText(
+        $("runTitle").textContent || "");
+      runCopyBtn.textContent = "✓ Copied";
+      setTimeout(() => {
+        runCopyBtn.textContent = "📋 Copy summary";
+      }, 1200);
+    } catch (e) {
+      alert("Clipboard was not available here.");
+    }
+  };
 /*@@BOARDDATA-END@@*/
 
 /*@@CAMPAIGN1@@*/
@@ -5475,6 +5513,40 @@ if (termSliceBtn)
     }
     termSliceBtn.disabled = false;
   };
+const termRunFileBtn = $("termRunFile");
+if (termRunFileBtn)
+  termRunFileBtn.onclick = async () => {
+    /* Cycle 3 I7: run the editor's current file in the
+       REPL session (the in-editor text, so unsaved work
+       counts; capped so a huge file can't flood it). */
+    if (!currentFile) {
+      alert("Open a file first.");
+      return;
+    }
+    const text = view.state.doc.toString();
+    if (text.length > 20000) {
+      alert("That file is over 20,000 characters - run " +
+        "it in pieces instead.");
+      return;
+    }
+    termRunFileBtn.disabled = true;
+    try {
+      const d = await postJson("/api/repl", { input: text });
+      const out = $("termOut");
+      out.textContent += d.output || "";
+      out.scrollTop = out.scrollHeight;
+    } catch (e) {
+      alert("The REPL run failed to reach the server.");
+    }
+    termRunFileBtn.disabled = false;
+  };
+const termClearBtn = $("termClear");
+if (termClearBtn)
+  termClearBtn.onclick = () => {
+    /* Cycle 3 I10: clear the pane only; the session
+       (terminal cwd, REPL globals) keeps running. */
+    $("termOut").textContent = "";
+  };
 const termAskBtn = $("termAsk");
 if (termAskBtn)
   termAskBtn.onclick = () => askGhostWith(
@@ -5499,7 +5571,11 @@ openMcpPanel = async function () {
     const note = document.createElement("div");
     note.className = "dim";
     note.textContent = "Live sessions: " + d.sessions.map(
-      (s) => s.server + " (" + s.calls + " calls)").join(", ");
+      (s) => s.server + " (" + s.calls + " calls" +
+        (s.age_s != null
+          ? ", " + Math.round(s.age_s / 60) + "m old, idle " +
+            Math.round((s.idle_s || 0) / 60) + "m"
+          : "") + ")").join(", ");
     todoResults.appendChild(note);
     /* Cycle 3 I1: restart one session at a time. */
     for (const s of d.sessions) {
@@ -5581,7 +5657,10 @@ async function refreshMcpInfo() {
     const ss = (d && d.sessions) || [];
     el.textContent = ss.length
       ? ss.map((s) => s.server + " (" + s.calls +
-          " call" + (s.calls === 1 ? "" : "s") + ")")
+          " call" + (s.calls === 1 ? "" : "s") +
+          (s.idle_s != null
+            ? ", idle " + Math.round(s.idle_s / 60) + "m"
+            : "") + ")")
           .join(", ")
       : "none live";
   } catch (e) { el.textContent = "unavailable"; }
@@ -5647,6 +5726,19 @@ if (runFixBtn)
   };
 /*@@CAMPAIGN4-END@@*/
 
+/* Cycle 3 I8: keep the last eight eco runs on-device. */
+function noteEcoRun(tool, ok) {
+  try {
+    const key = "ghostide.ecoRuns";
+    const runs = JSON.parse(localStorage.getItem(key)
+      || "[]");
+    runs.unshift({ tool, ok: !!ok,
+                   at: Date.now() });
+    localStorage.setItem(key,
+      JSON.stringify(runs.slice(0, 8)));
+  } catch (e) { /* history is a nicety */ }
+}
+
 async function openEco() {
   hideTools();
   $("todoTitle").textContent = "Ecosystem tools";
@@ -5662,6 +5754,18 @@ async function openEco() {
   ecoHead.textContent = tools.length + " tools in the catalog. " +
     "Ready tools run here against this workspace.";
   $("todoResults").appendChild(ecoHead);
+  /* Cycle 3 I8: recent eco runs on this device. */
+  try {
+    const runs = JSON.parse(localStorage.getItem(
+      "ghostide.ecoRuns") || "[]");
+    if (runs.length) {
+      const rh = document.createElement("div");
+      rh.className = "dim";
+      rh.textContent = "Recent runs: " + runs.map((r) =>
+        r.tool + (r.ok ? "" : " (failed)")).join(", ");
+      $("todoResults").appendChild(rh);
+    }
+  } catch (e) { /* history is a nicety */ }
   /* Cycle 2 I11: filter the catalog as you type. */
   const ecoSearch = document.createElement("input");
   ecoSearch.type = "search";
@@ -5702,6 +5806,7 @@ async function openEco() {
           const rr = await (await fetch("/api/eco/run", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ tool: t.id }) })).json();
+          noteEcoRun(t.name, !rr.error);
           $("todoResults").textContent = rr.error ||
             (t.name + " report:\n\n" + (rr.output || "(no output)"));
         } catch (e) { $("todoResults").textContent = "The run failed to reach the server."; }
@@ -5725,6 +5830,7 @@ async function openEco() {
         try {
           const rr = await postJson("/api/eco/toolrun",
             { tool: t.id, path });
+          noteEcoRun(t.name, !rr.error);
           $("todoResults").textContent = rr.error ||
             (t.name + " report:\n\n" + (rr.output || "(no output)"));
         } catch (e) { $("todoResults").textContent = "The run failed to reach the server."; }
@@ -8148,6 +8254,9 @@ function openTermPane(mode) {
   hideTools();
   termMode = mode;
   $("termPane").classList.remove("hidden");
+  /* Cycle 3 I7: Run file only makes sense for the REPL. */
+  const rf = $("termRunFile");
+  if (rf) rf.style.display = mode === "repl" ? "" : "none";
   if (mode === "repl") {
     $("termTitle").textContent =
       "Python REPL · session stays alive between lines";

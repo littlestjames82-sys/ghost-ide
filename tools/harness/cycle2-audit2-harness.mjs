@@ -30,9 +30,12 @@ ck("A8 new sinks are textContent (commit line, dots, packs)",
 const ecoState = JSON.parse(readFileSync(home +
   "/workspace/ghost-ide/tools/eco-bundle-state.json",
   "utf8"));
-ck("A9 bundle pins: 29 tools, Cycle 2 versions held",
+ck("A9 bundle pins: 29 tools, versions held",
    Object.keys(ecoState.tools).length === 29 &&
    ecoState.tools.ghostdata.version === "0.1.1" &&
-   ecoState.tools.ghostmcp.version === "0.3.0");
+   // ghostmcp was 0.3.0 at the Cycle 2 audit; Cycle 3
+   // I1 bumped it to 0.3.1 (drop verb) with a fresh
+   // GREEN gate, so the pin moves with the gate state.
+   ecoState.tools.ghostmcp.version === "0.3.1");
 console.log(`RESULT ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

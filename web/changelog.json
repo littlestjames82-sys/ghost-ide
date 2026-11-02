@@ -3,6 +3,18 @@
  "kind": "changelog",
  "entries": [
   {
+   "version": "2.65.0",
+   "date": "Nov 1, 2026",
+   "goal": "Campaign Cycle 3 batch 3: atomic writes, bundle self-check, idle reaping, queue wait times, session ages",
+   "summary": "The hardening batch closes the oldest open note in the audit book: file saves are now atomic on both servers (temporary file plus rename, snapshots still taken first), so a crash mid-save can no longer leave a torn file. The build's self-check now reaches into the bundled tool zip and refuses to ship if its tool count or key versions drift from the audited pins. MCP sessions idle for thirty minutes are reaped instead of holding processes forever, approval requests show how long they have been waiting, and session readouts show age and idle time. The daemon behaviors are covered by new tests in GhostMCP's own suite."
+  },
+  {
+   "version": "2.64.0",
+   "date": "Nov 1, 2026",
+   "goal": "Campaign Cycle 3 batch 2: git-dirty tree markers, REPL run-file, eco run history, copy summary, terminal clear",
+   "summary": "Files git knows are dirty now carry a diamond in the tree, next to the watcher's changed-on-disk dot, so the two kinds of 'changed' stop being confused. The REPL gains a Run file button that executes the editor's current text (unsaved work included, size-capped) - proven live with a multi-line program. Ecosystem tool runs keep an on-device history shown at the top of the panel, failures marked. The Run pane can copy its one-line summary (the Verify verdict) to the clipboard, and the terminal pane can clear its output without killing the session."
+  },
+  {
    "version": "2.63.0",
    "date": "Nov 1, 2026",
    "goal": "Campaign Cycle 3 batch 1: per-server MCP restart, paired devices, git-aware agent, pack viewer, openable renders",

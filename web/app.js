@@ -33197,6 +33197,8 @@
         el.textContent = fileIcon(f.path) + " " + baseName;
         if (watchChanged.has(f.path))
           el.textContent += " \u25CF";
+        if (gitDirtyPaths.has(f.path))
+          el.textContent += " \u25C6";
         if (f.path === currentFile) el.classList.add("active");
         el.onclick = () => openFile(f.path);
       }
@@ -35505,6 +35507,9 @@
         return;
       }
       $("gitBranch").textContent = d.branch || "";
+      gitDirtyPaths.clear();
+      for (const c of d.changes || [])
+        if (c.path) gitDirtyPaths.add(c.path);
       const scopeEl = $("gitScopeLine");
       if (scopeEl)
         scopeEl.textContent = d.scope_line ? "Last Scope: " + d.scope_line : "";
@@ -37041,7 +37046,18 @@
       row.className = "todorow";
       row.dataset.kind = kindOf(it);
       const label = document.createElement("span");
-      label.textContent = it.action + " - risk " + it.risk + " - " + (it.summary || "");
+      let ageTxt = "";
+      if (it.ingested_at) {
+        const t2 = Date.parse(it.ingested_at);
+        if (!isNaN(t2)) {
+          const m = Math.max(
+            0,
+            Math.round((Date.now() - t2) / 6e4)
+          );
+          ageTxt = " - waiting " + (m < 60 ? m + "m" : Math.round(m / 60) + "h");
+        }
+      }
+      label.textContent = it.action + " - risk " + it.risk + ageTxt + " - " + (it.summary || "");
       row.appendChild(label);
       for (const dec2 of ["approve", "deny"]) {
         const b = document.createElement("button");
@@ -37188,6 +37204,7 @@
     };
   var watchBase = null;
   var watchChanged = /* @__PURE__ */ new Set();
+  var gitDirtyPaths = /* @__PURE__ */ new Set();
   function watchSnapshot(files) {
     const m = /* @__PURE__ */ new Map();
     for (const f of files)
@@ -37567,6 +37584,21 @@
       "Explain this output and what to do about it:",
       $("runOut").textContent
     );
+  var runCopyBtn = $("runCopy");
+  if (runCopyBtn)
+    runCopyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(
+          $("runTitle").textContent || ""
+        );
+        runCopyBtn.textContent = "\u2713 Copied";
+        setTimeout(() => {
+          runCopyBtn.textContent = "\u{1F4CB} Copy summary";
+        }, 1200);
+      } catch (e) {
+        alert("Clipboard was not available here.");
+      }
+    };
   function saveTrail(task, trail) {
     if (!trail || !trail.length) return;
     postJson("/api/eco/replay/save", { task, trail }).catch(() => {
@@ -37913,6 +37945,34 @@
       }
       termSliceBtn.disabled = false;
     };
+  var termRunFileBtn = $("termRunFile");
+  if (termRunFileBtn)
+    termRunFileBtn.onclick = async () => {
+      if (!currentFile) {
+        alert("Open a file first.");
+        return;
+      }
+      const text = view.state.doc.toString();
+      if (text.length > 2e4) {
+        alert("That file is over 20,000 characters - run it in pieces instead.");
+        return;
+      }
+      termRunFileBtn.disabled = true;
+      try {
+        const d = await postJson("/api/repl", { input: text });
+        const out = $("termOut");
+        out.textContent += d.output || "";
+        out.scrollTop = out.scrollHeight;
+      } catch (e) {
+        alert("The REPL run failed to reach the server.");
+      }
+      termRunFileBtn.disabled = false;
+    };
+  var termClearBtn = $("termClear");
+  if (termClearBtn)
+    termClearBtn.onclick = () => {
+      $("termOut").textContent = "";
+    };
   var termAskBtn = $("termAsk");
   if (termAskBtn)
     termAskBtn.onclick = () => askGhostWith(
@@ -37930,7 +37990,7 @@
       const note = document.createElement("div");
       note.className = "dim";
       note.textContent = "Live sessions: " + d.sessions.map(
-        (s) => s.server + " (" + s.calls + " calls)"
+        (s) => s.server + " (" + s.calls + " calls" + (s.age_s != null ? ", " + Math.round(s.age_s / 60) + "m old, idle " + Math.round((s.idle_s || 0) / 60) + "m" : "") + ")"
       ).join(", ");
       todoResults.appendChild(note);
       for (const s of d.sessions) {
@@ -37996,7 +38056,7 @@
     try {
       const d = await postJson("/api/mcp/sessions", {});
       const ss = d && d.sessions || [];
-      el.textContent = ss.length ? ss.map((s) => s.server + " (" + s.calls + " call" + (s.calls === 1 ? "" : "s") + ")").join(", ") : "none live";
+      el.textContent = ss.length ? ss.map((s) => s.server + " (" + s.calls + " call" + (s.calls === 1 ? "" : "s") + (s.idle_s != null ? ", idle " + Math.round(s.idle_s / 60) + "m" : "") + ")").join(", ") : "none live";
     } catch (e) {
       el.textContent = "unavailable";
     }
@@ -38048,6 +38108,22 @@
       if (tg) tg.checked = true;
       if (ta) ta.focus();
     };
+  function noteEcoRun(tool, ok) {
+    try {
+      const key = "ghostide.ecoRuns";
+      const runs = JSON.parse(localStorage.getItem(key) || "[]");
+      runs.unshift({
+        tool,
+        ok: !!ok,
+        at: Date.now()
+      });
+      localStorage.setItem(
+        key,
+        JSON.stringify(runs.slice(0, 8))
+      );
+    } catch (e) {
+    }
+  }
   async function openEco() {
     hideTools();
     $("todoTitle").textContent = "Ecosystem tools";
@@ -38066,6 +38142,18 @@
     ecoHead.className = "dim";
     ecoHead.textContent = tools.length + " tools in the catalog. Ready tools run here against this workspace.";
     $("todoResults").appendChild(ecoHead);
+    try {
+      const runs = JSON.parse(localStorage.getItem(
+        "ghostide.ecoRuns"
+      ) || "[]");
+      if (runs.length) {
+        const rh = document.createElement("div");
+        rh.className = "dim";
+        rh.textContent = "Recent runs: " + runs.map((r2) => r2.tool + (r2.ok ? "" : " (failed)")).join(", ");
+        $("todoResults").appendChild(rh);
+      }
+    } catch (e) {
+    }
     const ecoSearch = document.createElement("input");
     ecoSearch.type = "search";
     ecoSearch.placeholder = "Filter tools\u2026";
@@ -38101,6 +38189,7 @@
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ tool: t2.id })
             })).json();
+            noteEcoRun(t2.name, !rr.error);
             $("todoResults").textContent = rr.error || t2.name + " report:\n\n" + (rr.output || "(no output)");
           } catch (e) {
             $("todoResults").textContent = "The run failed to reach the server.";
@@ -38128,6 +38217,7 @@
               "/api/eco/toolrun",
               { tool: t2.id, path }
             );
+            noteEcoRun(t2.name, !rr.error);
             $("todoResults").textContent = rr.error || t2.name + " report:\n\n" + (rr.output || "(no output)");
           } catch (e) {
             $("todoResults").textContent = "The run failed to reach the server.";
@@ -40500,6 +40590,8 @@
     hideTools();
     termMode = mode;
     $("termPane").classList.remove("hidden");
+    const rf = $("termRunFile");
+    if (rf) rf.style.display = mode === "repl" ? "" : "none";
     if (mode === "repl") {
       $("termTitle").textContent = "Python REPL \xB7 session stays alive between lines";
       $("termCwd").textContent = "";

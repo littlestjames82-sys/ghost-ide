@@ -130,6 +130,7 @@ setTimeout(function () {
     <div id="runPane" class="hidden">
       <div class="run-head"><span id="runTitle">Output</span>
         <span><button id="runSlice" title="GhostLogs: slice this output into an incident pack (error windows, duplicates collapsed)">🔪 Slice log</button>
+        <button id="runCopy" title="Copy the one-line summary (the pane title) to the clipboard">📋 Copy summary</button>
         <button id="runAsk" title="Put this output in the chat box so you can ask Ghost about it">💬 Ask Ghost</button>
         <button id="runFix" title="After a Verify run: draft an agent fix task from the gaps it found (fills the chat box, never sends)">🛠 Draft fix task</button>
         <button id="runClose">✕</button></span></div>
@@ -148,6 +149,8 @@ setTimeout(function () {
       <div class="run-head"><span><span id="termTitle">Terminal · workspace folder · local shell (unsandboxed)</span> <span id="termCwd"></span></span>
         <span><button id="termSlice" title="GhostLogs: slice the terminal output into an incident pack">🔪 Slice log</button>
         <button id="termAsk" title="Put the terminal output in the chat box so you can ask Ghost about it">💬 Ask Ghost</button>
+        <button id="termRunFile" title="REPL only: run the current file in this REPL session">▶ Run file</button>
+        <button id="termClear" title="Clear the pane output (the session itself keeps running)">🧹 Clear</button>
         <button id="termReset">↺ Session</button>
         <button id="termClose">✕</button></span></div>
       <pre id="termOut"></pre>

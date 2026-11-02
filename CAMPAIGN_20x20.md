@@ -456,3 +456,38 @@ run-all) with a summary line.
 - [x] C3-I5 DONE (v2.63): studio renders verb returns
       JSON on both servers; Recipes shelf lists renders
       with Open buttons (openFile into .ghostide).
+- [x] C3-I6 DONE (v2.64): git-dirty tree markers -
+      refreshGit fills gitDirtyPaths from the status
+      changes; rows append a diamond (distinct from the
+      watch dot; converges one refresh behind).
+- [x] C3-I7 DONE (v2.64): REPL Run file button (repl
+      mode only) sends the editor's current text (20k
+      cap) to /api/repl. Live-proven: a multi-line
+      program executed as one block with correct output.
+- [x] C3-I8 DONE (v2.64): eco run history - both Run
+      paths note outcomes to localStorage (last 8); the
+      panel head shows Recent runs with failures marked.
+- [x] C3-I9 DONE (v2.64): Run pane Copy summary button
+      copies the pane title (Verify's one-line verdict)
+      with a copied confirmation state.
+- [x] C3-I10 DONE (v2.64): terminal Clear button
+      empties the pane output only; the session (cwd,
+      REPL globals) keeps running - distinct from the
+      existing Session reset.
+- [x] C3-I11 DONE (v2.65): atomic writes both servers -
+      desktop /api/file saves via same-dir temp +
+      os.replace after the snapshot; Java writeFile via
+      temp sibling + ATOMIC_MOVE (rename fallback). The
+      A14 residual recorded since Cycle 1 is CLOSED.
+- [x] C3-I12 DONE (v2.65): build.sh self-check extended
+      into the bundle - eco.zip tool count must equal
+      the gate state and ghostmcp/ghostdata versions
+      must match the pins, else the build fails.
+- [x] C3-I13 DONE (v2.65): daemon idle reaping -
+      sessions idle over 1800s close lazily on the next
+      daemon touch (GhostMCP 0.3.2); suite-tested.
+- [x] C3-I14 DONE (v2.65): approve rows show the wait
+      (from GhostApprove's ingested_at, m/h text).
+- [x] C3-I15 DONE (v2.65): sessions readout gains
+      age_s + idle_s; panel shows age + idle, Settings
+      shows idle.
