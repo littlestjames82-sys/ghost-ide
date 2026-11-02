@@ -159,7 +159,8 @@ const settings = Object.assign(
     activeLine: true, chatFs: "13",
     chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false, wrapChat: false,
     roleLabels: true, sliceBudget: 6000,
-    attachSelection: true, attachDiff: false },
+    attachSelection: true, attachDiff: false,
+    agentRepairRounds: 3 },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
 /*@@AUTOSAVE@@*/
 /* Autosave has ONE shape (v2.37 untangle): a mode
@@ -6152,7 +6153,14 @@ if (settingsBtnEl)
    and every panel then fails one by one with no
    single signal; the dot is that signal. It polls
    only while the page is visible. */
-async function pollHealth() {
+/* Renamed in Cycle 5 (A10 catch): this health-dot
+   poller shared its name with the model-status
+   pollHealth above, and the duplicate declaration
+   made esbuild refuse the bundle - silently, behind
+   a piped tail that masked the exit code. The built
+   bundle froze at the last good build until A10's
+   freshness check caught it. */
+async function pollHealthDot() {
   const dot = $("healthDot");
   if (!dot) return;
   if (document.hidden) return;
@@ -6167,8 +6175,8 @@ async function pollHealth() {
       "until it is back.";
   }
 }
-setInterval(pollHealth, 60000);
-pollHealth();
+setInterval(pollHealthDot, 60000);
+pollHealthDot();
 /* Cycle 5 I4: tapping the dot opens Settings, where
    the About line carries the same health detail. */
 const healthDotEl = $("healthDot");
@@ -10289,6 +10297,9 @@ const AGENT_RULES = [
   "STEP_DONE. Never batch WRITE, EDIT, RUN or DELETE.",
   "Rules: never invent file contents - READ a file before",
   "rewriting it. Keep every WRITE and EDIT syntactically valid.",
+  "DONE is gated: if your staged files fail their automatic",
+  "checks, DONE is refused and the failures come back to you",
+  "to fix first (a limited number of repair rounds).",
   "Do not explain outside the action line. You have at most "
     + AGENT_MAX_STEPS + " actions.",
 ].join("\n");
@@ -10654,12 +10665,18 @@ async function agentToolText(act) {
     if (act.type === "verify") {
       const d = await postJson("/api/verify/run", {});
       if (d.error) return "VERIFY failed: " + d.error;
+      /* Cycle 6 I3: the problems themselves, compactly -
+         counts alone made the agent guess where to fix. */
+      const probs = (d.checks.problems || []).slice(0, 10)
+        .map((p) => "⚠ " + p.path + ":" + (p.line || 1) +
+          " " + (p.message || "")).join("\n");
       return "Verify pipeline: evidence level " +
         d.evidence.level + "; " + d.checks.checked +
         " checked, " + d.checks.problems.length +
         " problem(s); tests " + d.tests.passed + "/" +
-        d.tests.total + " passed.\nReport:\n" +
-        (d.report || "").slice(0, 5000);
+        d.tests.total + " passed." +
+        (probs ? "\nProblems:\n" + probs : "") +
+        "\nReport:\n" + (d.report || "").slice(0, 5000);
     }
     if (act.type === "test") {
       const d = await postJson("/api/tests/run",
@@ -11044,6 +11061,32 @@ async function runAgent(task, opts) {
   let outcome = "cap";
   let summary = "";
   let nudges = 0;
+  /* Cycle 6 I1/I4/I5: self-repair accounting - DONE
+     is gated on the staged checks, identical repeated
+     actions are detected, and both are counted for
+     the end-of-run summary and the trail. */
+  let repairs = 0;
+  let lastSig = "";
+  let sigCount = 0;
+  const repairCap = Math.max(0, Math.min(5,
+    Number(settings.agentRepairRounds ?? 3) || 0));
+  async function doneGate() {
+    if (!staged.size || repairs >= repairCap) return true;
+    const notes = [];
+    for (const [p, c] of staged)
+      notes.push(await agentCheckOne(p, c));
+    const bad = notes.filter((n) => n.includes("PROBLEM"));
+    if (!bad.length) return true;
+    repairs++;
+    addMsg("SYSTEM", "🛠 DONE held: " + bad.length +
+      " staged check(s) failing (repair round " +
+      repairs + "/" + repairCap + ")");
+    messages.push({ role: "user", content: "DONE refused: " +
+      "your staged changes fail their automatic checks:\n" +
+      bad.join("\n") + "\nFix them with WRITE or EDIT, " +
+      "then finish with DONE again." });
+    return false;
+  }
   for (let step = 1; step <= AGENT_MAX_STEPS; step++) {
     if (thermalWatchdog() === "stop") {
       addMsg("SYSTEM", "🌡 Agent stopped: the device " +
@@ -11079,6 +11122,19 @@ async function runAgent(task, opts) {
     trail.push({ step: step, type: act.type,
       target: act.path || act.command || act.query ||
         act.server || "" });
+    /* Cycle 6 I4: identical-action loop detection. */
+    const sig = act.type + "|" + (act.path || "") + "|" +
+      (act.command || "") + "|" + (act.query || "");
+    if (sig === lastSig) sigCount++; else {
+      lastSig = sig; sigCount = 1;
+    }
+    if (sigCount >= 4) {
+      addMsg("SYSTEM", "🔁 Agent stopped: the same action " +
+        "repeated " + sigCount + " times in a row (" +
+        act.type + "). Nothing was written.");
+      outcome = "looping";
+      break;
+    }
     if (act.type === "read") {
       const content = await readForAgent(act.path);
       addMsg("SYSTEM", "📖 READ " + act.path);
@@ -11294,9 +11350,14 @@ async function runAgent(task, opts) {
       const t = await agentToolText(act);
       messages.push({ role: "user", content: t + "\nContinue." });
     } else if (act.type === "done") {
-      outcome = "done";
-      summary = act.summary;
-      break;
+      /* Cycle 6 I1: the self-repair gate - DONE with
+         staged changes first proves they pass their
+         automatic checks, up to the repair cap. */
+      if (await doneGate()) {
+        outcome = "done";
+        summary = act.summary;
+        break;
+      }
     } else if (act.type === "ask") {
       addMsg("GHOST", "❓ " + act.question);
       outcome = "asked";
@@ -11316,7 +11377,19 @@ async function runAgent(task, opts) {
         "MCP, DONE, or ASK - or a batch of read-only " +
         "actions, one per line." });
     }
+    /* Cycle 6 I4: the third identical action earns a
+       warning inside the conversation (the fourth
+       stopped the run above). */
+    if (sigCount === 3)
+      messages.push({ role: "user", content: "Warning: " +
+        "you have repeated the same action 3 times. If " +
+        "it is not producing new information, change " +
+        "approach or finish with DONE." });
   }
+  /* Cycle 6 I5: run accounting rides the trail. */
+  if (repairs)
+    trail.push({ step: 0, type: "repairs",
+      target: repairs + " repair round(s)" });
   saveTrail(task, trail, (Date.now() - agentT0) / 1000);
   sendBtn.textContent = "Send";
   sendBtn.onclick = oldSend;
@@ -11348,7 +11421,11 @@ async function runAgent(task, opts) {
       " - review the " + staged.size + " file change(s)" +
       (deletions.size ? " and " + deletions.size +
         " deletion(s)" : "") + " below. Nothing is saved " +
-      "until you approve.");
+      "until you approve." +
+      /* Cycle 6 I5: the run's accounting, in the open. */
+      " (Run: " + trail.filter((t) => t.step > 0).length +
+      " step(s), " + repairs + " repair round(s), " +
+      Math.round((Date.now() - agentT0) / 1000) + "s.)");
     openAgentReview({ staged, deletions, checkpoints, todos,
       task });
   } else if (outcome === "done") {
@@ -11648,6 +11725,29 @@ async function openAgentReview(review) {
       " file(s) saved" + (nd ? ", " + nd + " deleted" : "") +
       (ckptPath ? ". Undo point saved: " + ckptPath +
         " (Chat options: Checkpoints)." : "."));
+    /* Cycle 6 I2: applying changes verifies them on
+       disk automatically - the staged checks could
+       not run the project's tests against unwritten
+       files, so this is where the full pipeline
+       gets its say. Problems prefill a fix task. */
+    try {
+      const vd = await postJson("/api/verify/run", {});
+      if (vd && !vd.error && vd.checks) {
+        const probs = vd.checks.problems || [];
+        addMsg("SYSTEM", "🔍 Post-apply verify: " +
+          vd.evidence.level + " - " + vd.checks.checked +
+          " checked, " + probs.length + " problem(s); " +
+          "tests " + vd.tests.passed + "/" + vd.tests.total +
+          " passed.");
+        if (probs.length)
+          askGhostWith("Fix the verify problems",
+            "The applied changes left " + probs.length +
+            " verify problem(s): " + probs.slice(0, 5)
+              .map((p) => p.path + ":" + (p.line || 1) +
+                " " + (p.message || "")).join("; ") +
+            ". Fix them.");
+      }
+    } catch (e) { /* verify stays available manually */ }
   };
   refreshApply();
   box.appendChild(applyRow);

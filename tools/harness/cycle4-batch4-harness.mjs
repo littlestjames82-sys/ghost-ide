@@ -28,7 +28,10 @@ ck("I19 About counts workspace files",
    src.includes('fetch("/api/files")'));
 ck("I20 health dot polls visibly and explains itself",
    html.includes('id="healthDot"') &&
-   src.includes("setInterval(pollHealth, 60000)") &&
+   /* The dot poller was renamed pollHealthDot in
+      Cycle 5: it had shared its name with the model
+      poller, which froze the bundle build (A10). */
+   src.includes("setInterval(pollHealthDot, 60000)") &&
    src.includes('"Server unreachable'));
 console.log(`RESULT ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

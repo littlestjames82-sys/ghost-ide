@@ -680,3 +680,92 @@ upload is attempted unless he asks for a link.
       eco/info, files, git/log.
 - [x] C5-A5 PASS (v2.83): eco gate green; generation
       e13, 29 tools, ghostmcp 0.3.2 unchanged.
+- [x] C5-A6 PASS (v2.84): timeouts intact (120/50/30
+      pins, both runners).
+- [x] C5-A7 PASS (v2.84): GitHub push modes and the
+      signer remain script constants (lineage by
+      construction).
+- [x] C5-A8 PASS (v2.84): sink census on the built
+      bundle UNCHANGED at 101 across all twenty
+      Cycle 5 features - every new surface used
+      textContent/createElement.
+- [x] C5-A9 PASS (v2.84): eco stamp e13 consistent
+      (gate + Java ensureEco + build self-check).
+- [x] C5-A10 PASS (v2.84): bundle freshness - the
+      built bundle carries this cycle's markers
+      (git/show route, palette entries); DOM-stub
+      gate passed in the release ritual.
+- [x] C5-A10 CORRECTED (v2.84): the freshness check
+      FAILED first - the bundle had frozen at the
+      16:11 build because two health pollers shared
+      the name pollHealth and esbuild refused every
+      build since, masked by a piped tail in the
+      ritual. v2.79-v2.83 APKs carried a pre-Cycle-5
+      frontend (servers current). Fixed by renaming
+      the dot poller pollHealthDot, un-piping the
+      build step, keeping A10's marker pin permanent,
+      and verifying freshness inside the APK asset.
+      v2.84 is the first Cycle 5 APK whose interface
+      contains all twenty improvements.
+- [x] C5-A11 PASS (v2.85): signer verified LIVE on
+      the v2.84 APK (SHA-256 8ea8684a..., unbroken).
+- [x] C5-A12 PASS (v2.85): census re-derived at
+      137 desktop / 127 Java - exactly the Cycle 4
+      baseline plus I16's deliberate route pair.
+- [x] C5-A13 PASS (v2.85): datapack name pins and
+      traversal refusal unchanged.
+- [x] C5-A14 PASS (v2.85): history delta wording
+      honest both ways (KB figures only at >= 1 KB;
+      sub-KB reads "about the same size as now").
+- [x] C5-A15 PASS (v2.85): malformed JSON probed
+      live on current code - clean {error} answers,
+      health 200 after; body cap unchanged.
+- [x] C5-A16 PASS (v2.86): leak sweep - zero
+      canary/key-shaped strings in shipped sources.
+- [x] C5-A17 PASS (v2.86): one decide route per
+      server; Deny all and every decision ride it
+      (live ledger proof stands from Cycle 4 A17).
+- [x] C5-A18 PASS (v2.86): caps re-pinned, incl.
+      the new show route's 20000-char cap both
+      servers.
+- [x] C5-A19 PASS (v2.86): verify problem rows
+      render from structured fields via textContent;
+      priming names changes without overstating.
+- [x] C5-A20 PASS (v2.86): version ritual held
+      (2.86.0/191, five sources, gate enforced).
+      CYCLE 5 COMPLETE: improvements v2.79-v2.82,
+      audits v2.83-v2.86, suite 113/113. Headline:
+      A10 caught the frozen bundle - the cycle's
+      most valuable audit outcome.
+
+# Cycle 6 - THE AGENTIC CYCLE (Ryan, Nov 2, 2026: "Run the full agentic cycle")
+Scope set by Ryan after the gap inventory: self-repair,
+batching depth, budgets, sub-runs, agent memory,
+background runs. Scouting corrected the inventory
+before building: read batching, VERIFY/TEST actions,
+per-file staged checks, and a stop flag ALREADY
+exist. The real gaps are enforcement and depth:
+nothing makes the agent verify before DONE, batches
+run sequentially, there is no loop detection, no
+sub-run delegation, no agent-written memory, no
+pause/queue, and no run accounting. Releases:
+improvements v2.87-v2.90, audits v2.91-v2.94.
+Same delivery rule: build + push, no uploads.
+- [x] C6-I1 DONE (v2.87): DONE gate - with staged
+      changes, DONE first runs every staged file's
+      automatic check; failures refuse DONE and feed
+      back for repair (cap: settings.agentRepairRounds,
+      default 3, max 5). Rules text tells the model.
+- [x] C6-I2 DONE (v2.87): post-apply verify - the
+      review's Apply now runs the full pipeline on
+      disk and reports it; problems prefill a fix
+      task (never auto-sent).
+- [x] C6-I3 DONE (v2.87): VERIFY action returns the
+      problem lines (path:line message, up to 10),
+      not just counts.
+- [x] C6-I4 DONE (v2.87): identical-action loop
+      detection - warning injected at 3 repeats, run
+      stops as "looping" at 4.
+- [x] C6-I5 DONE (v2.87): run accounting - repairs
+      ride the trail record; the end-of-run line
+      reports steps, repair rounds, and seconds.
