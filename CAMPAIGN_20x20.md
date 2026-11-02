@@ -341,3 +341,23 @@ hammer on the session daemon + approve store together).
 - [x] C2-A5 PASS (v2.59): hash binding intact - decide
       still passes the record's hash to GhostApprove;
       the I8 kind filter is display-only DOM code.
+- [x] C2-A6 PASS (v2.60): Cycle 2 routes (datapacks,
+      datapack/delete, mcp/sessions, mcp/restart) exist
+      on both servers; pack mtime is seconds on both.
+- [x] C2-A7 PASS, DEEPENED (v2.60): canary hunted through
+      the NEW outputs - board JSON, datapack list, MCP
+      sessions, eco/info - all clean; GhostData analyze
+      of a canary-header CSV through the IDE carried
+      zero canary occurrences (the C2-I4 redaction
+      holding in the integrated path). Pack contents
+      remain same-user-by-design (created by the user's
+      own Pack tap on their own file).
+- [x] C2-A8 PASS (v2.60): Cycle 2 DOM sinks are
+      textContent (board commit line, tree dots, watch
+      links, pack list, verify history).
+- [x] C2-A9 PASS (v2.60): gate state holds 29 tools at
+      the Cycle 2 pins (ghostdata 0.1.1, ghostmcp 0.3.0,
+      ghostconsole suite 103); nothing bundled changed
+      since the e11 gate.
+- [x] C2-A10 PASS (v2.60): version gate ritual (five
+      sources agree before the build starts).
