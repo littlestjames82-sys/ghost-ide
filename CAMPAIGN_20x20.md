@@ -533,3 +533,25 @@ run-all) with a summary line.
       (/api/eco/datapacks object entries; view returns
       {ok, output}). All 7 traversal-shaped names are
       refused by the view pin, same as delete.
+
+## Cycle 4 (defined Nov 2, 2026, on Ryan's "Continue")
+Improvements v2.71-v2.74 (C4-I1-I20), audits v2.75-
+v2.78 deepening A6 (new-route parity), A12 (new UI
+labels), A17 (hammer incl. restarts), A19 (new label
+honesty). Delivery rule this cycle: build + push only
+- Ryan declined the v2.66 and v2.70 uploads, so no
+upload is attempted unless he asks for a link.
+- [x] C4-I1 DONE (v2.71): git ahead/behind - the
+      porcelain branch header's [ahead N, behind M] is
+      parsed on both servers and shown by the branch
+      name (zeros hidden). Live-proven both ways.
+- [x] C4-I2 DONE (v2.71): tree folder rows show their
+      descendant file count, counted from the list the
+      server already sends (no extra fetch).
+- [x] C4-I3 DONE (v2.71): status bar gains selection
+      word count (lines/chars already existed).
+- [x] C4-I4 DONE (v2.71): terminal/REPL history
+      persists on-device (localStorage, last 50) - it
+      used to die with the page.
+- [x] C4-I5 DONE (v2.71): terminal pane Copy button
+      (the Run pane's copy pattern, applied to termOut).

@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.69.0"
+APP_VERSION = "2.71.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -4807,10 +4807,21 @@ class Handler(SimpleHTTPRequestHandler):
                                            "error": err.strip()[:200]})
                 lines = out.splitlines()
                 branch = ""
+                ahead = 0
+                behind = 0
                 changes = []
                 for ln in lines:
                     if ln.startswith("## "):
+                        # Cycle 4 I1: the branch header
+                        # already carries [ahead N, behind M]
+                        # when an upstream is configured.
                         branch = ln[3:].split("...")[0].strip()
+                        m_a = _re_mod.search(r"ahead (\d+)", ln)
+                        m_b = _re_mod.search(r"behind (\d+)", ln)
+                        if m_a:
+                            ahead = int(m_a.group(1))
+                        if m_b:
+                            behind = int(m_b.group(1))
                     elif len(ln) > 3:
                         changes.append({"index": ln[0], "worktree": ln[1],
                                         "path": ln[3:].strip()})
@@ -4829,6 +4840,7 @@ class Handler(SimpleHTTPRequestHandler):
                     except OSError:
                         scope_line = ""
                 return self.send_json({"repo": True, "branch": branch,
+                                       "ahead": ahead, "behind": behind,
                                        "changes": changes,
                                        "scope_line": scope_line})
             if parsed.path == "/api/git/remote":

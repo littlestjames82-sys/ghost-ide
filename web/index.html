@@ -72,6 +72,7 @@ setTimeout(function () {
     <input id="fileFilter" type="text" placeholder="Filter files…">
     <div id="wsPath" class="hint"></div>
     <div id="watchFeed" class="dim"></div>
+    <div class="dim">● changed on disk · ◆ uncommitted in git</div>
     <div id="fileTree"></div>
     <div id="gitPanel">
       <div class="panel-head"><span id="gitHeadTxt">GIT</span> <span id="gitBranch" class="tag"></span></div>
@@ -150,6 +151,7 @@ setTimeout(function () {
         <span><button id="termSlice" title="GhostLogs: slice the terminal output into an incident pack">🔪 Slice log</button>
         <button id="termAsk" title="Put the terminal output in the chat box so you can ask Ghost about it">💬 Ask Ghost</button>
         <button id="termRunFile" title="REPL only: run the current file in this REPL session">▶ Run file</button>
+        <button id="termCopy" title="Copy the pane output to the clipboard">📋 Copy</button>
         <button id="termClear" title="Clear the pane output (the session itself keeps running)">🧹 Clear</button>
         <button id="termReset">↺ Session</button>
         <button id="termClose">✕</button></span></div>

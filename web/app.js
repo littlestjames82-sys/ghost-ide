@@ -33004,7 +33004,8 @@
             u.state.doc.lines,
             u.state.doc.length,
             selM.empty ? 0 : selM.to - selM.from,
-            selM.empty ? 0 : u.state.doc.lineAt(selM.to).number - line.number + 1
+            selM.empty ? 0 : u.state.doc.lineAt(selM.to).number - line.number + 1,
+            selM.empty ? 0 : (u.state.doc.sliceString(selM.from, selM.to).match(/\S+/g) || []).length
           );
           $("fileType").textContent = langName(currentFile);
           updateCrumbs();
@@ -33186,7 +33187,8 @@
       const baseName = f.path.split("/").pop();
       if (f.type === "dir") {
         const closed = collapsedDirs.has(f.path);
-        el.textContent = (closed ? "\u25B8 \u{1F4C1} " : "\u25BE \u{1F4C2} ") + baseName;
+        const kids = (d.files || []).filter((x) => x.type === "file" && x.path.startsWith(f.path + "/")).length;
+        el.textContent = (closed ? "\u25B8 \u{1F4C1} " : "\u25BE \u{1F4C2} ") + baseName + (kids ? " (" + kids + ")" : "");
         el.onclick = () => {
           if (closed) collapsedDirs.delete(f.path);
           else collapsedDirs.add(f.path);
@@ -34435,10 +34437,11 @@
     if (!ext || ext === path.toLowerCase()) return "Text";
     return LANG_NAMES[ext] || ext.toUpperCase();
   }
-  function cursorStatus(line, col, lines, chars, selLen, selLines) {
+  function cursorStatus(line, col, lines, chars, selLen, selLines, selWords) {
     let s = "Ln " + line + ", Col " + col + " \xB7 " + lines + " lines \xB7 " + chars + " chars";
     if (selLen > 0) {
       s += " \xB7 " + selLen + " selected";
+      if (selWords) s += " (" + selWords + " words)";
       if (selLines > 1) s += " (" + selLines + " lines)";
     }
     return s;
@@ -35506,7 +35509,7 @@
         box.appendChild(initBtn);
         return;
       }
-      $("gitBranch").textContent = d.branch || "";
+      $("gitBranch").textContent = (d.branch || "") + (d.ahead ? " \u2191" + d.ahead : "") + (d.behind ? " \u2193" + d.behind : "");
       gitDirtyPaths.clear();
       for (const c of d.changes || [])
         if (c.path) gitDirtyPaths.add(c.path);
@@ -38025,6 +38028,21 @@
         alert("The REPL run failed to reach the server.");
       }
       termRunFileBtn.disabled = false;
+    };
+  var termCopyBtn = $("termCopy");
+  if (termCopyBtn)
+    termCopyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(
+          $("termOut").textContent || ""
+        );
+        termCopyBtn.textContent = "\u2713 Copied";
+        setTimeout(() => {
+          termCopyBtn.textContent = "\u{1F4CB} Copy";
+        }, 1200);
+      } catch (e) {
+        alert("Clipboard was not available here.");
+      }
     };
   var termClearBtn = $("termClear");
   if (termClearBtn)
@@ -40653,7 +40671,26 @@
     await loadFiles();
     alert("Saved .ghostide-context.md (" + d.tokens.toLocaleString() + " tokens, " + d.files + " files).");
   };
-  var termHistory = [];
+  var termHistory = (() => {
+    try {
+      return JSON.parse(localStorage.getItem(
+        "ghostide.termHistory"
+      ) || "[]");
+    } catch (e) {
+      return [];
+    }
+  })();
+  function noteTermHistory(cmd2) {
+    termHistory.unshift(cmd2);
+    while (termHistory.length > 50) termHistory.pop();
+    try {
+      localStorage.setItem(
+        "ghostide.termHistory",
+        JSON.stringify(termHistory)
+      );
+    } catch (e) {
+    }
+  }
   var termIdx = -1;
   var termMode = "shell";
   function openTermPane(mode) {
@@ -40696,7 +40733,7 @@
     const out = $("termOut");
     if (termMode === "repl") {
       input.value = "";
-      if (cmd2.trim()) termHistory.unshift(cmd2);
+      if (cmd2.trim()) noteTermHistory(cmd2);
       termIdx = -1;
       out.textContent += cmd2 + "\n";
       const d2 = await postJson("/api/repl", { input: cmd2 });
@@ -40706,7 +40743,7 @@
       return;
     }
     if (!cmd2.trim()) return;
-    termHistory.unshift(cmd2);
+    noteTermHistory(cmd2);
     termIdx = -1;
     input.value = "";
     out.textContent += "$ " + cmd2 + "\n";

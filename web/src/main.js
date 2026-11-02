@@ -346,7 +346,10 @@ function baseExtensions(path) {
           selM.empty ? 0 : selM.to - selM.from,
           selM.empty ? 0 :
             u.state.doc.lineAt(selM.to).number -
-            line.number + 1);
+            line.number + 1,
+          selM.empty ? 0 :
+            (u.state.doc.sliceString(selM.from, selM.to)
+              .match(/\S+/g) || []).length);
         $("fileType").textContent = langName(currentFile);
         updateCrumbs();
       }
@@ -520,7 +523,14 @@ async function loadFiles() {
     const baseName = f.path.split("/").pop();
     if (f.type === "dir") {
       const closed = collapsedDirs.has(f.path);
-      el.textContent = (closed ? "▸ 📁 " : "▾ 📂 ") + baseName;
+      /* Cycle 4 I2: how many files live under this
+         folder (counted from the full list the server
+         already sent - no extra fetch). */
+      const kids = (d.files || []).filter((x) =>
+        x.type === "file" &&
+        x.path.startsWith(f.path + "/")).length;
+      el.textContent = (closed ? "▸ 📁 " : "▾ 📂 ") + baseName +
+        (kids ? " (" + kids + ")" : "");
       el.onclick = () => {
         if (closed) collapsedDirs.delete(f.path);
         else collapsedDirs.add(f.path);
@@ -1744,11 +1754,14 @@ function langName(path) {
   return LANG_NAMES[ext] || ext.toUpperCase();
 }
 function cursorStatus(line, col, lines, chars, selLen,
-                      selLines) {
+                      selLines, selWords) {
   let s = "Ln " + line + ", Col " + col + " · " +
     lines + " lines · " + chars + " chars";
   if (selLen > 0) {
     s += " · " + selLen + " selected";
+    /* Cycle 4 I3: words in the selection - the one
+       everyday stat the bar did not carry. */
+    if (selWords) s += " (" + selWords + " words)";
     if (selLines > 1) s += " (" + selLines + " lines)";
   }
   return s;
@@ -2988,7 +3001,11 @@ async function refreshGit() {
       box.appendChild(initBtn);
       return;
     }
-    $("gitBranch").textContent = d.branch || "";
+    /* Cycle 4 I1: show upstream distance when git
+       reports it (zeros stay invisible). */
+    $("gitBranch").textContent = (d.branch || "") +
+      (d.ahead ? " ↑" + d.ahead : "") +
+      (d.behind ? " ↓" + d.behind : "");
     /* Cycle 3 I6: feed the tree's dirty markers. */
     gitDirtyPaths.clear();
     for (const c of d.changes || [])
@@ -5621,6 +5638,22 @@ if (termRunFileBtn)
       alert("The REPL run failed to reach the server.");
     }
     termRunFileBtn.disabled = false;
+  };
+const termCopyBtn = $("termCopy");
+if (termCopyBtn)
+  termCopyBtn.onclick = async () => {
+    /* Cycle 4 I5: the Run pane has had Copy summary
+       since Cycle 3; the terminal pane gets its own. */
+    try {
+      await navigator.clipboard.writeText(
+        $("termOut").textContent || "");
+      termCopyBtn.textContent = "✓ Copied";
+      setTimeout(() => {
+        termCopyBtn.textContent = "📋 Copy";
+      }, 1200);
+    } catch (e) {
+      alert("Clipboard was not available here.");
+    }
   };
 const termClearBtn = $("termClear");
 if (termClearBtn)
@@ -8345,7 +8378,22 @@ $("toolSlice").onclick = async () => {
 /* Terminal (persistent desktop shell) + Python REPL (G10).
    Both keep server-side sessions: shell cwd/vars and REPL
    variables persist between commands. */
-const termHistory = [];
+/* Cycle 4 I4: history survives restarts (last 50,
+   on-device) - it used to die with the page. */
+const termHistory = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(
+      "ghostide.termHistory") || "[]");
+  } catch (e) { return []; }
+})();
+function noteTermHistory(cmd) {
+  termHistory.unshift(cmd);
+  while (termHistory.length > 50) termHistory.pop();
+  try {
+    localStorage.setItem("ghostide.termHistory",
+      JSON.stringify(termHistory));
+  } catch (e) { /* history is a nicety */ }
+}
 let termIdx = -1;
 let termMode = "shell";
 function openTermPane(mode) {
@@ -8394,7 +8442,7 @@ async function runTerm() {
   const out = $("termOut");
   if (termMode === "repl") {
     input.value = "";
-    if (cmd.trim()) termHistory.unshift(cmd);
+    if (cmd.trim()) noteTermHistory(cmd);
     termIdx = -1;
     out.textContent += cmd + "\n";
     const d = await postJson("/api/repl", { input: cmd });
@@ -8404,7 +8452,7 @@ async function runTerm() {
     return;
   }
   if (!cmd.trim()) return;
-  termHistory.unshift(cmd);
+  noteTermHistory(cmd);
   termIdx = -1;
   input.value = "";
   out.textContent += "$ " + cmd + "\n";
