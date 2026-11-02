@@ -572,3 +572,22 @@ upload is attempted unless he asks for a link.
       word wrap and Quick Open recents were scouted
       for this batch and found ALREADY covered - the
       picks above replaced them before building.
+- [x] C4-I16 DONE (v2.74): agent priming reports
+      upstream distance (ahead/behind commit counts)
+      alongside the branch line. (Pair revoke-all was
+      scouted first: already shipped since v2.32.)
+- [x] C4-I17 DONE (v2.74): Run pane Save output -
+      downloads the full pane text as a .log (Copy
+      summary only ever carried the title line).
+- [x] C4-I18 DONE (v2.74): MCP tools Refresh - the
+      panel refetches with refresh:true; the phone's
+      five-minute list cache skips its read (fresh
+      result still stored); the desktop daemon is
+      always live and ignores the flag.
+- [x] C4-I19 DONE (v2.74): Settings About counts the
+      workspace's files next to version/model.
+- [x] C4-I20 DONE (v2.74): header health dot polls
+      /api/health every 60s while visible; green with
+      version/workspace on the title, red with the
+      failure explained. CYCLE 4 IMPROVEMENTS COMPLETE
+      (v2.71-v2.74).

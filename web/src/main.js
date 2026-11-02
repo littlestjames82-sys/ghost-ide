@@ -4382,6 +4382,32 @@ async function openMcpPanel() {
         th.textContent = s.name + ": " +
           (td.tools || []).length + " tool(s).";
         box.appendChild(th);
+        /* Cycle 4 I18: refetch past the phone's
+           five-minute list cache when tools changed. */
+        const rfRow = document.createElement("div");
+        rfRow.className = "todorow";
+        const rf = document.createElement("button");
+        rf.className = "ghostbtn";
+        rf.textContent = "↻ Refresh tools";
+        rf.onclick = async () => {
+          rf.disabled = true; rf.textContent = "Refreshing…";
+          try {
+            const nd = await postJson("/api/mcp/tools",
+              { server: s.name, refresh: true });
+            if (!nd.error) {
+              th.textContent = s.name + ": " +
+                (nd.tools || []).length +
+                " tool(s) (refreshed).";
+              rf.textContent = "✓ Refreshed";
+            } else {
+              rf.textContent = nd.error;
+            }
+          } catch (e) {
+            rf.textContent = "Refresh failed";
+          }
+        };
+        rfRow.appendChild(rf);
+        box.appendChild(rfRow);
         for (const t of td.tools || []) {
           const tr = document.createElement("div");
           tr.className = "todorow";
@@ -5006,6 +5032,16 @@ async function openBoardPanel() {
   head.textContent = proj.name + " - board column: " +
     proj.column + ". " + (proj.column_reason || "");
   box.appendChild(head);
+  /* Cycle 4 I15: when the model carries more projects
+     than this workspace's own, list each one's column
+     too - the panel used to show only the first. */
+  for (const p of (d.projects || []).slice(1)) {
+    const row = document.createElement("div");
+    row.className = "dim";
+    row.textContent = p.name + " - board column: " +
+      p.column + ".";
+    box.appendChild(row);
+  }
   /* Cycle 3 I16: from the board straight to the Git
      panel - the board says where a project stands, the
      Git panel is where its changes get committed. */
@@ -5242,6 +5278,21 @@ if (runAskBtn)
   runAskBtn.onclick = () => askGhostWith(
     "Explain this output and what to do about it:",
     $("runOut").textContent);
+/* Cycle 4 I17: save the FULL output, not just the
+   summary line Copy carries. */
+const runSaveBtn = $("runSave");
+if (runSaveBtn)
+  runSaveBtn.onclick = () => {
+    const blob = new Blob([$("runOut").textContent || ""],
+      { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "ghostide-output-" +
+      new Date().toISOString().slice(0, 19)
+        .replace(/[:T]/g, "-") + ".log";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  };
 const runCopyBtn = $("runCopy");
 if (runCopyBtn)
   runCopyBtn.onclick = async () => {
@@ -5493,9 +5544,34 @@ async function openPackListPanel() {
         const v = await postJson(
           "/api/eco/datapack/view", { name });
         /* The view route returns {ok, output} - the
-           same shape the Data pane has always read. */
-        box.textContent = v.error ||
+           same shape the Data pane has always read.
+           Cycle 4 I14: the text lands beside a Copy
+           button instead of replacing the list. */
+        box.textContent = "";
+        const head = document.createElement("div");
+        head.className = "dim";
+        head.textContent = name;
+        box.appendChild(head);
+        const cp = document.createElement("button");
+        cp.className = "ghostbtn";
+        cp.textContent = "📋 Copy pack summary";
+        cp.onclick = async () => {
+          try {
+            await navigator.clipboard.writeText(
+              v.output || "");
+            cp.textContent = "✓ Copied";
+            setTimeout(() => {
+              cp.textContent = "📋 Copy pack summary";
+            }, 1200);
+          } catch (e2) {
+            alert("Clipboard was not available here.");
+          }
+        };
+        if (!v.error) box.appendChild(cp);
+        const pre = document.createElement("pre");
+        pre.textContent = v.error ||
           (v.output || "(empty pack summary)");
+        box.appendChild(pre);
       } catch (e) {
         box.textContent = "Could not reach the server.";
       }
@@ -5878,10 +5954,40 @@ async function refreshAbout() {
       " · workspace " + (d.workspace || "?") +
       " · model " + (d.model || "?") +
       (d.modelName ? " (" + d.modelName + ")" : "");
+    /* Cycle 4 I19: the workspace's size joins About -
+       a glanceable "how big is this project". */
+    try {
+      const fl = await (await fetch("/api/files")).json();
+      const n = (fl.files || []).filter((f) =>
+        f.type === "file").length;
+      el.textContent += " · " + n + " file(s)";
+    } catch (e) { /* the line stands without it */ }
   } catch (e) { el.textContent = "unavailable"; }
 }
 if (settingsBtnEl)
   settingsBtnEl.addEventListener("click", refreshAbout);
+/* Cycle 4 I20: a living health dot in the header. The
+   desktop server can die (or the phone's can stall)
+   and every panel then fails one by one with no
+   single signal; the dot is that signal. It polls
+   only while the page is visible. */
+async function pollHealth() {
+  const dot = $("healthDot");
+  if (!dot) return;
+  if (document.hidden) return;
+  try {
+    const d = await (await fetch("/api/health")).json();
+    dot.style.color = "#4caf7d";
+    dot.title = "Server up: GhostIDE " +
+      (d.version || "?") + " · " + (d.workspace || "");
+  } catch (e) {
+    dot.style.color = "#e5534b";
+    dot.title = "Server unreachable - panels will fail " +
+      "until it is back.";
+  }
+}
+setInterval(pollHealth, 60000);
+pollHealth();
 /* Cycle 4 I10: What's new - the bundled changelog,
    readable in-app (until now only the newest entry
    ever surfaced, inside a chat answer). */
@@ -5971,6 +6077,13 @@ async function openEco() {
   ecoHead.textContent = tools.length + " tools in the catalog. " +
     "Ready tools run here against this workspace.";
   $("todoResults").appendChild(ecoHead);
+  /* Cycle 4 I13: name the bundle generation here too
+     (Settings showed it; the catalog itself did not). */
+  fetch("/api/eco/info").then((r) => r.json()).then((d) => {
+    if (d && d.generation)
+      ecoHead.textContent += " Bundle generation " +
+        d.generation + ".";
+  }).catch(() => { /* the head line stands alone */ });
   /* Cycle 3 I8: recent eco runs on this device. */
   try {
     const runs = JSON.parse(localStorage.getItem(
@@ -9451,8 +9564,17 @@ $("toolHistory").onclick = async () => {
   for (const e of d.entries) {
     const row = document.createElement("div");
     row.className = "findRow";
+    /* Cycle 4 I11: size the snapshot against the file
+       as it stands now, so picking one is informed. */
+    const now = view ? view.state.doc.length : 0;
+    const delta = now ? (e.size === now ? " · same size as now"
+      : e.size < now
+        ? " · " + Math.max(1, Math.round((now - e.size)
+            / 1024)) + " KB smaller than now"
+        : " · " + Math.max(1, Math.round((e.size - now)
+            / 1024)) + " KB larger than now") : "";
     row.textContent = "🕘 " + fmtSnapTs(e.ts) + "  ·  " +
-      Math.max(1, Math.round(e.size / 1024)) + " KB";
+      Math.max(1, Math.round(e.size / 1024)) + " KB" + delta;
     row.onclick = async () => {
       const rr = await fetch("/api/history/file?path=" +
         encodeURIComponent(currentFile) + "&ts=" +
@@ -10539,7 +10661,32 @@ async function runAgent(task, opts) {
     if (gs && gs.branch)
       memText += "\n\nGit: on branch " + gs.branch + ", " +
         ((gs.changes || []).length) +
-        " changed file(s) not yet committed.";
+        " changed file(s) not yet committed." +
+        /* Cycle 4 I16: upstream distance joins the
+           priming (the fields landed with I1). */
+        (gs.ahead ? " " + gs.ahead + " commit(s) ahead " +
+          "of upstream." : "") +
+        (gs.behind ? " " + gs.behind + " commit(s) " +
+          "behind upstream." : "");
+  } catch (e) { /* optional */ }
+  /* Cycle 4 I12: test awareness - the agent should
+     know whether this workspace HAS tests before it
+     plans changes, and which style they follow. */
+  try {
+    const fl = await (await fetch("/api/files")).json();
+    const paths = (fl.files || []).filter((f) =>
+      f.type === "file").map((f) => f.path);
+    const tests = paths.filter((p) =>
+      /(^|\/)(tests?|__tests__)\//.test(p) ||
+      /(^|\/)test_[^/]*\.py$/.test(p) ||
+      /(_test|\.test|\.spec)\.[a-z]+$/.test(p));
+    if (tests.length)
+      memText += "\n\nTests: " + tests.length +
+        " test file(s) in this workspace (e.g. " +
+        tests[0] + "). Keep them passing.";
+    else
+      memText += "\n\nTests: no test files found in " +
+        "this workspace.";
   } catch (e) { /* optional */ }
   if (memText)
     addMsg("SYSTEM", "📚 Agent primed with project memory " +
