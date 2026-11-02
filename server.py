@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.57.0"
+APP_VERSION = "2.59.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -5822,6 +5822,12 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json(out)
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/mcp/restart":
+                # Cycle 2 I15: drop every persistent
+                # session; the next call respawns.
+                _MCP_DAEMON._stop()
+                globals()["_MCP_DAEMON_DOWN_UNTIL"] = 0.0
+                return self.send_json({"ok": True})
             if parsed.path == "/api/mcp/sessions":
                 # Cycle 2 I5: which servers the persistent
                 # daemon holds open + calls served.

@@ -297,3 +297,47 @@ hammer on the session daemon + approve store together).
       pinned to the data-pack- namespace); Data pane
       gains a Packs button (list + delete by exact name).
       Desktop routes fixture-proven live.
+- [x] C2-I14 DONE (v2.58): board panel shows the
+      project's last commit (hash + subject).
+- [x] C2-I15 DONE (v2.58): Settings MCP readout (live
+      sessions) + Restart sessions button; /api/mcp/
+      restart both servers (desktop stops the daemon,
+      phone clears its list cache); phone gains a
+      shape-parity /api/mcp/sessions (empty list).
+- [x] C2-I16 DONE (v2.58): palette gains the eight panel
+      openers (Approve, Board, Eco, MCP, Replay, Recipes,
+      Leads, QuoteShot).
+- [x] C2-I17 VERIFIED COVERED (v2.58): the auto-scroll
+      toggle already exists end to end (settings.
+      autoScroll + #setAutoScroll + shouldChatScroll in
+      addMsg and the stream path). No code needed.
+- [x] C2-I18 DONE (v2.58): watch-changed files carry a
+      dot in the tree until opened (watchChanged set fed
+      by watchTick; reloaded files clear theirs).
+- [x] C2-I19 VERIFIED COVERED + polish (v2.58): the REPL
+      shares the terminal pane, so I9's Slice/Ask already
+      operate on REPL output; the Ask lead is now
+      mode-aware ("REPL output" in repl mode).
+- [x] C2-I20 DONE (v2.58): build.sh self-check extracts
+      the signed APK's staged www assets and byte-
+      compares them with the web sources; a mismatch
+      fails the build before BUILD-OK.
+
+## Cycle 2 audits (A1-A20 re-run, deepening A7 + A17)
+- [x] C2-A1 PASS (v2.59): pair gate still precedes routing
+      in do_GET and do_POST; every Cycle 2 route sits
+      behind it by construction.
+- [x] C2-A2 PASS (v2.59): datapack/delete name pin probed
+      live with six traversal shapes (../, ..%2e, slashes,
+      absolute, bare prefix) - all refused; renders verb
+      is glob-scoped to .ghostide.
+- [x] C2-A3 PASS (v2.59): agent RUN/DELETE/MCP branches
+      still check the queue policy first; Cycle 2 touched
+      priming text only.
+- [x] C2-A4 PASS (v2.59): MCP execution still lives only
+      inside approve_decide (post-approval); the C2-I1
+      daemon sits below _mcp_cli and cannot be reached
+      by the agent without a decide.
+- [x] C2-A5 PASS (v2.59): hash binding intact - decide
+      still passes the record's hash to GhostApprove;
+      the I8 kind filter is display-only DOM code.

@@ -529,6 +529,10 @@ async function loadFiles() {
       };
     } else {
       el.textContent = fileIcon(f.path) + " " + baseName;
+      /* Cycle 2 I18: a dot marks files the watcher saw
+         change on disk until they are opened. */
+      if (watchChanged.has(f.path))
+        el.textContent += " ●";
       if (f.path === currentFile) el.classList.add("active");
       el.onclick = () => openFile(f.path);
     }
@@ -703,6 +707,7 @@ function closeTab(p) {
 }
 
 async function openFile(path, skipGuard) {
+  watchChanged.delete(path);
   if (window.innerWidth <= 900) setDrawer(false);
   if (/\.(db|sqlite3?)$/i.test(path)) { openDbStudio(path); return; }
   if (path === currentFile) return;
@@ -4731,6 +4736,9 @@ if (wtAddBtn)
   };
 
 let watchBase = null;
+/* Cycle 2 I18: paths the watcher saw change on disk and
+   the user has not opened since; the tree dots them. */
+const watchChanged = new Set();
 function watchSnapshot(files) {
   const m = new Map();
   for (const f of files)
@@ -4786,6 +4794,14 @@ async function watchTick() {
         reloaded.push(p);
       else changed.push(p);
     }
+    /* Cycle 2 I18: keep the tree's change dots current. */
+    for (const entry of changed) {
+      const p = entry.replace(/ \((new|gone)\)$/, "");
+      if (entry.endsWith(" (gone)")) watchChanged.delete(p);
+      else watchChanged.add(p);
+    }
+    for (const p of reloaded) watchChanged.delete(p);
+    if (changed.length || reloaded.length) loadFiles();
     if (reloaded.length && reloaded.includes(currentFile))
       watchNote = "↻ Reloaded " +
         currentFile.split("/").pop() +
@@ -4893,6 +4909,19 @@ async function openBoardPanel() {
   head.textContent = proj.name + " - board column: " +
     proj.column + ". " + (proj.column_reason || "");
   box.appendChild(head);
+  /* Cycle 2 I14: the project's last commit, so the board
+     says how fresh the work is. */
+  try {
+    const lg = await (await fetch("/api/git/log")).json();
+    const top = (lg.commits || [])[0];
+    if (top) {
+      const lc = document.createElement("div");
+      lc.className = "dim";
+      lc.textContent = "Last commit: " + top.hash +
+        " " + top.subject;
+      box.appendChild(lc);
+    }
+  } catch (e) { /* not a repo; the board still works */ }
   const groups = { "Verified": [], "Attention": [],
                    "Stale": [] };
   for (const s of proj.sections || []) {
@@ -5402,7 +5431,11 @@ if (termSliceBtn)
 const termAskBtn = $("termAsk");
 if (termAskBtn)
   termAskBtn.onclick = () => askGhostWith(
-    "Explain this terminal output and what to do about it:",
+    /* Cycle 2 I19: the REPL shares this pane (and these
+       buttons, from I9); name the output for the mode. */
+    termMode === "repl"
+      ? "Explain this REPL output and what to do about it:"
+      : "Explain this terminal output and what to do about it:",
     $("termOut").textContent);
 /*@@CAMPAIGN2-END@@*/
 
@@ -5471,6 +5504,31 @@ if (settingsBtnEl)
       el.textContent = "unavailable";
     }
   });
+/* Cycle 2 I15: the Settings MCP readout + restart. */
+async function refreshMcpInfo() {
+  const el = $("setMcpInfo");
+  if (!el) return;
+  try {
+    const d = await postJson("/api/mcp/sessions", {});
+    const ss = (d && d.sessions) || [];
+    el.textContent = ss.length
+      ? ss.map((s) => s.server + " (" + s.calls +
+          " call" + (s.calls === 1 ? "" : "s") + ")")
+          .join(", ")
+      : "none live";
+  } catch (e) { el.textContent = "unavailable"; }
+}
+const setMcpRestartBtn = $("setMcpRestart");
+if (setMcpRestartBtn)
+  setMcpRestartBtn.onclick = async () => {
+    setMcpRestartBtn.disabled = true;
+    try { await postJson("/api/mcp/restart", {}); }
+    catch (e) {}
+    await refreshMcpInfo();
+    setMcpRestartBtn.disabled = false;
+  };
+if (settingsBtnEl)
+  settingsBtnEl.addEventListener("click", refreshMcpInfo);
 const runFixBtn = $("runFix");
 if (runFixBtn)
   runFixBtn.onclick = () => {
@@ -8429,6 +8487,14 @@ const COMMANDS = [
   { title: "Reference docs", run: () => $("toolRefdocs").click() },
   { title: "Macros", run: () => $("toolMacros").click() },
   { title: "Verify pipeline", run: () => $("toolVerify").click() },
+  { title: "Approve queue", run: () => $("toolApprove").click() },
+  { title: "Ecosystem board", run: () => $("toolBoard").click() },
+  { title: "Ecosystem tools", run: () => $("toolEco").click() },
+  { title: "MCP servers", run: () => $("toolMcp").click() },
+  { title: "Session replay", run: () => $("toolReplay").click() },
+  { title: "Recipes shelf", run: () => $("toolRecipes").click() },
+  { title: "Leads", run: () => $("toolLeads").click() },
+  { title: "QuoteShot", run: () => $("toolQuote").click() },
   { title: "Big-screen mode", run: () => $("toolBigscreen").click() },
   { title: "Keyboard shortcuts", run: () => $("toolKeys").click() },
   { title: "Export app state", run: () => $("toolStateExport").click() },
