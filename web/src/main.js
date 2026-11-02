@@ -2721,6 +2721,14 @@ async function sendChat() {
   }
   if ($("agentToggle") && $("agentToggle").checked) {
     ta.value = "";
+    /* Cycle 6 I18: a task sent while the agent is busy
+       queues instead of bouncing off the run. */
+    if (agentRunning) {
+      agentQueue.push(text);
+      addMsg("SYSTEM", "📥 Agent busy - task queued (#" +
+        agentQueue.length + "): " + text.slice(0, 80));
+      return;
+    }
     runAgent(text);
     return;
   }
@@ -10294,6 +10302,28 @@ const AGENT_MAX_STEPS = 50;
 const AGENT_PLAN_MAX_STEPS = 20;
 let agentRunning = false;
 let agentStop = false;
+/* Cycle 6 I16-I18: run control - a status pill that
+   outlives the chat view, a pause flag the loops
+   honor between steps, and a FIFO task queue. */
+let agentPause = false;
+const agentQueue = [];
+function agentPillShow(label) {
+  const pill = $("agentPill");
+  if (!pill) return;
+  pill.classList.remove("hidden");
+  const t = $("agentPillTxt");
+  if (t) t.textContent = label;
+  const pb = $("agentPillPause");
+  if (pb) pb.textContent = agentPause ? "▶" : "⏸";
+}
+function agentPillStep(text) {
+  const t = $("agentPillTxt");
+  if (t && agentRunning) t.textContent = text;
+}
+function agentPillHide() {
+  const pill = $("agentPill");
+  if (pill) pill.classList.add("hidden");
+}
 const AGENT_RULES = [
   "You are Ghost in AGENT MODE. Complete the task by",
   "replying with exactly ONE action per message:",
@@ -10759,6 +10789,28 @@ if (agentPolicySel) {
     } catch (e) {}
   };
 }
+/* Cycle 6 I16-I18: pill controls. Pause toggles the
+   flag the loops honor between steps; Stop is the
+   same agentStop the Send button sets; tapping the
+   label jumps back to the chat view. */
+const agentPillPauseBtn = $("agentPillPause");
+if (agentPillPauseBtn)
+  agentPillPauseBtn.onclick = () => {
+    agentPause = !agentPause;
+    agentPillPauseBtn.textContent = agentPause ? "▶" : "⏸";
+    agentPillStep(agentPause
+      ? "⏸ Agent paused - tap ▶ to resume"
+      : "🤖 Agent working…");
+  };
+const agentPillStopBtn = $("agentPillStop");
+if (agentPillStopBtn)
+  agentPillStopBtn.onclick = () => { agentStop = true; };
+const agentPillTxtEl = $("agentPillTxt");
+if (agentPillTxtEl)
+  agentPillTxtEl.onclick = () => {
+    const vc = $("viewChat");
+    if (vc) vc.click();
+  };
 /* Cycle 6 I6: the agent's budgets are user settings -
    step cap for ACT runs and the DONE-gate repair
    rounds from batch 1, both in Chat options. */
@@ -10891,6 +10943,8 @@ async function runAgent(task, opts) {
   }
   agentRunning = true;
   agentStop = false;
+  agentPause = false;
+  agentPillShow("🤖 " + task.slice(0, 60));
   const trail = [];
   const agentT0 = Date.now();
   const staged = new Map(Object.entries(opts.staged || {}));
@@ -10975,7 +11029,15 @@ async function runAgent(task, opts) {
       parts = await Promise.all(acts.map(batchPart));
     } else {
       parts = [];
-      for (const a of acts) parts.push(await batchPart(a));
+      for (const a of acts) {
+        /* Cycle 6 I19: a sequential batch honors Stop
+           between actions, not just between steps. */
+        if (agentStop) {
+          parts.push("(batch stopped by the user)");
+          break;
+        }
+        parts.push(await batchPart(a));
+      }
     }
     persist();
     renderAgentTodos(todos, checkpoints);
@@ -11323,7 +11385,16 @@ async function runAgent(task, opts) {
         "reached severe heat. (Thermal guard.)");
       agentStop = true;
     }
+    /* Cycle 6 I17: pause holds the run between steps
+       (Stop still lands immediately). */
+    while (agentPause && !agentStop) {
+      agentPillStep("⏸ Agent paused at step " + step +
+        " - tap ▶ to resume");
+      await new Promise((r) => setTimeout(r, 400));
+    }
     if (agentStop) { outcome = "stopped"; break; }
+    agentPillStep("🤖 step " + step + "/" + stepCap +
+      " · " + task.slice(0, 40));
     addMsg("SYSTEM", "🤖 step " + step + "/" + stepCap);
     /* Cycle 6 I8: a meter line every ten steps. */
     if (step > 1 && step % 10 === 1)
@@ -11693,10 +11764,25 @@ async function runAgent(task, opts) {
       task });
   } else if (outcome === "done") {
     agentActiveClear();
-    addMsg("GHOST", "🤖 Done: " + summary);
+    /* Cycle 6 I20: the accounting shows on every
+       completion, not only when changes are staged. */
+    addMsg("GHOST", "🤖 Done: " + summary + " (Run: " +
+      trail.filter((t) => t.step > 0).length + " step(s), " +
+      repairs + " repair round(s), " +
+      Math.round((Date.now() - agentT0) / 1000) + "s.)");
   }
+  agentPillHide();
   notifyDone("Agent finished",
     "The agent task ended (" + outcome + ").", agentT0);
+  /* Cycle 6 I18: drain the queue - the next task starts
+     with fresh priming, like any run. */
+  if (agentQueue.length) {
+    const nextTask = agentQueue.shift();
+    addMsg("SYSTEM", "▶ Starting queued task (" +
+      agentQueue.length + " left): " +
+      nextTask.slice(0, 80));
+    setTimeout(() => runAgent(nextTask), 50);
+  }
 }
 
 async function runPlan(task) {
@@ -11706,6 +11792,8 @@ async function runPlan(task) {
   }
   agentRunning = true;
   agentStop = false;
+  agentPause = false;
+  agentPillShow("📝 Planning: " + task.slice(0, 50));
   const trail = [];
   const planT0 = Date.now();
   let todos = [];
@@ -11890,6 +11978,7 @@ async function runPlan(task) {
   } else if (outcome === "stopped") {
     addMsg("SYSTEM", "Planning stopped. Nothing was changed.");
   }
+  agentPillHide();
   notifyDone("Plan finished",
     "The planning run ended (" + outcome + ").", planT0);
 }

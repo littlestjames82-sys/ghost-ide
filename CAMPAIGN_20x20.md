@@ -769,3 +769,21 @@ Same delivery rule: build + push, no uploads.
 - [x] C6-I5 DONE (v2.87): run accounting - repairs
       ride the trail record; the end-of-run line
       reports steps, repair rounds, and seconds.
+- [x] C6-I16 DONE (v2.90): agent status pill - fixed
+      chip visible from any view while a run or plan
+      is live, showing step and task; tap jumps to
+      Chat. (Styling in style.css with a
+      :not(.hidden) display rule - an inline flex
+      would have defeated the .hidden class.)
+- [x] C6-I17 DONE (v2.90): Pause/Resume on the pill -
+      the ACT loop holds between steps while paused;
+      Stop lands immediately through the same wait.
+- [x] C6-I18 DONE (v2.90): task queue - an agent task
+      sent while busy queues with a receipt; the run
+      drains FIFO into fresh-primed runs.
+- [x] C6-I19 DONE (v2.90): sequential batches honor
+      Stop between actions, not only between steps.
+- [x] C6-I20 DONE (v2.90): run accounting (steps,
+      repairs, seconds) now shows on every completion
+      line, not only when changes are staged.
+      CYCLE 6 IMPROVEMENTS COMPLETE (v2.87-v2.90).
