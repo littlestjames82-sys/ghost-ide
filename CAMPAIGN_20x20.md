@@ -265,3 +265,19 @@ hammer on the session daemon + approve store together).
       spacing); every pinned 2026-10 date in the suite
       converted; GhostConsole 103/103 green. Eco bundle
       generation e10 carries GhostMCP 0.3.0.
+- [x] C2-I2 DONE (v2.56): Java mcpListBody caches tools/
+      resources/prompts for 5 min keyed by config path +
+      verb + server, invalidated by config mtime; calls
+      never cached - parity with the desktop cache.
+- [x] C2-I4 DONE (v2.56): GhostData 0.1.1 display_name()
+      masks KEY=VALUE header tails (CANARY=<redacted>) in
+      schema, columns and redacted lists; suite 95/95;
+      canary verified gone from output. Bundle e11.
+- [x] C2-I6 DONE (v2.56): agent priming adds a one-line
+      Studio board summary (boardSummaryLine, shared with
+      the board panel).
+- [x] C2-I7 DONE (v2.56): replay rows gain Export .md -
+      a markdown transcript downloaded client-side.
+- [x] C2-I8 DONE (v2.56): approve panel gains a kind
+      filter bar (All/Run/Delete/MCP/Write/Other) when
+      more than one request waits.

@@ -85,9 +85,9 @@
    "tests_failed": 0
   },
   "ghostdata": {
-   "version": "0.1.0",
+   "version": "0.1.1",
    "files": 10,
-   "src_bytes": 91927,
+   "src_bytes": 92669,
    "tests_passed": 95,
    "tests_failed": 0
   },

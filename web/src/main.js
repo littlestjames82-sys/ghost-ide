@@ -4557,9 +4557,40 @@ async function openApprovePanel() {
       "own: approving records your decision and only then " +
       "does the IDE carry out that one action.";
   box.appendChild(head);
+  /* Cycle 2 I8: filter the queue by action kind (the
+     kind rides in the action text GhostApprove wrote). */
+  const kindOf = (it) => {
+    const a = String(it.action || "");
+    if (a.startsWith("Run command")) return "run";
+    if (a.startsWith("Delete")) return "delete";
+    if (a.startsWith("Call MCP")) return "mcp";
+    if (a.startsWith("Write")) return "write";
+    return "other";
+  };
+  if ((d.items || []).length > 1) {
+    const bar = document.createElement("div");
+    bar.className = "todorow";
+    const kinds = [["all", "All"], ["run", "Run"],
+      ["delete", "Delete"], ["mcp", "MCP"],
+      ["write", "Write"], ["other", "Other"]];
+    for (const [k, label] of kinds) {
+      const fb = document.createElement("button");
+      fb.className = "ghostbtn";
+      fb.textContent = label;
+      fb.onclick = () => {
+        for (const r2 of box.querySelectorAll(
+            ".todorow[data-kind]"))
+          r2.style.display = (k === "all" ||
+            r2.dataset.kind === k) ? "" : "none";
+      };
+      bar.appendChild(fb);
+    }
+    box.appendChild(bar);
+  }
   for (const it of d.items || []) {
     const row = document.createElement("div");
     row.className = "todorow";
+    row.dataset.kind = kindOf(it);
     const label = document.createElement("span");
     label.textContent = it.action + " - risk " + it.risk +
       " - " + (it.summary || "");
@@ -4798,6 +4829,26 @@ function askGhostWith(lead, text) {
   box.value = lead + "\n\n" + (text || "").slice(0, 6000);
   box.focus();
 }
+/* One-line board summary (Cycle 2 I6), shared by the
+   board panel header and the agent priming. */
+function boardSummaryLine(d) {
+  const proj = (d && d.projects || [])[0];
+  if (!proj) return "";
+  let ok = 0, stale = 0;
+  const attn = [];
+  for (const s of proj.sections || []) {
+    if (s.state === "ok") ok++;
+    else if (s.state === "absent") stale++;
+    else attn.push(s.tool || s.name || "section");
+  }
+  let line = proj.name + ": " + ok + " verified";
+  if (attn.length)
+    line += ", " + attn.length + " need attention (" +
+      attn.slice(0, 3).join(", ") + ")";
+  if (stale) line += ", " + stale + " stale";
+  return line;
+}
+
 async function openBoardPanel() {
   hideTools();
   $("todoTitle").textContent = "Ecosystem board";
@@ -5161,6 +5212,34 @@ async function openReplayPanel() {
       if (ta) ta.focus();
     };
     row.appendChild(rerun);
+    /* Cycle 2 I7: export the trail as a markdown
+       transcript the user can share or archive. */
+    const exp = document.createElement("button");
+    exp.className = "ghostbtn";
+    exp.textContent = "Export .md";
+    exp.onclick = async () => {
+      let rec;
+      try {
+        rec = await postJson("/api/eco/replay/get",
+          { id: s.id });
+      } catch (e) { return; }
+      if (rec.error) return;
+      const lines = ["# Agent run transcript", "",
+        "Task: " + (rec.task || ""), "",
+        "Saved: " + (rec.saved_at || ""), ""];
+      for (const e of rec.trail || [])
+        lines.push("- Step " + e.step + " - " +
+          String(e.type).toUpperCase() + " - " + e.target);
+      const blob = new Blob([lines.join("\n") + "\n"],
+        { type: "text/markdown" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "agent-run-" +
+        String(s.id || "trail").slice(0, 12) + ".md";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    };
+    row.appendChild(exp);
     const open = document.createElement("button");
     open.className = "ghostbtn";
     open.textContent = "Open";
@@ -9865,6 +9944,14 @@ async function runAgent(task, opts) {
         wts.map((w) => (w.path || "").split("/").pop() +
           " (" + (w.branch || "detached") + ")").join(", ") +
         ".";
+  } catch (e) { /* optional */ }
+  /* Board briefing (Cycle 2 I6): one line of studio
+     board state, so the agent knows what else is in
+     flight across the ecosystem. */
+  try {
+    const bd = await postJson("/api/eco/board", {});
+    const line = boardSummaryLine(bd);
+    if (line) memText += "\n\nStudio board: " + line + ".";
   } catch (e) { /* optional */ }
   if (memText)
     addMsg("SYSTEM", "📚 Agent primed with project memory " +
