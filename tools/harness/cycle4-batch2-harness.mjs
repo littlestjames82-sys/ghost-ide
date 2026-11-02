@@ -28,6 +28,6 @@ ck("I9 file filter persists and restores at boot",
 ck("I10 What's new renders the bundled changelog",
    html.includes('id="setWhatsNew"') &&
    src.includes('fetch("changelog.json")') &&
-   src.includes("(d.entries || []).slice(0, 6)"));
+   src.includes("all.slice(0, 6)"));  // C5-I3 refactored the slice; behavior kept + extended
 console.log(`RESULT ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -4470,6 +4470,32 @@ async function openMcpPanel() {
         rh.textContent = s.name + ": " +
           (rd.resources || []).length + " resource(s).";
         box.appendChild(rh);
+        /* Cycle 5 I5: resources get the same refresh
+           past the phone cache that tools got in C4. */
+        const rfRow = document.createElement("div");
+        rfRow.className = "todorow";
+        const rf = document.createElement("button");
+        rf.className = "ghostbtn";
+        rf.textContent = "↻ Refresh resources";
+        rf.onclick = async () => {
+          rf.disabled = true; rf.textContent = "Refreshing…";
+          try {
+            const nd = await postJson("/api/mcp/resources",
+              { server: s.name, refresh: true });
+            if (nd.error) {
+              rf.textContent = nd.error;
+              return;
+            }
+            /* The cache now holds the fresh list;
+               re-render through the normal path. */
+            rb.disabled = false;
+            rb.onclick();
+          } catch (e) {
+            rf.textContent = "Refresh failed";
+          }
+        };
+        rfRow.appendChild(rf);
+        box.appendChild(rfRow);
         for (const r of rd.resources || []) {
           const rr = document.createElement("div");
           rr.className = "todorow";
@@ -5988,6 +6014,14 @@ async function pollHealth() {
 }
 setInterval(pollHealth, 60000);
 pollHealth();
+/* Cycle 5 I4: tapping the dot opens Settings, where
+   the About line carries the same health detail. */
+const healthDotEl = $("healthDot");
+if (healthDotEl)
+  healthDotEl.onclick = () => {
+    const sb = $("settingsBtn");
+    if (sb) sb.click();
+  };
 /* Cycle 4 I10: What's new - the bundled changelog,
    readable in-app (until now only the newest entry
    ever surfaced, inside a chat answer). */
@@ -6004,14 +6038,31 @@ if (whatsNewBtn)
       return;
     }
     box.textContent = "";
-    for (const en of (d.entries || []).slice(0, 6)) {
-      const row = document.createElement("div");
-      row.className = "todorow";
-      const lab = document.createElement("span");
-      lab.textContent = "v" + en.version + " (" +
-        en.date + ") - " + en.goal + "\n" + en.summary;
-      row.appendChild(lab);
-      box.appendChild(row);
+    /* Cycle 5 I3: the newest six by default, with the
+       whole bundled history one tap away. */
+    const renderEntries = (list) => {
+      box.textContent = "";
+      for (const en of list) {
+        const row = document.createElement("div");
+        row.className = "todorow";
+        const lab = document.createElement("span");
+        lab.textContent = "v" + en.version + " (" +
+          en.date + ") - " + en.goal + "\n" + en.summary;
+        row.appendChild(lab);
+        box.appendChild(row);
+      }
+    };
+    const all = d.entries || [];
+    renderEntries(all.slice(0, 6));
+    if (all.length > 6) {
+      const more = document.createElement("button");
+      more.className = "ghostbtn";
+      more.textContent = "Show all " + all.length +
+        " entries";
+      more.onclick = () => {
+        renderEntries(all);
+      };
+      box.appendChild(more);
     }
     if (!box.children.length)
       box.textContent = "No changelog entries bundled.";
@@ -10692,6 +10743,28 @@ async function runAgent(task, opts) {
     else
       memText += "\n\nTests: no test files found in " +
         "this workspace.";
+    /* Cycle 5 I2: the workspace's shape joins the
+       priming - scale and the biggest file, from the
+       same listing (sizes ride along when the server
+       provides them). */
+    const dirs = new Set(paths.filter((p) =>
+      p.includes("/")).map((p) =>
+      p.split("/").slice(0, -1).join("/")));
+    let bigName = "", bigSize = 0;
+    for (const f of fl.files || []) {
+      if (f.type === "file" && (f.size || 0) > bigSize) {
+        bigSize = f.size || 0;
+        bigName = f.path;
+      }
+    }
+    memText += "\n\nWorkspace shape: " + paths.length +
+      " file(s) across " + dirs.size + " folder(s)" +
+      (bigName
+        ? "; largest is " + bigName + " (" +
+          (bigSize >= 1024
+            ? Math.round(bigSize / 1024) + " KB"
+            : "under 1 KB") + ")."
+        : ".");
   } catch (e) { /* optional */ }
   if (memText)
     addMsg("SYSTEM", "📚 Agent primed with project memory " +
