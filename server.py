@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.81.0"
+APP_VERSION = "2.82.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -4879,6 +4879,26 @@ class Handler(SimpleHTTPRequestHandler):
                         "hash": parts[0],
                         "subject": parts[1] if len(parts) > 1 else ""})
                 return self.send_json({"commits": commits})
+            if parsed.path == "/api/git/show":
+                # Cycle 5 I16: one commit, stat + patch.
+                # The hash is pinned to hex so it can
+                # never become a flag or a path.
+                qs = urllib.parse.parse_qs(parsed.query)
+                chash = (qs.get("hash") or [""])[0]
+                if not _re_mod.fullmatch(r"[0-9a-f]{7,40}",
+                                         chash):
+                    return self.send_json(
+                        {"error": "bad commit hash"},
+                        status=400)
+                rc, out, err, _ = git_out(
+                    ["show", "--stat", "--patch",
+                     "--no-color", chash])
+                if rc != 0:
+                    return self.send_json(
+                        {"error": (err or "git show failed")
+                            .strip()[:200]}, status=400)
+                return self.send_json(
+                    {"output": (out or "")[:20000]})
             if parsed.path == "/api/git/diff-all":
                 # Whole-change diff for the AI commit message tool.
                 rc, out, err, _ = git_out(["diff", "HEAD", "--no-color"])

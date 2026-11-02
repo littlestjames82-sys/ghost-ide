@@ -3144,8 +3144,35 @@ async function refreshGit() {
       const lr = await fetch("/api/git/log");
       const ld = await lr.json();
       if (ld.commits && ld.commits.length) {
-        $("gitLog").textContent = "Recent commits:\n" +
-          ld.commits.map((c) => c.hash + "  " + c.subject).join("\n");
+        /* Cycle 5 I16: commits are tappable - each
+           opens its stat + patch in a panel. */
+        const gl = $("gitLog");
+        gl.textContent = "";
+        const gh = document.createElement("div");
+        gh.textContent = "Recent commits (tap to view):";
+        gl.appendChild(gh);
+        for (const c of ld.commits) {
+          const row = document.createElement("div");
+          row.className = "findRow";
+          row.textContent = c.hash + "  " + c.subject;
+          row.onclick = async () => {
+            const box = studioPanel("Commit " + c.hash);
+            try {
+              const sd = await (await fetch(
+                "/api/git/show?hash=" +
+                encodeURIComponent(c.hash))).json();
+              const pre = document.createElement("pre");
+              pre.textContent = sd.error ||
+                sd.output || "(empty commit)";
+              box.textContent = "";
+              box.appendChild(pre);
+            } catch (e) {
+              box.textContent =
+                "Could not reach the server.";
+            }
+          };
+          gl.appendChild(row);
+        }
       } else {
         $("gitLog").textContent = "";
       }
@@ -4819,6 +4846,25 @@ async function openApprovePanel() {
     label.textContent = it.action + " - risk " + it.risk +
       ageTxt + " - " + (it.summary || "");
     row.appendChild(label);
+    /* Cycle 5 I19: copy the action text - for talking
+       about a request before deciding it. */
+    const cpAct = document.createElement("button");
+    cpAct.className = "ghostbtn";
+    cpAct.textContent = "📋";
+    cpAct.title = "Copy this request's action text";
+    cpAct.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(
+          label.textContent);
+        cpAct.textContent = "✓";
+        setTimeout(() => {
+          cpAct.textContent = "📋";
+        }, 1200);
+      } catch (e) {
+        alert("Clipboard was not available here.");
+      }
+    };
+    row.appendChild(cpAct);
     for (const dec of ["approve", "deny"]) {
       const b = document.createElement("button");
       b.className = "ghostbtn";
@@ -5743,6 +5789,24 @@ async function openReplayPanel() {
       if (ta) ta.focus();
     };
     row.appendChild(rerun);
+    /* Cycle 5 I17: copy the run's one-line summary
+       (lighter than the full .md export beside it). */
+    const cpRun = document.createElement("button");
+    cpRun.className = "ghostbtn";
+    cpRun.textContent = "📋 Copy";
+    cpRun.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(
+          label.textContent);
+        cpRun.textContent = "✓";
+        setTimeout(() => {
+          cpRun.textContent = "📋 Copy";
+        }, 1200);
+      } catch (e) {
+        alert("Clipboard was not available here.");
+      }
+    };
+    row.appendChild(cpRun);
     /* Cycle 2 I7: export the trail as a markdown
        transcript the user can share or archive. */
     const exp = document.createElement("button");
@@ -6273,6 +6337,31 @@ async function openEco() {
       ecoHead.textContent += " Bundle generation " +
         d.generation + ".";
   }).catch(() => { /* the head line stands alone */ });
+  /* Cycle 5 I18: copy the catalog as plain lines -
+     handy for pasting a tool inventory into a chat
+     or a note. */
+  const ecoCopyRow = document.createElement("div");
+  ecoCopyRow.className = "todorow";
+  const ecoCopy = document.createElement("button");
+  ecoCopy.className = "ghostbtn";
+  ecoCopy.textContent = "📋 Copy catalog summary";
+  ecoCopy.onclick = async () => {
+    const lines = tools.map((t) =>
+      t.id + " - " + t.name + " (" + t.state + ")");
+    try {
+      await navigator.clipboard.writeText(
+        tools.length + " ecosystem tools:\n" +
+        lines.join("\n"));
+      ecoCopy.textContent = "✓ Copied";
+      setTimeout(() => {
+        ecoCopy.textContent = "📋 Copy catalog summary";
+      }, 1200);
+    } catch (e) {
+      alert("Clipboard was not available here.");
+    }
+  };
+  ecoCopyRow.appendChild(ecoCopy);
+  $("todoResults").appendChild(ecoCopyRow);
   /* Cycle 3 I8: recent eco runs on this device. */
   try {
     const runs = JSON.parse(localStorage.getItem(
@@ -10884,7 +10973,16 @@ async function runAgent(task, opts) {
         (gs.ahead ? " " + gs.ahead + " commit(s) ahead " +
           "of upstream." : "") +
         (gs.behind ? " " + gs.behind + " commit(s) " +
-          "behind upstream." : "");
+          "behind upstream." : "") +
+        /* Cycle 5 I20: name the first few changed
+           paths, not just the count. */
+        ((gs.changes || []).length
+          ? " Changed: " + gs.changes.slice(0, 3)
+              .map((c) => c.path).join(", ") +
+            (gs.changes.length > 3
+              ? " (+" + (gs.changes.length - 3) +
+                " more)" : "") + "."
+          : "");
   } catch (e) { /* optional */ }
   /* Cycle 4 I12: test awareness - the agent should
      know whether this workspace HAS tests before it

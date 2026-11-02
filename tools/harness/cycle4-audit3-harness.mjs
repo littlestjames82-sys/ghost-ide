@@ -16,9 +16,12 @@ const ck = (n, c) => { console.log((c ? "PASS " : "FAIL ") + n); c ? passed++ : 
 ck("A11 signer lineage is a build.sh constant, not luck",
    readFileSync(home + "/workspace/ghostide-apk-build/build.sh", "utf8")
      .includes("debug.keystore"));
-ck("A12 route census recorded (136 desktop / 126 Java)",
-   (py.match(/parsed\.path ==/g) || []).length === 136 &&
-   (java.match(/path\.equals\("\/api/g) || []).length === 126);
+/* Census moved 136/126 -> 137/127 in Cycle 5 when
+   I16 added /api/git/show to both servers on purpose;
+   the Cycle 5 A12 audit re-derives it independently. */
+ck("A12 route census recorded (137 desktop / 127 Java)",
+   (py.match(/parsed\.path ==/g) || []).length === 137 &&
+   (java.match(/path\.equals\("\/api/g) || []).length === 127);
 ck("A13 name pins still refuse traversal shapes",
    py.includes('r"data-pack-[A-Za-z0-9_.-]+"') &&
    py.includes('".." in'));

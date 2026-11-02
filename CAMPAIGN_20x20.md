@@ -650,3 +650,19 @@ upload is attempted unless he asks for a link.
       tree order (mirrors C5-I7).
 - [x] C5-I15 DONE (v2.81): palette gains Copy
       settings JSON (mirrors C5-I6).
+- [x] C5-I16 DONE (v2.82): commit viewer - Recent
+      commits are tappable; /api/git/show on both
+      servers (hash pinned to hex 7-40) returns stat
+      + patch capped at 20000 chars. Live-proven:
+      real hash served, flag/garbage refused.
+- [x] C5-I17 DONE (v2.82): replay rows gain a Copy
+      summary button beside Re-run and Export.
+- [x] C5-I18 DONE (v2.82): eco catalog Copy summary
+      (id, name, state per tool - the payload carries
+      no version field; the copy does not invent one).
+- [x] C5-I19 DONE (v2.82): approval rows gain a copy
+      button for the action text.
+- [x] C5-I20 DONE (v2.82): agent priming names the
+      first three changed paths (+N more), not just
+      the count. CYCLE 5 IMPROVEMENTS COMPLETE
+      (v2.79-v2.82).
