@@ -4931,6 +4931,21 @@ async function openBoardPanel() {
   head.textContent = proj.name + " - board column: " +
     proj.column + ". " + (proj.column_reason || "");
   box.appendChild(head);
+  /* Cycle 3 I16: from the board straight to the Git
+     panel - the board says where a project stands, the
+     Git panel is where its changes get committed. */
+  const gitRow = document.createElement("div");
+  gitRow.className = "todorow";
+  const gitB = document.createElement("button");
+  gitB.className = "ghostbtn";
+  gitB.textContent = "Open Git panel";
+  gitB.onclick = () => {
+    $("todoPanel").classList.add("hidden");
+    const vg = $("viewGit");
+    if (vg) vg.click();
+  };
+  gitRow.appendChild(gitB);
+  box.appendChild(gitRow);
   /* Cycle 2 I14: the project's last commit, so the board
      says how fresh the work is. */
   try {
@@ -5179,9 +5194,15 @@ if (runCopyBtn)
    Replay: runAgent and runPlan record their action
    trails; when a run ends the trail is saved server-side
    and this panel scrubs it step by step. */
-function saveTrail(task, trail) {
+function saveTrail(task, trail, elapsedS) {
   if (!trail || !trail.length) return;
-  postJson("/api/eco/replay/save", { task, trail })
+  /* Cycle 3 I18: runs record how long they took; the
+     replay list shows it. Older records simply lack
+     the field - nothing is backfilled or invented. */
+  const body = { task, trail };
+  if (typeof elapsedS === "number" && elapsedS >= 0)
+    body.elapsed_s = Math.round(elapsedS);
+  postJson("/api/eco/replay/save", body)
     .catch(() => {});
 }
 async function studioCall(tool, verb, arg) {
@@ -5356,6 +5377,51 @@ async function openQuotePanel() {
   }
   box.appendChild(out);
 }
+/* Cycle 3 I17: the palette's pack browser - list the
+   workspace's data packs and view one without opening
+   the Data pane first. Same pinned routes as the pane. */
+async function openPackListPanel() {
+  const box = studioPanel("Data packs");
+  let d;
+  try {
+    d = await postJson("/api/eco/datapack/list", {});
+  } catch (e) {
+    box.textContent = "Could not reach the server.";
+    return;
+  }
+  box.textContent = "";
+  const packs = (d && d.packs) || [];
+  if (!packs.length) {
+    box.textContent = "No data packs in this workspace " +
+      "yet. Open a data file and use Pack to build one.";
+    return;
+  }
+  for (const name of packs) {
+    const row = document.createElement("div");
+    row.className = "todorow";
+    const lab = document.createElement("span");
+    lab.textContent = name;
+    row.appendChild(lab);
+    const vb = document.createElement("button");
+    vb.className = "ghostbtn";
+    vb.textContent = "View";
+    vb.onclick = async () => {
+      vb.disabled = true;
+      try {
+        const v = await postJson(
+          "/api/eco/datapack/view", { name });
+        box.textContent = v.error ||
+          ((v.file || "PROMPT.md") + ":\n\n" +
+           (v.text || "(empty)"));
+      } catch (e) {
+        box.textContent = "Could not reach the server.";
+      }
+    };
+    row.appendChild(vb);
+    box.appendChild(row);
+  }
+}
+
 async function openReplayPanel() {
   const box = studioPanel("Session replay");
   let d;
@@ -5377,7 +5443,15 @@ async function openReplayPanel() {
     const label = document.createElement("span");
     label.textContent = (s.saved_at || "") + " - " +
       String(s.task || "").slice(0, 60) + " (" + s.steps +
-      " steps)";
+      " steps" +
+      /* Cycle 3 I18: the run's wall-clock, when the
+         record carries it (older runs do not). */
+      (typeof s.elapsed_s === "number"
+        ? ", took " + (s.elapsed_s < 60
+            ? s.elapsed_s + "s"
+            : Math.floor(s.elapsed_s / 60) + "m " +
+              (s.elapsed_s % 60) + "s")
+        : "") + ")";
     row.appendChild(label);
     const rerun = document.createElement("button");
     rerun.className = "ghostbtn";
@@ -5693,6 +5767,22 @@ async function refreshPairInfo() {
 }
 if (settingsBtnEl)
   settingsBtnEl.addEventListener("click", refreshPairInfo);
+/* Cycle 3 I19: about-this-build - server version,
+   workspace and model state from /api/health, so the
+   phone and the desktop can be told apart at a glance. */
+async function refreshAbout() {
+  const el = $("setAbout");
+  if (!el) return;
+  try {
+    const d = await (await fetch("/api/health")).json();
+    el.textContent = "GhostIDE " + (d.version || "?") +
+      " · workspace " + (d.workspace || "?") +
+      " · model " + (d.model || "?") +
+      (d.modelName ? " (" + d.modelName + ")" : "");
+  } catch (e) { el.textContent = "unavailable"; }
+}
+if (settingsBtnEl)
+  settingsBtnEl.addEventListener("click", refreshAbout);
 const runFixBtn = $("runFix");
 if (runFixBtn)
   runFixBtn.onclick = () => {
@@ -8685,6 +8775,11 @@ const COMMANDS = [
   { title: "Ecosystem board", run: () => $("toolBoard").click() },
   { title: "Ecosystem tools", run: () => $("toolEco").click() },
   { title: "MCP servers", run: () => $("toolMcp").click() },
+  { title: "Restart MCP sessions", run: async () => {
+      await postJson("/api/mcp/restart", {});
+      openMcpPanel();
+    } },
+  { title: "View data packs", run: () => openPackListPanel() },
   { title: "Session replay", run: () => $("toolReplay").click() },
   { title: "Recipes shelf", run: () => $("toolRecipes").click() },
   { title: "Leads", run: () => $("toolLeads").click() },
@@ -10596,7 +10691,7 @@ async function runAgent(task, opts) {
         "actions, one per line." });
     }
   }
-  saveTrail(task, trail);
+  saveTrail(task, trail, (Date.now() - agentT0) / 1000);
   sendBtn.textContent = "Send";
   sendBtn.onclick = oldSend;
   agentRunning = false;
@@ -10795,7 +10890,7 @@ async function runPlan(task) {
         "SEARCH, LIST, TODO, DONE, or ASK." });
     }
   }
-  saveTrail(task, trail);
+  saveTrail(task, trail, (Date.now() - planT0) / 1000);
   sendBtn.textContent = "Send";
   sendBtn.onclick = oldSend;
   agentRunning = false;

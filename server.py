@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.65.0"
+APP_VERSION = "2.66.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2933,7 +2933,7 @@ def eco_studio(tool, verb, arg, arg2, ws):
     raise ValueError("unknown studio tool: " + tool)
 
 
-def replay_save(task, trail, ws):
+def replay_save(task, trail, ws, elapsed_s=None):
     """E16: record one agent run's action trail for the
     Replay panel. Entries are capped and trimmed here -
     the store is IDE state, not a transcript dump."""
@@ -2951,6 +2951,11 @@ def replay_save(task, trail, ws):
     rec = {"task": str(task or "")[:500],
            "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "trail": clean}
+    # Cycle 3 I18: the run's wall-clock, when the
+    # caller measured it (bounded, never backfilled).
+    if (isinstance(elapsed_s, (int, float))
+            and 0 <= elapsed_s <= 86400):
+        rec["elapsed_s"] = int(elapsed_s)
     name = "run-" + stamp + ".json"
     p = d / name
     n = 1
@@ -2970,10 +2975,13 @@ def replay_list(ws):
                 rec = json.loads(p.read_text(encoding="utf-8"))
             except ValueError:
                 continue
-            out.append({"id": p.name,
-                        "task": rec.get("task", ""),
-                        "saved_at": rec.get("saved_at", ""),
-                        "steps": len(rec.get("trail") or [])})
+            item = {"id": p.name,
+                    "task": rec.get("task", ""),
+                    "saved_at": rec.get("saved_at", ""),
+                    "steps": len(rec.get("trail") or [])}
+            if isinstance(rec.get("elapsed_s"), int):
+                item["elapsed_s"] = rec["elapsed_s"]
+            out.append(item)
     return {"sessions": out}
 
 
@@ -5729,7 +5737,23 @@ class Handler(SimpleHTTPRequestHandler):
                 try:
                     return self.send_json(replay_save(
                         data.get("task"),
-                        data.get("trail"), WORKSPACE))
+                        data.get("trail"), WORKSPACE,
+                        data.get("elapsed_s")))
+                except ValueError as e:
+                    return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/replay/list":
+                # Cycle 3 I18 fix: the panel POSTs (the
+                # phone has always served POST); the
+                # desktop only had the GET twin, so the
+                # desktop Replay panel silently showed
+                # zero runs since E16. POST now mirrors
+                # GET; both stay available.
+                return self.send_json(replay_list(WORKSPACE))
+            if parsed.path == "/api/eco/replay/get":
+                data = self.read_json()
+                try:
+                    return self.send_json(replay_get(
+                        WORKSPACE, data.get("id") or ""))
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
             if parsed.path == "/api/eco/datapack":

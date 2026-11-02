@@ -491,3 +491,26 @@ run-all) with a summary line.
 - [x] C3-I15 DONE (v2.65): sessions readout gains
       age_s + idle_s; panel shows age + idle, Settings
       shows idle.
+- [x] C3-I16 DONE (v2.66): board panel gains an Open
+      Git panel button (closes the panel, clicks the
+      drawer Git view).
+- [x] C3-I17 DONE (v2.66): palette gains Restart MCP
+      sessions (restart then reopen the panel) and View
+      data packs (new pack-list panel reusing the
+      pinned view route).
+- [x] C3-I18 DONE (v2.66): replay records elapsed_s
+      (both runners pass their T0; bounded 0..86400;
+      list shows "took Xm Ys" only when present -
+      nothing backfilled). FOUND + FIXED en route: the
+      desktop served replay list/get only via GET
+      while the panel POSTs, so the desktop Replay
+      panel silently showed zero runs since E16; POST
+      twins now mirror the phone. Live-proven chain.
+- [x] C3-I19 DONE (v2.66): Settings This build line
+      from /api/health (version, workspace, model) -
+      the health shape already matched on both servers.
+- [x] C3-I20 DONE (v2.66): tools/harness/run-all.mjs -
+      one command, per-file summary, nonzero exit on
+      any failure. It caught two stale pins on its
+      first run (campaign1 saveTrail shape, C2-A9
+      ghostmcp pin), both updated with reasons.

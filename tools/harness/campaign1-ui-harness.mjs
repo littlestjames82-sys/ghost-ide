@@ -28,7 +28,9 @@ ck("replay panel lists, gets and scrubs with a slider",
 ck("agent loops record trails and save them at exit",
    src.includes("const trail = [];") &&
    src.includes("trail.push({ step: step, type: act.type,") &&
-   src.includes("saveTrail(task, trail);"));
+   // Cycle 3 I18: the save call now also passes the
+   // run's elapsed seconds (agentT0 / planT0).
+   src.includes("saveTrail(task, trail, (Date.now()"));
 ck("Tools menu carries the four new entries",
    html.includes('id="toolRecipes"') &&
    html.includes('id="toolLeads"') &&

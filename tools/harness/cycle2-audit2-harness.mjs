@@ -34,8 +34,9 @@ ck("A9 bundle pins: 29 tools, versions held",
    Object.keys(ecoState.tools).length === 29 &&
    ecoState.tools.ghostdata.version === "0.1.1" &&
    // ghostmcp was 0.3.0 at the Cycle 2 audit; Cycle 3
-   // I1 bumped it to 0.3.1 (drop verb) with a fresh
-   // GREEN gate, so the pin moves with the gate state.
-   ecoState.tools.ghostmcp.version === "0.3.1");
+   // bumped it twice (0.3.1 drop verb, 0.3.2 reaping),
+   // each with a fresh GREEN gate, so the pin moves
+   // with the gate state.
+   ecoState.tools.ghostmcp.version === "0.3.2");
 console.log(`RESULT ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
