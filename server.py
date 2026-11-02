@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.56.0"
+APP_VERSION = "2.57.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2855,6 +2855,23 @@ def eco_studio(tool, verb, arg, arg2, ws):
 
     if tool == "ghostrecipes":
         lib = str(ws / "recipes")
+        if verb == "renders":
+            # Cycle 2 I12: render history - the checklist
+            # files renders wrote into .ghostide, newest
+            # first.
+            files = sorted(
+                gi.glob("recipe-*.md"),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True)[:20]
+            if not files:
+                return "No renders yet in this workspace."
+            return "\n".join(
+                "%s - %d B - %s" % (
+                    f.name, f.stat().st_size,
+                    time.strftime(
+                        "%Y-%m-%d %H:%M",
+                        time.localtime(f.stat().st_mtime)))
+                for f in files)
         if verb == "list":
             return run(tool, ["list", "--library", lib,
                               "--json"])
@@ -5701,6 +5718,43 @@ class Handler(SimpleHTTPRequestHandler):
                                            "output": out})
                 except ValueError as e:
                     return self.send_json({"error": str(e)}, 400)
+            if parsed.path == "/api/eco/datapacks":
+                # Cycle 2 I13: the packs this workspace holds.
+                gi = WORKSPACE / ".ghostide"
+                packs = []
+                if gi.is_dir():
+                    for d in sorted(
+                            gi.glob("data-pack-*"),
+                            key=lambda p: p.stat().st_mtime,
+                            reverse=True):
+                        if d.is_dir():
+                            packs.append({
+                                "name": d.name,
+                                "files": sum(
+                                    1 for _ in d.rglob("*")
+                                    if _.is_file()),
+                                "mtime": int(
+                                    d.stat().st_mtime)})
+                return self.send_json({"packs": packs})
+            if parsed.path == "/api/eco/datapack/delete":
+                # Cycle 2 I13: remove one pack. The name is
+                # pinned to the data-pack- namespace inside
+                # .ghostide; nothing else can be named.
+                data = self.read_json()
+                name = str(data.get("name") or "")
+                if not _re_mod.fullmatch(
+                        r"data-pack-[A-Za-z0-9_.-]+", name) \
+                        or ".." in name:
+                    return self.send_json(
+                        {"error": "not a pack name"}, 400)
+                target = (WORKSPACE / ".ghostide"
+                          / name)
+                if not target.is_dir():
+                    return self.send_json(
+                        {"error": "no such pack"}, 400)
+                import shutil as _sh
+                _sh.rmtree(target)
+                return self.send_json({"ok": True})
             if parsed.path == "/api/eco/slicelog":
                 # E13: run output -> GhostLogs incident pack.
                 data = self.read_json()

@@ -281,3 +281,19 @@ hammer on the session daemon + approve store together).
 - [x] C2-I8 DONE (v2.56): approve panel gains a kind
       filter bar (All/Run/Delete/MCP/Write/Other) when
       more than one request waits.
+- [x] C2-I9 DONE (v2.57): watch feed renders each changed
+      file as a jump link that opens it (gone files stay
+      plain text; the bar still refreshes the tree).
+- [x] C2-I10 DONE (v2.57): verify runs keep a five-entry
+      on-device history (localStorage) shown under the
+      report.
+- [x] C2-I11 DONE (v2.57): ecosystem panel gains a live
+      filter box over tool name + blurb.
+- [x] C2-I12 DONE (v2.57): studio "renders" verb on both
+      servers lists .ghostide/recipe-*.md newest first;
+      Recipes shelf gains a Recent renders button.
+- [x] C2-I13 DONE (v2.57): /api/eco/datapacks +
+      /api/eco/datapack/delete on both servers (names
+      pinned to the data-pack- namespace); Data pane
+      gains a Packs button (list + delete by exact name).
+      Desktop routes fixture-proven live.

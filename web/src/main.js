@@ -4792,11 +4792,34 @@ async function watchTick() {
         " (changed on disk)";
     const feed = $("watchFeed");
     if (feed && changed.length) {
-      feed.textContent = "↻ Changed on disk: " +
-        changed.slice(0, 4).join(", ") +
-        (changed.length > 4
-          ? " (+" + (changed.length - 4) + " more)" : "") +
-        " - tap to refresh";
+      /* Cycle 2 I9: each changed file is a jump link
+         that opens it; gone files stay plain text. The
+         bar as a whole still refreshes the tree. */
+      feed.textContent = "↻ Changed on disk: ";
+      changed.slice(0, 4).forEach((entry, i) => {
+        const gone = entry.endsWith(" (gone)");
+        const p = entry.replace(/ \((new|gone)\)$/, "");
+        if (i) feed.appendChild(
+          document.createTextNode(", "));
+        if (gone) {
+          feed.appendChild(document.createTextNode(entry));
+        } else {
+          const link = document.createElement("a");
+          link.href = "#";
+          link.textContent = entry;
+          link.onclick = (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            openFile(p);
+          };
+          feed.appendChild(link);
+        }
+      });
+      if (changed.length > 4)
+        feed.appendChild(document.createTextNode(
+          " (+" + (changed.length - 4) + " more)"));
+      feed.appendChild(document.createTextNode(
+        " - tap to refresh"));
       feed.style.cursor = "pointer";
       feed.onclick = () => loadFiles();
     } else if (feed && watchNote) {
@@ -5002,6 +5025,41 @@ if (dataPackBtn)
     }
     dataPackBtn.disabled = false;
   };
+const dataPacksBtn = $("dataPacks");
+if (dataPacksBtn)
+  dataPacksBtn.onclick = async () => {
+    /* Cycle 2 I13: list packs; delete one by exact name. */
+    try {
+      const d = await postJson("/api/eco/datapacks", {});
+      if (d.error) {
+        $("dataOut").textContent = d.error;
+        return;
+      }
+      const packs = d.packs || [];
+      $("dataTitle").textContent =
+        "🗂 GhostData packs in this workspace";
+      if (!packs.length) {
+        $("dataOut").textContent =
+          "No packs yet. Build one with Pack.";
+        return;
+      }
+      $("dataOut").textContent = packs.map((p) =>
+        p.name + " - " + p.files + " file(s)").join("\n") +
+        "\n\nTo delete one, tap Packs again and type its " +
+        "exact name.";
+      const name = prompt(
+        "Delete a pack? Type its exact name (blank cancels):",
+        "");
+      if (!name) return;
+      const r = await postJson("/api/eco/datapack/delete",
+        { name });
+      $("dataOut").textContent = r.error ||
+        "Deleted " + name + ".";
+    } catch (e) {
+      $("dataOut").textContent =
+        "The packs list failed to reach the server.";
+    }
+  };
 const runSliceBtn = $("runSlice");
 if (runSliceBtn)
   runSliceBtn.onclick = async () => {
@@ -5070,6 +5128,15 @@ async function openRecipesPanel() {
     "Recipes are data-only checklists - rendering one " +
     "never runs its steps.";
   box.appendChild(head);
+  /* Cycle 2 I12: what renders this workspace already has. */
+  const rendersBtn = document.createElement("button");
+  rendersBtn.className = "ghostbtn";
+  rendersBtn.textContent = "Recent renders";
+  rendersBtn.onclick = async () => {
+    box.textContent = await studioCall(
+      "ghostrecipes", "renders");
+  };
+  box.appendChild(rendersBtn);
   for (const r of items) {
     const row = document.createElement("div");
     row.className = "todorow";
@@ -5452,9 +5519,24 @@ async function openEco() {
   ecoHead.textContent = tools.length + " tools in the catalog. " +
     "Ready tools run here against this workspace.";
   $("todoResults").appendChild(ecoHead);
+  /* Cycle 2 I11: filter the catalog as you type. */
+  const ecoSearch = document.createElement("input");
+  ecoSearch.type = "search";
+  ecoSearch.placeholder = "Filter tools…";
+  ecoSearch.style.width = "100%";
+  ecoSearch.oninput = () => {
+    const q = ecoSearch.value.toLowerCase();
+    for (const row of $("todoResults")
+        .querySelectorAll(".todorow[data-tool]"))
+      row.style.display =
+        row.dataset.tool.includes(q) ? "" : "none";
+  };
+  $("todoResults").appendChild(ecoSearch);
   for (const t of tools) {
     const row = document.createElement("div");
     row.className = "todorow";
+    row.dataset.tool = (t.name + " " + (t.blurb || ""))
+      .toLowerCase();
     const label = document.createElement("span");
     label.textContent = t.name + " — " + t.blurb;
     row.appendChild(label);
@@ -12061,6 +12143,28 @@ $("toolVerify").onclick = async () => {
     d.checks.problems.length + " problem(s) · tests " +
     d.tests.passed + "/" + d.tests.total + " passed";
   $("runOut").textContent = d.report;
+  /* Cycle 2 I10: keep the last five verify runs on this
+     device and show them under the report. */
+  try {
+    const key = "ghostide.verifyHistory";
+    const hist = JSON.parse(localStorage.getItem(key)
+      || "[]");
+    hist.unshift({
+      at: new Date().toLocaleString(),
+      level: d.evidence.level,
+      checked: d.checks.checked,
+      problems: d.checks.problems.length,
+      tests: d.tests.passed + "/" + d.tests.total });
+    localStorage.setItem(key,
+      JSON.stringify(hist.slice(0, 5)));
+    const lines = hist.slice(0, 5).map((h) =>
+      h.at + " - " + h.level + " - " + h.checked +
+      " checked, " + h.problems + " problem(s), tests " +
+      h.tests);
+    $("runOut").textContent = d.report +
+      "\n\nRecent verify runs on this device:\n" +
+      lines.join("\n");
+  } catch (e) { /* history is a nicety */ }
   loadFiles();
 };
 
