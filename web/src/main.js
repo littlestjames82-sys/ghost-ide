@@ -5384,7 +5384,13 @@ async function openPackListPanel() {
   const box = studioPanel("Data packs");
   let d;
   try {
-    d = await postJson("/api/eco/datapack/list", {});
+    /* The list route is /api/eco/datapacks (Cycle 2
+       I13) and its entries are {name, files, mtime}
+       objects. Cycle 3's audit batch 3 caught this
+       panel calling a route that does not exist and
+       treating the entries as strings - it would
+       always have shown the empty message. */
+    d = await postJson("/api/eco/datapacks", {});
   } catch (e) {
     box.textContent = "Could not reach the server.";
     return;
@@ -5396,7 +5402,8 @@ async function openPackListPanel() {
       "yet. Open a data file and use Pack to build one.";
     return;
   }
-  for (const name of packs) {
+  for (const pack of packs) {
+    const name = pack.name;
     const row = document.createElement("div");
     row.className = "todorow";
     const lab = document.createElement("span");
@@ -5410,9 +5417,10 @@ async function openPackListPanel() {
       try {
         const v = await postJson(
           "/api/eco/datapack/view", { name });
+        /* The view route returns {ok, output} - the
+           same shape the Data pane has always read. */
         box.textContent = v.error ||
-          ((v.file || "PROMPT.md") + ":\n\n" +
-           (v.text || "(empty)"));
+          (v.output || "(empty pack summary)");
       } catch (e) {
         box.textContent = "Could not reach the server.";
       }

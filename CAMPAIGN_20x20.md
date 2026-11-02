@@ -521,3 +521,15 @@ run-all) with a summary line.
   md5 07fd17f23249ffec56a1659ba9396a55, on disk at
   ~/workspace/ghostide-apk/ghostide-v2.66.0.apk). Do
   not re-upload unless Ryan asks.
+- [x] A11-A15 PASS (v2.69), A13 DEEPENED + 2 FIXES:
+      signer lineage verified live on the v2.68 APK
+      (8ea8684a...); terminal honesty label intact;
+      body cap intact; malformed JSON earns clean 400s
+      with the server healthy after. A13's pack-view
+      deepening caught TWO defects in Cycle 3's own
+      pack panel (v2.66, never installed): it called a
+      nonexistent list route and read nonexistent view
+      fields - both fixed to the real contracts
+      (/api/eco/datapacks object entries; view returns
+      {ok, output}). All 7 traversal-shaped names are
+      refused by the view pin, same as delete.
