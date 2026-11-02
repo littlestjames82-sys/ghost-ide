@@ -361,3 +361,41 @@ hammer on the session daemon + approve store together).
       since the e11 gate.
 - [x] C2-A10 PASS (v2.60): version gate ritual (five
       sources agree before the build starts).
+- [x] C2-A11 PASS (v2.61): signer lineage continues
+      (v2.60 cert prefix 8ea8684a...); staged-match is
+      now enforced inside build.sh itself (C2-I20).
+- [x] C2-A12 PASS (v2.61): terminal honesty unchanged -
+      desktop labeled unsandboxed, phone refuses.
+- [x] C2-A13 PASS (v2.61): switch/worktree guards
+      untouched by Cycle 2 (switch still raises
+      "not a folder").
+- [x] C2-A14 PASS (v2.61): snapshot_history still runs
+      before every content overwrite; Cycle 2 added no
+      new content-writing routes (pack delete removes a
+      namespace-pinned directory only).
+- [x] C2-A15 PASS (v2.61): new routes' error shapes
+      probed live - unknown studio verb, unknown studio
+      tool and a malformed JSON body all returned clean
+      {error} JSON.
+- [x] C2-A16 PASS (v2.62): every Cycle 2 subprocess path
+      keeps a bound (daemon calls 50s default with the
+      per-request deadline refresh; renders ride the eco
+      120s bound; pack routes are filesystem-only).
+- [x] C2-A17 PASS, DEEPENED (v2.62): live hammer -
+      10 parallel MCP calls through the daemon all
+      answered (isError false) with exactly ONE fixture
+      spawn (the _McpDaemon lock serializes creation;
+      the session is shared); 10 parallel approve-list
+      reads all returned valid JSON, store uncorrupted.
+- [x] C2-A18 PASS (v2.62): Cycle 2 shapes match across
+      servers ({packs:[...]}, {sessions:[...]},
+      {ok:true}).
+- [x] C2-A19 PASS (v2.62): new labels stay honest -
+      verify history is scoped "on this device", the
+      phone's sessions line reads "none live" (true:
+      one-shot), Restart's title states its scope.
+- [x] C2-A20 PASS (v2.62): this file carries every
+      Cycle 2 verdict; BUILD_NOTES carries the
+      consolidated Cycle 2 posture note in the v2.62
+      entry. CYCLE 2 COMPLETE: improvements v2.55-
+      v2.58, audits v2.59-v2.62.
