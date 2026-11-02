@@ -514,3 +514,10 @@ run-all) with a summary line.
       any failure. It caught two stale pins on its
       first run (campaign1 saveTrail shape, C2-A9
       ghostmcp pin), both updated with reasons.
+- NOTE (v2.66 delivery): the APK upload approval was
+  DECLINED by Ryan at the prompt (Nov 1 late), so no
+  v2.66 link exists and nothing was uploaded. The
+  build itself is complete and verified (93/93,
+  md5 07fd17f23249ffec56a1659ba9396a55, on disk at
+  ~/workspace/ghostide-apk/ghostide-v2.66.0.apk). Do
+  not re-upload unless Ryan asks.
