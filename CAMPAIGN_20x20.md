@@ -555,3 +555,20 @@ upload is attempted unless he asks for a link.
       used to die with the page.
 - [x] C4-I5 DONE (v2.71): terminal pane Copy button
       (the Run pane's copy pattern, applied to termOut).
+- [x] C4-I6 DONE (v2.72): Approve queue Deny all -
+      confirm, then a per-id deny loop; executes
+      nothing by construction.
+- [x] C4-I7 DONE (v2.72): verify history keeps 12
+      (was 5) and marks the problem trend vs the
+      previous run (fewer / more / same).
+- [x] C4-I8 DONE (v2.72): plain find groups matches
+      under counted per-file headers (was one flat
+      list); the indexed search was already grouped.
+- [x] C4-I9 DONE (v2.72): file filter persists
+      (localStorage) and restores into the box at boot.
+- [x] C4-I10 DONE (v2.72): Settings What's new button
+      renders the bundled changelog's top 6 entries
+      in-app (route live-proven). NOTE: font size,
+      word wrap and Quick Open recents were scouted
+      for this batch and found ALREADY covered - the
+      picks above replaced them before building.

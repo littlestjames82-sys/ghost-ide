@@ -33139,9 +33139,23 @@
     $("draftText").textContent = "Unsaved draft from " + new Date(d.ts).toLocaleTimeString() + " differs from the saved file.";
     $("draftBar").classList.remove("hidden");
   }
-  var fileFilterText = "";
+  var fileFilterText = (() => {
+    try {
+      return localStorage.getItem("ghostide.fileFilter") || "";
+    } catch (e) {
+      return "";
+    }
+  })();
+  if (fileFilterText) $("fileFilter").value = fileFilterText;
   $("fileFilter").addEventListener("input", (e) => {
     fileFilterText = e.target.value.trim().toLowerCase();
+    try {
+      localStorage.setItem(
+        "ghostide.fileFilter",
+        fileFilterText
+      );
+    } catch (e2) {
+    }
     loadFiles();
   });
   var collapsedDirs = /* @__PURE__ */ new Set();
@@ -35843,15 +35857,28 @@
       box.textContent = "No matches.";
       return;
     }
+    const byFile = /* @__PURE__ */ new Map();
     for (const m of d.matches) {
-      const row = document.createElement("div");
-      row.className = "findRow";
-      row.textContent = m.path + ":" + m.line + "  " + m.text;
-      row.onclick = async () => {
-        await openFile(m.path);
-        jumpToLine(m.line);
-      };
-      box.appendChild(row);
+      if (!byFile.has(m.path)) byFile.set(m.path, []);
+      byFile.get(m.path).push(m);
+    }
+    for (const [path, ms] of byFile) {
+      const head = document.createElement("div");
+      head.className = "findRow";
+      head.textContent = "\u{1F4C4} " + path + " (" + ms.length + ")";
+      head.onclick = () => openFile(path);
+      box.appendChild(head);
+      for (const m of ms) {
+        const row = document.createElement("div");
+        row.className = "findRow";
+        row.style.paddingLeft = "22px";
+        row.textContent = m.line + "  " + m.text;
+        row.onclick = async () => {
+          await openFile(m.path);
+          jumpToLine(m.line);
+        };
+        box.appendChild(row);
+      }
     }
     if (d.truncated) {
       const n = document.createElement("div");
@@ -37011,6 +37038,33 @@
     head.className = "dim";
     head.textContent = d.error ? d.error : (d.items || []).length + " request(s) waiting. Nothing here executes on its own: approving records your decision and only then does the IDE carry out that one action.";
     box.appendChild(head);
+    if ((d.items || []).length > 1) {
+      const denyRow = document.createElement("div");
+      denyRow.className = "todorow";
+      const db = document.createElement("button");
+      db.className = "ghostbtn";
+      db.textContent = "Deny all " + d.items.length + " waiting";
+      db.onclick = async () => {
+        if (!confirm("Deny all " + d.items.length + " waiting requests? Nothing will execute."))
+          return;
+        db.disabled = true;
+        db.textContent = "Denying\u2026";
+        let done = 0;
+        for (const it of d.items) {
+          try {
+            const r = await postJson(
+              "/api/approve/decide",
+              { id: it.id, decision: "deny" }
+            );
+            if (!r.error) done++;
+          } catch (e) {
+          }
+        }
+        box.textContent = "Denied " + done + " of " + d.items.length + " requests. Nothing was executed.";
+      };
+      denyRow.appendChild(db);
+      box.appendChild(denyRow);
+    }
     const kindOf = (it) => {
       const a = String(it.action || "");
       if (a.startsWith("Run command")) return "run";
@@ -38175,6 +38229,29 @@
   }
   if (settingsBtnEl)
     settingsBtnEl.addEventListener("click", refreshAbout);
+  var whatsNewBtn = $("setWhatsNew");
+  if (whatsNewBtn)
+    whatsNewBtn.onclick = async () => {
+      const box = studioPanel("What's new");
+      let d;
+      try {
+        d = await (await fetch("changelog.json")).json();
+      } catch (e) {
+        box.textContent = "The bundled changelog could not be read on this build.";
+        return;
+      }
+      box.textContent = "";
+      for (const en of (d.entries || []).slice(0, 6)) {
+        const row = document.createElement("div");
+        row.className = "todorow";
+        const lab = document.createElement("span");
+        lab.textContent = "v" + en.version + " (" + en.date + ") - " + en.goal + "\n" + en.summary;
+        row.appendChild(lab);
+        box.appendChild(row);
+      }
+      if (!box.children.length)
+        box.textContent = "No changelog entries bundled.";
+    };
   var runFixBtn = $("runFix");
   if (runFixBtn)
     runFixBtn.onclick = () => {
@@ -44753,9 +44830,13 @@
       });
       localStorage.setItem(
         key,
-        JSON.stringify(hist.slice(0, 5))
+        JSON.stringify(hist.slice(0, 12))
       );
-      const lines = hist.slice(0, 5).map((h) => h.at + " - " + h.level + " - " + h.checked + " checked, " + h.problems + " problem(s), tests " + h.tests);
+      const lines = hist.slice(0, 12).map((h, i2, a) => {
+        const prev = a[i2 + 1];
+        const trend = !prev ? "" : h.problems < prev.problems ? " \u25BC fewer problems" : h.problems > prev.problems ? " \u25B2 more problems" : " = same problems";
+        return h.at + " - " + h.level + " - " + h.checked + " checked, " + h.problems + " problem(s), tests " + h.tests + trend;
+      });
       $("runOut").textContent = d.report + "\n\nRecent verify runs on this device:\n" + lines.join("\n");
     } catch (e) {
     }

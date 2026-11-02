@@ -475,9 +475,21 @@ function checkDraft(path, diskContent) {
   $("draftBar").classList.remove("hidden");
 }
 
-let fileFilterText = "";
+/* Cycle 4 I9: the filter survives restarts like the
+   history now does (restored into the box at boot). */
+let fileFilterText = (() => {
+  try {
+    return localStorage.getItem("ghostide.fileFilter")
+      || "";
+  } catch (e) { return ""; }
+})();
+if (fileFilterText) $("fileFilter").value = fileFilterText;
 $("fileFilter").addEventListener("input", (e) => {
   fileFilterText = e.target.value.trim().toLowerCase();
+  try {
+    localStorage.setItem("ghostide.fileFilter",
+      fileFilterText);
+  } catch (e2) { /* a nicety */ }
   loadFiles();
 });
 
@@ -3302,15 +3314,30 @@ $("findGo").onclick = async () => {
   if (d.error) { box.textContent = d.error; return; }
   box.innerHTML = "";
   if (!d.matches.length) { box.textContent = "No matches."; return; }
+  /* Cycle 4 I8: group by file under a counted header -
+     the flat list hid which files carry the matches. */
+  const byFile = new Map();
   for (const m of d.matches) {
-    const row = document.createElement("div");
-    row.className = "findRow";
-    row.textContent = m.path + ":" + m.line + "  " + m.text;
-    row.onclick = async () => {
-      await openFile(m.path);
-      jumpToLine(m.line);
-    };
-    box.appendChild(row);
+    if (!byFile.has(m.path)) byFile.set(m.path, []);
+    byFile.get(m.path).push(m);
+  }
+  for (const [path, ms] of byFile) {
+    const head = document.createElement("div");
+    head.className = "findRow";
+    head.textContent = "📄 " + path + " (" + ms.length + ")";
+    head.onclick = () => openFile(path);
+    box.appendChild(head);
+    for (const m of ms) {
+      const row = document.createElement("div");
+      row.className = "findRow";
+      row.style.paddingLeft = "22px";
+      row.textContent = m.line + "  " + m.text;
+      row.onclick = async () => {
+        await openFile(m.path);
+        jumpToLine(m.line);
+      };
+      box.appendChild(row);
+    }
   }
   if (d.truncated) {
     const n = document.createElement("div");
@@ -4585,6 +4612,37 @@ async function openApprovePanel() {
       "own: approving records your decision and only then " +
       "does the IDE carry out that one action.";
   box.appendChild(head);
+  /* Cycle 4 I6: deny-all - the safe bulk action. It
+     executes nothing; every request still needs its
+     own approval to ever run, and denying is always
+     reversible by re-asking. */
+  if ((d.items || []).length > 1) {
+    const denyRow = document.createElement("div");
+    denyRow.className = "todorow";
+    const db = document.createElement("button");
+    db.className = "ghostbtn";
+    db.textContent = "Deny all " + d.items.length +
+      " waiting";
+    db.onclick = async () => {
+      if (!confirm("Deny all " + d.items.length +
+          " waiting requests? Nothing will execute."))
+        return;
+      db.disabled = true; db.textContent = "Denying…";
+      let done = 0;
+      for (const it of d.items) {
+        try {
+          const r = await postJson("/api/approve/decide",
+            { id: it.id, decision: "deny" });
+          if (!r.error) done++;
+        } catch (e) { /* counted below */ }
+      }
+      box.textContent = "Denied " + done + " of " +
+        d.items.length + " requests. Nothing was " +
+        "executed.";
+    };
+    denyRow.appendChild(db);
+    box.appendChild(denyRow);
+  }
   /* Cycle 2 I8: filter the queue by action kind (the
      kind rides in the action text GhostApprove wrote). */
   const kindOf = (it) => {
@@ -5824,6 +5882,34 @@ async function refreshAbout() {
 }
 if (settingsBtnEl)
   settingsBtnEl.addEventListener("click", refreshAbout);
+/* Cycle 4 I10: What's new - the bundled changelog,
+   readable in-app (until now only the newest entry
+   ever surfaced, inside a chat answer). */
+const whatsNewBtn = $("setWhatsNew");
+if (whatsNewBtn)
+  whatsNewBtn.onclick = async () => {
+    const box = studioPanel("What's new");
+    let d;
+    try {
+      d = await (await fetch("changelog.json")).json();
+    } catch (e) {
+      box.textContent = "The bundled changelog could " +
+        "not be read on this build.";
+      return;
+    }
+    box.textContent = "";
+    for (const en of (d.entries || []).slice(0, 6)) {
+      const row = document.createElement("div");
+      row.className = "todorow";
+      const lab = document.createElement("span");
+      lab.textContent = "v" + en.version + " (" +
+        en.date + ") - " + en.goal + "\n" + en.summary;
+      row.appendChild(lab);
+      box.appendChild(row);
+    }
+    if (!box.children.length)
+      box.textContent = "No changelog entries bundled.";
+  };
 const runFixBtn = $("runFix");
 if (runFixBtn)
   runFixBtn.onclick = () => {
@@ -12576,11 +12662,20 @@ $("toolVerify").onclick = async () => {
       problems: d.checks.problems.length,
       tests: d.tests.passed + "/" + d.tests.total });
     localStorage.setItem(key,
-      JSON.stringify(hist.slice(0, 5)));
-    const lines = hist.slice(0, 5).map((h) =>
-      h.at + " - " + h.level + " - " + h.checked +
-      " checked, " + h.problems + " problem(s), tests " +
-      h.tests);
+      JSON.stringify(hist.slice(0, 12)));
+    /* Cycle 4 I7: keep twelve and mark the problem
+       trend against the previous run, so the history
+       reads as a direction, not just a list. */
+    const lines = hist.slice(0, 12).map((h, i, a) => {
+      const prev = a[i + 1];
+      const trend = !prev ? ""
+        : h.problems < prev.problems ? " ▼ fewer problems"
+        : h.problems > prev.problems ? " ▲ more problems"
+        : " = same problems";
+      return h.at + " - " + h.level + " - " + h.checked +
+        " checked, " + h.problems + " problem(s), tests " +
+        h.tests + trend;
+    });
     $("runOut").textContent = d.report +
       "\n\nRecent verify runs on this device:\n" +
       lines.join("\n");
