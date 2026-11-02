@@ -32813,7 +32813,8 @@
       sliceBudget: 6e3,
       attachSelection: true,
       attachDiff: false,
-      agentRepairRounds: 3
+      agentRepairRounds: 3,
+      agentMaxSteps: 50
     },
     JSON.parse(localStorage.getItem("ghostide-settings") || "{}")
   );
@@ -36419,6 +36420,36 @@
     if (menuTarget) openSplit(menuTarget.path);
   };
   $("ckptBtn").onclick = () => openCheckpointsPanel();
+  var agentNotesBtn = $("agentNotesBtn");
+  if (agentNotesBtn)
+    agentNotesBtn.onclick = async () => {
+      const box = studioPanel("Agent notes");
+      let content2 = "";
+      try {
+        const r = await fetch("/api/file?path=" + encodeURIComponent(".ghostide/agent-notes.md"));
+        const d = await r.json();
+        if (!d.error) content2 = d.content || "";
+      } catch (e) {
+      }
+      box.textContent = "";
+      const pre = document.createElement("pre");
+      pre.textContent = content2.trim() ? content2 : "(no agent notes yet - the agent writes them with its NOTE action)";
+      box.appendChild(pre);
+      if (content2.trim()) {
+        const clr = document.createElement("button");
+        clr.className = "ghostbtn";
+        clr.textContent = "Clear notes";
+        clr.onclick = async () => {
+          await postJson(
+            "/api/file",
+            { path: ".ghostide/agent-notes.md", content: "" }
+          );
+          pre.textContent = "(notes cleared)";
+          clr.remove();
+        };
+        box.appendChild(clr);
+      }
+    };
   $("agentResumeBtn").onclick = () => {
     const active = agentActiveLoad();
     if (!active || !active.task) {
@@ -42471,6 +42502,12 @@
     "MCP <server> <tool> <json-args> - call a tool on a",
     "  configured MCP server; your briefing lists the servers",
     "  and tools available, if any",
+    "EXPLORE <question> - delegate a focused read-only",
+    "  question to a sub-run (it can only read and search);",
+    "  its summary comes back to you as the result",
+    "NOTE <text> - append one line to your own scratchpad",
+    "  (.ghostide/agent-notes.md), which your briefing",
+    "  includes on future runs in this workspace",
     "Depending on the user's approval policy, RUN and DELETE",
     "may go to an approval queue instead of happening; the",
     "result message will say so when it does.",
@@ -42642,10 +42679,12 @@
       todos: normalizeAgentTodos(todos)
     };
   }
-  function agentStateSummary(staged, deletions, todos) {
+  function agentStateSummary(staged, deletions, todos, problems) {
     const files = Object.keys(staged || {});
     const open = normalizeAgentTodos(todos).filter((t2) => !t2.done).map((t2) => t2.text);
-    return "State so far: " + files.length + " file(s) staged" + (files.length ? " (" + files.join(", ") + ")" : "") + ((deletions || []).length ? "; deletions staged: " + deletions.join(", ") : "") + (open.length ? "; open plan items: " + open.join(" | ") : "") + ".";
+    return "State so far: " + files.length + " file(s) staged" + (files.length ? " (" + files.join(", ") + ")" : "") + ((deletions || []).length ? "; deletions staged: " + deletions.join(", ") : "") + (open.length ? "; open plan items: " + open.join(" | ") : "") + /* Cycle 6 I10: open check problems survive
+       compaction too - they are what a repair is for. */
+    ((problems || []).length ? "; open check problems: " + problems.join(" | ") : "") + ".";
   }
   function compactAgentMessages(messages, summary, limit) {
     const cap = limit || 56e3;
@@ -42695,6 +42734,10 @@
     if (m) return { type: "test", path: m[1] || "" };
     m = text.match(/^\s*GIT\s+(status|diff|log)\s*$/im);
     if (m) return { type: "git", what: m[1].toLowerCase() };
+    m = text.match(/^\s*EXPLORE\s+(.+)$/m);
+    if (m) return { type: "explore", question: m[1].trim() };
+    m = text.match(/^\s*NOTE\s+(.+)$/m);
+    if (m) return { type: "note", text: m[1].trim() };
     m = text.match(/^\s*MCP\s+(\S+)\s+(\S+)(?:\s+(\{[\s\S]*\}))?\s*$/m);
     if (m) {
       let args = {};
@@ -42728,7 +42771,7 @@
     "git",
     "context"
   ];
-  var AGENT_BATCH_BLOCK = /^\s*(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST|MCP)\b/;
+  var AGENT_BATCH_BLOCK = /^\s*(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST|MCP|EXPLORE|NOTE)\b/;
   function parseAgentLine(line) {
     const t2 = (line || "").trim();
     if (!t2) return null;
@@ -42863,6 +42906,22 @@
         );
       } catch (e) {
       }
+    };
+  }
+  var agentStepsSel = $("agentStepsSel");
+  if (agentStepsSel) {
+    agentStepsSel.value = String(settings.agentMaxSteps || 50);
+    agentStepsSel.onchange = () => {
+      settings.agentMaxSteps = Number(agentStepsSel.value) || 50;
+      saveSettings();
+    };
+  }
+  var agentRepairSel = $("agentRepairSel");
+  if (agentRepairSel) {
+    agentRepairSel.value = String(settings.agentRepairRounds ?? 3);
+    agentRepairSel.onchange = () => {
+      settings.agentRepairRounds = Number(agentRepairSel.value);
+      saveSettings();
     };
   }
   function agentTodosSave(todos) {
@@ -43014,38 +43073,143 @@
       readCache.set(path, d.content);
       return d.content;
     }
+    async function batchPart(a) {
+      if (a.type === "read") {
+        const c = await readForAgent(a.path);
+        return c == null ? "READ failed: " + a.path + " does not exist yet. You may create it with WRITE." : "Content of " + a.path + ":\n```\n" + c.slice(0, 8e3) + "\n```";
+      }
+      if (a.type === "search") {
+        const d = await postJson(
+          "/api/search",
+          { query: a.query }
+        );
+        const ms = (d.matches || []).slice(0, 20);
+        return "Search results for " + a.query + ":\n" + (ms.length ? ms.map((x) => x.path + ":" + x.line + " " + x.text).join("\n") : "(no matches)");
+      }
+      if (a.type === "list") {
+        const fr = await fetch("/api/files");
+        const fd = await fr.json();
+        let names = (fd.files || []).filter((x) => x.type === "file").map((x) => x.path);
+        if (a.path) names = names.filter((p) => p === a.path || p.startsWith(a.path + "/"));
+        return "Files" + (a.path ? " under " + a.path : "") + ":\n" + names.slice(0, 120).join("\n");
+      }
+      if (a.type === "todo") {
+        todos = addAgentTodo(todos, a.text);
+        return "Plan item added: " + a.text;
+      }
+      if (a.type === "stepdone") {
+        todos = completeAgentTodo(todos, a.text);
+        return "Plan item marked done: " + a.text;
+      }
+      return agentToolText(a);
+    }
     async function runBatch(acts) {
-      const parts = [];
-      for (const a of acts) {
+      const pure = acts.every((a) => a.type !== "todo" && a.type !== "stepdone");
+      let parts;
+      if (pure) {
+        parts = await Promise.all(acts.map(batchPart));
+      } else {
+        parts = [];
+        for (const a of acts) parts.push(await batchPart(a));
+      }
+      persist();
+      renderAgentTodos(todos, checkpoints);
+      return parts.join("\n\n");
+    }
+    const EXPLORE_RULES = [
+      "You are a read-only explorer for a larger agent task.",
+      "Answer the question using only: READ, SEARCH, LIST,",
+      "REVERSE, ECO, GIT, CONTEXT (one action per reply, or a",
+      "batch of read-only actions, one per line). You cannot",
+      "write, run, delete, or call MCP tools. Finish with",
+      "DONE <a compact summary answering the question, with",
+      "file paths and line-level facts, no speculation>."
+    ].join("\n");
+    async function runExplore(question3) {
+      const msgs = [
+        { role: "system", content: BEHAVIOR.systemPrompt + "\n\n" + EXPLORE_RULES },
+        { role: "user", content: "Question: " + question3 }
+      ];
+      let nudged = 0;
+      for (let s = 1; s <= 6; s++) {
+        if (agentStop) return "(explore stopped)";
+        let reply = "";
+        try {
+          reply = await collectChat(msgs, 1024);
+        } catch (e) {
+          return "(explore failed: model call error)";
+        }
+        msgs.push({ role: "assistant", content: reply });
+        const batch = parseAgentBatch(
+          reply,
+          [
+            "read",
+            "search",
+            "list",
+            "reverse",
+            "eco",
+            "git",
+            "context"
+          ]
+        );
+        if (batch.length > 1) {
+          const out = await runBatch(batch);
+          msgs.push({ role: "user", content: "Batch results:\n" + out.slice(0, 12e3) + "\nContinue or finish with DONE <summary>." });
+          continue;
+        }
+        const a = parseAgentActionFull(reply);
+        if (a.type === "done")
+          return "Explore summary: " + (a.summary || "(no summary given)");
         if (a.type === "read") {
           const c = await readForAgent(a.path);
-          parts.push(c == null ? "READ failed: " + a.path + " does not exist yet. You may create it with WRITE." : "Content of " + a.path + ":\n```\n" + c.slice(0, 8e3) + "\n```");
+          msgs.push({ role: "user", content: c == null ? "READ failed: " + a.path + " does not exist." : "Content of " + a.path + ":\n```\n" + c.slice(0, 8e3) + "\n```" });
         } else if (a.type === "search") {
           const d = await postJson(
             "/api/search",
             { query: a.query }
           );
           const ms = (d.matches || []).slice(0, 20);
-          parts.push("Search results for " + a.query + ":\n" + (ms.length ? ms.map((x) => x.path + ":" + x.line + " " + x.text).join("\n") : "(no matches)"));
+          msgs.push({ role: "user", content: "Search results for " + a.query + ":\n" + (ms.length ? ms.map((x) => x.path + ":" + x.line + " " + x.text).join("\n") : "(no matches)") });
         } else if (a.type === "list") {
           const fr = await fetch("/api/files");
           const fd = await fr.json();
           let names = (fd.files || []).filter((x) => x.type === "file").map((x) => x.path);
           if (a.path) names = names.filter((p) => p === a.path || p.startsWith(a.path + "/"));
-          parts.push("Files" + (a.path ? " under " + a.path : "") + ":\n" + names.slice(0, 120).join("\n"));
-        } else if (a.type === "todo") {
-          todos = addAgentTodo(todos, a.text);
-          parts.push("Plan item added: " + a.text);
-        } else if (a.type === "stepdone") {
-          todos = completeAgentTodo(todos, a.text);
-          parts.push("Plan item marked done: " + a.text);
+          msgs.push({ role: "user", content: "Files:\n" + names.slice(0, 120).join("\n") });
+        } else if (["reverse", "eco", "git", "context"].includes(a.type)) {
+          msgs.push({
+            role: "user",
+            content: await agentToolText(a)
+          });
         } else {
-          parts.push(await agentToolText(a));
+          nudged++;
+          if (nudged > 1)
+            return "(explore produced no summary)";
+          msgs.push({ role: "user", content: "Read-only actions only, and no nested EXPLORE. Use READ, SEARCH, LIST, REVERSE, ECO, GIT or CONTEXT, then DONE <summary>." });
         }
       }
-      persist();
-      renderAgentTodos(todos, checkpoints);
-      return parts.join("\n\n");
+      return "(explore hit its 6-step cap without a summary)";
+    }
+    async function noteAppend(text) {
+      const path = ".ghostide/agent-notes.md";
+      let cur2 = "";
+      try {
+        const r = await fetch("/api/file?path=" + encodeURIComponent(path));
+        const d2 = await r.json();
+        if (!d2.error) cur2 = d2.content || "";
+      } catch (e) {
+      }
+      let next = cur2 + "- " + text + "\n";
+      if (next.length > 8e3) {
+        const tail = next.slice(next.length - 7500);
+        const nl = tail.indexOf("\n");
+        next = "(older notes trimmed to the 8 KB cap)\n" + (nl > 0 ? tail.slice(nl + 1) : tail);
+      }
+      const d = await postJson(
+        "/api/file",
+        { path, content: next }
+      );
+      return !d.error;
     }
     function snapshot(label, step) {
       const cp = makeAgentCheckpoint(
@@ -43094,6 +43258,21 @@
       const es = Object.entries(emStore()).slice(-5);
       if (es.length)
         memText += "\n\nError memory (past errors and what fixed them):\n" + es.map(([sig, v]) => sig + " -> " + (v && v.fix ? v.fix : JSON.stringify(v).slice(0, 200))).join("\n");
+    } catch (e) {
+    }
+    try {
+      const nr = await fetch("/api/file?path=" + encodeURIComponent(".ghostide/agent-notes.md"));
+      const nd = await nr.json();
+      if (!nd.error && nd.content && nd.content.trim())
+        memText += "\n\nYour agent notes from earlier runs (your own scratchpad):\n" + nd.content.slice(-1500);
+    } catch (e) {
+    }
+    try {
+      const lr = await fetch("/api/eco/replay/list");
+      const ld = await lr.json();
+      const last2 = (ld.sessions || [])[0];
+      if (last2)
+        memText += '\n\nYour last recorded run in this workspace: "' + String(last2.task || "").slice(0, 120) + '" (' + (last2.saved_at || "") + ", " + (last2.steps || 0) + " recorded step(s)).";
     } catch (e) {
     }
     try {
@@ -43162,7 +43341,9 @@
     if (memText)
       addMsg("SYSTEM", "\u{1F4DA} Agent primed with project memory (GhostRecall + error memory).");
     const messages = [
-      { role: "system", content: BEHAVIOR.systemPrompt + "\n\n" + AGENT_RULES + (mapText ? "\n\n" + mapText : "") + (memText ? "\n\nProject memory for this task:\n" + memText.slice(0, 8e3) : "") + (opts.plan ? "\n\nApproved plan:\n" + opts.plan : "") },
+      { role: "system", content: BEHAVIOR.systemPrompt + "\n\n" + AGENT_RULES + (mapText ? "\n\n" + mapText : "") + (memText ? "\n\nProject memory for this task:\n" + memText.slice(0, 8e3) : "") + (opts.plan ? "\n\nApproved plan:\n" + opts.plan : "") + /* Cycle 6 I6: state the run's real budget when
+         the user's setting moves it off the default. */
+      ((Number(settings.agentMaxSteps) || 50) !== AGENT_MAX_STEPS ? "\n\nYour step budget for this run is " + (Number(settings.agentMaxSteps) || 50) + " actions." : "") },
       { role: "user", content: "Task: " + task + (currentFile ? "\nThe user is currently editing: " + currentFile : "") + (todos.length ? "\nPlan items: " + todos.map((t2, i2) => i2 + 1 + ". " + t2.text).join(" | ") : "") }
     ];
     snapshot("task start", 0);
@@ -43172,6 +43353,7 @@
     let repairs = 0;
     let lastSig = "";
     let sigCount = 0;
+    let lastBad = [];
     const repairCap = Math.max(0, Math.min(
       5,
       Number(settings.agentRepairRounds ?? 3) || 0
@@ -43182,13 +43364,18 @@
       for (const [p, c] of staged)
         notes.push(await agentCheckOne(p, c));
       const bad = notes.filter((n) => n.includes("PROBLEM"));
+      lastBad = bad;
       if (!bad.length) return true;
       repairs++;
       addMsg("SYSTEM", "\u{1F6E0} DONE held: " + bad.length + " staged check(s) failing (repair round " + repairs + "/" + repairCap + ")");
       messages.push({ role: "user", content: "DONE refused: your staged changes fail their automatic checks:\n" + bad.join("\n") + "\nFix them with WRITE or EDIT, then finish with DONE again." });
       return false;
     }
-    for (let step = 1; step <= AGENT_MAX_STEPS; step++) {
+    const stepCap = Math.max(10, Math.min(
+      120,
+      Number(settings.agentMaxSteps) || 50
+    ));
+    for (let step = 1; step <= stepCap; step++) {
       if (thermalWatchdog() === "stop") {
         addMsg("SYSTEM", "\u{1F321} Agent stopped: the device reached severe heat. (Thermal guard.)");
         agentStop = true;
@@ -43197,7 +43384,9 @@
         outcome = "stopped";
         break;
       }
-      addMsg("SYSTEM", "\u{1F916} step " + step + "/" + AGENT_MAX_STEPS);
+      addMsg("SYSTEM", "\u{1F916} step " + step + "/" + stepCap);
+      if (step > 1 && step % 10 === 1)
+        addMsg("SYSTEM", "\u{1F4CA} " + (step - 1) + " steps in, " + Math.round((Date.now() - agentT0) / 1e3) + "s elapsed, " + staged.size + " file(s) staged, " + repairs + " repair round(s) used.");
       let reply = "";
       try {
         const compacted = compactAgentMessages(
@@ -43205,7 +43394,8 @@
           agentStateSummary(
             Object.fromEntries(staged),
             [...deletions],
-            todos
+            todos,
+            lastBad
           )
         );
         reply = await collectChat(compacted, 2048);
@@ -43218,6 +43408,12 @@
       const batch = parseAgentBatch(reply);
       if (batch.length > 1) {
         addMsg("SYSTEM", "\u{1F9FA} Batch of " + batch.length + " actions: " + batch.map((a) => a.type.toUpperCase()).join(", "));
+        for (const a of batch)
+          trail.push({
+            step,
+            type: a.type,
+            target: a.path || a.query || a.tool || ""
+          });
         const out = await runBatch(batch);
         messages.push({ role: "user", content: "Batch results:\n" + out.slice(0, 16e3) + "\nContinue with the next action (or a batch of read-only actions)." });
         continue;
@@ -43226,7 +43422,7 @@
       trail.push({
         step,
         type: act.type,
-        target: act.path || act.command || act.query || act.server || ""
+        target: act.path || act.command || act.query || act.server || act.question || (act.text ? act.text.slice(0, 60) : "") || ""
       });
       const sig = act.type + "|" + (act.path || "") + "|" + (act.command || "") + "|" + (act.query || "");
       if (sig === lastSig) sigCount++;
@@ -43354,6 +43550,7 @@
         const notes = [];
         for (const [p, c] of staged)
           notes.push(await agentCheckOne(p, c));
+        lastBad = notes.filter((n) => n.includes("PROBLEM"));
         if (!notes.length) notes.push("nothing staged to check");
         addMsg("SYSTEM", "\u{1F50D} CHECK\n" + notes.join("\n"));
         messages.push({ role: "user", content: "Check results:\n" + notes.join("\n") + "\nFix any problems with another WRITE or EDIT, or finish with DONE." });
@@ -43406,6 +43603,15 @@
             content: t2 + "\nContinue."
           });
         }
+      } else if (act.type === "explore") {
+        addMsg("SYSTEM", "\u{1F9ED} EXPLORE " + act.question);
+        const t2 = await runExplore(act.question);
+        addMsg("SYSTEM", "\u{1F9ED} " + t2.slice(0, 300));
+        messages.push({ role: "user", content: t2 + "\nContinue the main task." });
+      } else if (act.type === "note") {
+        const ok = await noteAppend(act.text);
+        addMsg("SYSTEM", "\u{1F5D2} NOTE " + (ok ? "saved to your scratchpad" : "FAILED to save"));
+        messages.push({ role: "user", content: ok ? "Note saved. It will be in your briefing on future runs in this workspace. Continue." : "Saving the note failed. Continue without it." });
       } else if ([
         "reverse",
         "eco",
@@ -43433,7 +43639,7 @@
           outcome = "failed";
           break;
         }
-        messages.push({ role: "user", content: "That reply had no action. Reply with exactly one action: READ, SEARCH, LIST, WRITE, EDIT, RUN, DELETE, TODO, STEP_DONE, CHECK, REVERSE, ECO, VERIFY, TEST, GIT, MCP, DONE, or ASK - or a batch of read-only actions, one per line." });
+        messages.push({ role: "user", content: "That reply had no action. Reply with exactly one action: READ, SEARCH, LIST, WRITE, EDIT, RUN, DELETE, TODO, STEP_DONE, CHECK, REVERSE, ECO, VERIFY, TEST, GIT, MCP, EXPLORE, NOTE, DONE, or ASK - or a batch of read-only actions, one per line." });
       }
       if (sigCount === 3)
         messages.push({ role: "user", content: "Warning: you have repeated the same action 3 times. If it is not producing new information, change approach or finish with DONE." });
@@ -43460,7 +43666,7 @@
       addMsg("SYSTEM", "Agent stopped by you. Nothing was written - the staged changes stay saved as a resumable task (Chat options: Resume agent task).");
       persist();
     } else if (outcome === "cap") {
-      addMsg("SYSTEM", "Agent hit the " + AGENT_MAX_STEPS + "-step cap.");
+      addMsg("SYSTEM", "Agent hit the " + stepCap + "-step cap.");
     }
     if ((outcome === "done" || outcome === "cap") && (staged.size || deletions.size)) {
       agentActiveClear();

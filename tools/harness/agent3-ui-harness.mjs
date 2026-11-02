@@ -32,7 +32,9 @@ ck("batching exists and fences disqualify a batch",
    block.includes('if (text.includes("```")) return [];'));
 ck("writes block a batch",
    block.includes("AGENT_BATCH_BLOCK") &&
-   block.includes("(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST|MCP)"));
+   /* Cycle 6: EXPLORE and NOTE joined the fence -
+      both are single-action only by design. */
+   block.includes("(WRITE|EDIT|RUN|DELETE|DONE|ASK|CHECK|VERIFY|TEST|MCP|EXPLORE|NOTE)"));
 ck("ACT loop runs batches and the toolbelt",
    src.includes("const batch = parseAgentBatch(reply);") &&
    src.includes("await runBatch(batch)") &&
