@@ -606,3 +606,20 @@ upload is attempted unless he asks for a link.
       unchanged at 101 - all Cycle 4 UI is textContent.
       A9 pins hold (29 tools, ghostmcp 0.3.2, e13).
       A10 atomic writes intact.
+- [x] A11-A15 PASS (v2.77): signer verified live on
+      the v2.76 APK (8ea8684a..., unbroken). Route
+      census: 136 desktop / 126 Java - Cycle 4 changed
+      zero routes; census recorded as the Cycle 5
+      baseline. Name pins intact; history delta is
+      display-only; malformed JSON probed live: clean
+      {error} on tools + decide, server healthy after.
+- [x] A16-A20 PASS (v2.78), A17 DEEPENED + 1 fix:
+      timeout census unchanged (13 calls, 0 unbounded).
+      A17 hammer: 6 enqueues, 6 parallel reads (valid),
+      6 parallel denies - all executed:false, ledger
+      coherent. A18 shapes plain. A19: labels honest;
+      FIX - snapshot deltas under 1 KB claimed a full
+      "1 KB"; they now read "about the same size".
+      A20: verdicts here + Cycle 4 posture note in
+      BUILD_NOTES. CYCLE 4 COMPLETE: improvements
+      v2.71-v2.74, audits v2.75-v2.78.

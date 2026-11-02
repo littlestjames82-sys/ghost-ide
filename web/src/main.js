@@ -9565,14 +9565,19 @@ $("toolHistory").onclick = async () => {
     const row = document.createElement("div");
     row.className = "findRow";
     /* Cycle 4 I11: size the snapshot against the file
-       as it stands now, so picking one is informed. */
+       as it stands now, so picking one is informed.
+       A19 (Cycle 4 audits): sub-KB differences used to
+       round up to a claimed "1 KB" - under 1 KB apart
+       the honest label is "about the same size". */
     const now = view ? view.state.doc.length : 0;
-    const delta = now ? (e.size === now ? " · same size as now"
-      : e.size < now
-        ? " · " + Math.max(1, Math.round((now - e.size)
-            / 1024)) + " KB smaller than now"
-        : " · " + Math.max(1, Math.round((e.size - now)
-            / 1024)) + " KB larger than now") : "";
+    const diff = now ? e.size - now : 0;
+    const delta = !now ? ""
+      : Math.abs(diff) < 1024 ? " · about the same size as now"
+      : diff < 0
+        ? " · " + Math.round(-diff / 1024) +
+          " KB smaller than now"
+        : " · " + Math.round(diff / 1024) +
+          " KB larger than now";
     row.textContent = "🕘 " + fmtSnapTs(e.ts) + "  ·  " +
       Math.max(1, Math.round(e.size / 1024)) + " KB" + delta;
     row.onclick = async () => {
