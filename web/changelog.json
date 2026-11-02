@@ -3,6 +3,12 @@
  "kind": "changelog",
  "entries": [
   {
+   "version": "2.83.0",
+   "date": "Nov 2, 2026",
+   "goal": "Campaign Cycle 5 audit batch 1: pairing, traversal, atomic writes, secret sweep, bundle pins",
+   "summary": "The fifth cycle's audits open by re-proving the foundations on current code: the pairing gate still wraps every request path, workspace traversal and the new commit route's hash pin refuse bad input live, file writes stay atomic on both servers, a secret canary planted in the workspace appears in none of the probed responses, and the ecosystem bundle pins are unchanged."
+  },
+  {
    "version": "2.82.0",
    "date": "Nov 2, 2026",
    "goal": "Campaign Cycle 5 batch 4: commit viewer, summary copies, priming change names",

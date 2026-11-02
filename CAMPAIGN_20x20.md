@@ -666,3 +666,17 @@ upload is attempted unless he asks for a link.
       first three changed paths (+N more), not just
       the count. CYCLE 5 IMPROVEMENTS COMPLETE
       (v2.79-v2.82).
+
+## Cycle 5 audits (v2.83-v2.86) - vs the Cycle 4 census baseline
+- [x] C5-A1 PASS (v2.83): pair gate wraps do_GET/
+      do_POST once each; viewer check intact (pin).
+- [x] C5-A2 PASS (v2.83): traversal refused live;
+      the NEW show route's hex pin refused
+      traversal-shaped and overlong hashes live.
+- [x] C5-A3 PASS (v2.83): atomic writes intact
+      (os.replace / ATOMIC_MOVE pins).
+- [x] C5-A4 PASS (v2.83): canary sweep live on
+      current code - 0 hits on git/status, health,
+      eco/info, files, git/log.
+- [x] C5-A5 PASS (v2.83): eco gate green; generation
+      e13, 29 tools, ghostmcp 0.3.2 unchanged.
