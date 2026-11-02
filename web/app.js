@@ -37523,6 +37523,26 @@
         $("dataOut").textContent = "The packs list failed to reach the server.";
       }
     };
+  var dataPackViewBtn = $("dataPackView");
+  if (dataPackViewBtn)
+    dataPackViewBtn.onclick = async () => {
+      const name2 = prompt(
+        "Pack name to view (exact, e.g. data-pack-sales):",
+        ""
+      );
+      if (!name2) return;
+      try {
+        const d = await postJson(
+          "/api/eco/datapack/view",
+          { name: name2 }
+        );
+        $("dataTitle").textContent = "\u{1F441} " + name2;
+        $("dataOut").textContent = d.error || d.output || "(empty pack summary)";
+        $("dataPane").classList.remove("hidden");
+      } catch (e) {
+        $("dataOut").textContent = "The pack view failed to reach the server.";
+      }
+    };
   var runSliceBtn = $("runSlice");
   if (runSliceBtn)
     runSliceBtn.onclick = async () => {
@@ -37589,10 +37609,34 @@
     rendersBtn.className = "ghostbtn";
     rendersBtn.textContent = "Recent renders";
     rendersBtn.onclick = async () => {
-      box.textContent = await studioCall(
-        "ghostrecipes",
-        "renders"
-      );
+      const out2 = await studioCall("ghostrecipes", "renders");
+      let renders = null;
+      try {
+        renders = JSON.parse(out2);
+      } catch (e) {
+      }
+      if (!Array.isArray(renders)) {
+        box.textContent = out2;
+        return;
+      }
+      box.textContent = "";
+      const rh = document.createElement("div");
+      rh.className = "dim";
+      rh.textContent = renders.length ? renders.length + " render(s) in .ghostide, newest first. Open reads the checklist." : "No renders yet in this workspace.";
+      box.appendChild(rh);
+      for (const r of renders) {
+        const row = document.createElement("div");
+        row.className = "todorow";
+        const lab = document.createElement("span");
+        lab.textContent = r.name + " - " + r.size + " B";
+        row.appendChild(lab);
+        const ob = document.createElement("button");
+        ob.className = "ghostbtn";
+        ob.textContent = "Open";
+        ob.onclick = () => openFile(".ghostide/" + r.name);
+        row.appendChild(ob);
+        box.appendChild(row);
+      }
     };
     box.appendChild(rendersBtn);
     for (const r of items) {
@@ -37889,6 +37933,29 @@
         (s) => s.server + " (" + s.calls + " calls)"
       ).join(", ");
       todoResults.appendChild(note);
+      for (const s of d.sessions) {
+        const row = document.createElement("div");
+        row.className = "todorow";
+        const lab = document.createElement("span");
+        lab.textContent = s.server + " session";
+        row.appendChild(lab);
+        const rb = document.createElement("button");
+        rb.className = "ghostbtn";
+        rb.textContent = "Restart";
+        rb.onclick = async () => {
+          rb.disabled = true;
+          try {
+            await postJson(
+              "/api/mcp/restart",
+              { server: s.server }
+            );
+          } catch (e) {
+          }
+          openMcpPanel();
+        };
+        row.appendChild(rb);
+        todoResults.appendChild(row);
+      }
     } catch (e) {
     }
   };
@@ -37947,6 +38014,19 @@
     };
   if (settingsBtnEl)
     settingsBtnEl.addEventListener("click", refreshMcpInfo);
+  async function refreshPairInfo() {
+    const el = $("setPairInfo");
+    if (!el) return;
+    try {
+      const d = await (await fetch("/api/pair/devices")).json();
+      const devs = d && d.devices || [];
+      el.textContent = devs.length ? devs.map((x) => x.role + " until " + new Date(x.expires * 1e3).toLocaleTimeString()).join(", ") : "none paired";
+    } catch (e) {
+      el.textContent = "unavailable";
+    }
+  }
+  if (settingsBtnEl)
+    settingsBtnEl.addEventListener("click", refreshPairInfo);
   var runFixBtn = $("runFix");
   if (runFixBtn)
     runFixBtn.onclick = () => {
@@ -42403,6 +42483,12 @@
       const bd = await postJson("/api/eco/board", {});
       const line = boardSummaryLine(bd);
       if (line) memText += "\n\nStudio board: " + line + ".";
+    } catch (e) {
+    }
+    try {
+      const gs = await (await fetch("/api/git/status")).json();
+      if (gs && gs.branch)
+        memText += "\n\nGit: on branch " + gs.branch + ", " + (gs.changes || []).length + " changed file(s) not yet committed.";
     } catch (e) {
     }
     if (memText)

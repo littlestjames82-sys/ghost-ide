@@ -197,9 +197,9 @@
    "tests_failed": 0
   },
   "ghostmcp": {
-   "version": "0.3.0",
+   "version": "0.3.1",
    "files": 5,
-   "src_bytes": 37982,
+   "src_bytes": 38341,
    "tests_passed": 15,
    "tests_failed": 0
   }

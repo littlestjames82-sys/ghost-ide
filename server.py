@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.62.0"
+APP_VERSION = "2.63.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2858,20 +2858,17 @@ def eco_studio(tool, verb, arg, arg2, ws):
         if verb == "renders":
             # Cycle 2 I12: render history - the checklist
             # files renders wrote into .ghostide, newest
-            # first.
+            # first. Cycle 3 I5: JSON, so the shelf can
+            # offer an Open button per render.
             files = sorted(
                 gi.glob("recipe-*.md"),
                 key=lambda f: f.stat().st_mtime,
                 reverse=True)[:20]
-            if not files:
-                return "No renders yet in this workspace."
-            return "\n".join(
-                "%s - %d B - %s" % (
-                    f.name, f.stat().st_size,
-                    time.strftime(
-                        "%Y-%m-%d %H:%M",
-                        time.localtime(f.stat().st_mtime)))
-                for f in files)
+            return json.dumps([{
+                "name": f.name,
+                "size": f.stat().st_size,
+                "mtime": int(f.stat().st_mtime),
+            } for f in files])
         if verb == "list":
             return run(tool, ["list", "--library", lib,
                               "--json"])
@@ -4909,6 +4906,18 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/pair/peers":
                 return self.send_json({"peers": pair_snapshot()})
+            if parsed.path == "/api/pair/devices":
+                # Cycle 3 I2: paired guest tokens as
+                # metadata only - role + issue + expiry.
+                # Token values never leave the server.
+                now = time.time()
+                devices = [{
+                    "role": rec[0],
+                    "issued": int(rec[1]),
+                    "expires": int(rec[1] + PAIR_TOKEN_TTL),
+                } for rec in PAIR_TOKENS.values()
+                    if now - rec[1] <= PAIR_TOKEN_TTL]
+                return self.send_json({"devices": devices})
             if parsed.path == "/api/todos":
                 # TODO/FIXME scanner (Tools pack): markers across the
                 # workspace, clickable in the UI to jump to the line.
@@ -5755,6 +5764,34 @@ class Handler(SimpleHTTPRequestHandler):
                 import shutil as _sh
                 _sh.rmtree(target)
                 return self.send_json({"ok": True})
+            if parsed.path == "/api/eco/datapack/view":
+                # Cycle 3 I4: read a pack's prompt summary.
+                # Same namespace pin as delete; reads stay
+                # inside the pack directory.
+                data = self.read_json()
+                name = str(data.get("name") or "")
+                if not _re_mod.fullmatch(
+                        r"data-pack-[A-Za-z0-9_.-]+", name) \
+                        or ".." in name:
+                    return self.send_json(
+                        {"error": "not a pack name"}, 400)
+                pack = (WORKSPACE / ".ghostide" / name)
+                if not pack.is_dir():
+                    return self.send_json(
+                        {"error": "no such pack"}, 400)
+                doc = pack / "PROMPT.md"
+                if not doc.is_file():
+                    mds = sorted(pack.glob("*.md"))
+                    doc = mds[0] if mds else None
+                if doc is None:
+                    return self.send_json(
+                        {"error": "the pack has no readable "
+                                  "summary"}, 400)
+                return self.send_json({
+                    "ok": True,
+                    "output": doc.read_text(
+                        encoding="utf-8",
+                        errors="replace")[:40000]})
             if parsed.path == "/api/eco/slicelog":
                 # E13: run output -> GhostLogs incident pack.
                 data = self.read_json()
@@ -5825,6 +5862,18 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/mcp/restart":
                 # Cycle 2 I15: drop every persistent
                 # session; the next call respawns.
+                # Cycle 3 I1: with a server name, drop
+                # only that session via the daemon.
+                data = self.read_json()
+                server = str(data.get("server") or "")
+                if server:
+                    try:
+                        _MCP_DAEMON.request(
+                            {"verb": "drop",
+                             "server": server})
+                    except Exception:
+                        pass  # no live session to drop
+                    return self.send_json({"ok": True})
                 _MCP_DAEMON._stop()
                 globals()["_MCP_DAEMON_DOWN_UNTIL"] = 0.0
                 return self.send_json({"ok": True})

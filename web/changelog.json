@@ -3,6 +3,12 @@
  "kind": "changelog",
  "entries": [
   {
+   "version": "2.63.0",
+   "date": "Nov 1, 2026",
+   "goal": "Campaign Cycle 3 batch 1: per-server MCP restart, paired devices, git-aware agent, pack viewer, openable renders",
+   "summary": "Cycle 3 opens with depth where Cycle 2 added surface. MCP sessions can now be restarted one server at a time from the panel (the daemon gained a drop verb) instead of nuking them all. Settings shows who is paired - roles and expiry only, token values never leave the server. The agent's priming now includes the git state (branch and uncommitted count) next to the board line. Data packs can be viewed, not just listed and deleted, through the same namespace-pinned route discipline. Recipe renders became real list items with Open buttons. Everything was proven live against fixtures before shipping, which caught one import bug in the new devices route before it could ship."
+  },
+  {
    "version": "2.62.0",
    "date": "Nov 1, 2026",
    "goal": "Campaign Cycle 2 audit batch 4: A16-A20 re-run, concurrency deepened - Cycle 2 complete",

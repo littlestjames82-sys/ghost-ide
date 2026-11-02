@@ -399,3 +399,60 @@ hammer on the session daemon + approve store together).
       consolidated Cycle 2 posture note in the v2.62
       entry. CYCLE 2 COMPLETE: improvements v2.55-
       v2.58, audits v2.59-v2.62.
+
+# Cycle 3 (v2.63-v2.70) - defined Nov 1, 2026
+Ryan's "Continue" after Cycle 2 closed. Same shape: 20
+improvements in four batches of five (v2.63-v2.66),
+then A1-A20 re-run deepening A4/A5 (the new restart +
+pairing routes), A13 (pack view pin) and A17 (hammer
+with per-server restarts mixed in) as v2.67-v2.70, plus
+the Cycle 3 posture note.
+
+## Cycle 3 improvements
+Batch 1 (v2.63): C3-I1 per-server MCP session restart
+(drop verb in the daemon; panel rows gain Restart).
+C3-I2 paired-devices readout (roles + expiry, never
+token values; Settings). C3-I3 agent priming gains git
+state (branch + changed count). C3-I4 pack viewer
+(namespace-pinned view route; PROMPT.md). C3-I5 studio
+renders return JSON; shelf lists renders with Open
+buttons.
+Batch 2 (v2.64): C3-I6 git-dirty markers in the tree.
+C3-I7 REPL "Run current file". C3-I8 eco tool run
+history (on-device, in the panel). C3-I9 verify report
+Copy summary button. C3-I10 terminal Clear button if
+missing (else verified-covered).
+Batch 3 (v2.65): C3-I11 atomic writes (temp + rename
+under the snapshot) closing the A14 residual, both
+servers. C3-I12 build self-check extended to the eco
+bundle (tool count + pinned versions inside the APK).
+C3-I13 daemon idle-session reaping (30 min). C3-I14
+approve rows show request age. C3-I15 sessions readout
+gains per-session age + last-call time.
+Batch 4 (v2.66): C3-I16 board panel Git-panel jump.
+C3-I17 palette action commands (Restart MCP sessions,
+View data packs). C3-I18 replay list shows run elapsed
+time. C3-I19 Settings About-this-build readout.
+C3-I20 one-command harness runner (tools/harness/
+run-all) with a summary line.
+- [x] C3-I1 DONE (v2.63): daemon "drop" verb (GhostMCP
+      0.3.1); /api/mcp/restart takes {server} (desktop
+      drops one session, phone clears that server's
+      list cache); MCP panel sessions gain per-server
+      Restart rows. Live-proven: drop emptied the list,
+      next call respawned (spawns +2 across the cycle).
+- [x] C3-I2 DONE (v2.63): GET /api/pair/devices both
+      servers - role + issued + expires only, tokens
+      never leave the server; Settings gains a Paired
+      devices line. (Probe caught a _time NameError in
+      the first cut; fixed to time.time().)
+- [x] C3-I3 DONE (v2.63): agent priming gains a Git
+      line (branch + changed count from /api/git/
+      status's changes array).
+- [x] C3-I4 DONE (v2.63): /api/eco/datapack/view both
+      servers, same namespace pin as delete (traversal
+      refused live); Data pane gains a View pack button
+      showing PROMPT.md.
+- [x] C3-I5 DONE (v2.63): studio renders verb returns
+      JSON on both servers; Recipes shelf lists renders
+      with Open buttons (openFile into .ghostide).

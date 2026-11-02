@@ -5089,6 +5089,26 @@ if (dataPacksBtn)
         "The packs list failed to reach the server.";
     }
   };
+const dataPackViewBtn = $("dataPackView");
+if (dataPackViewBtn)
+  dataPackViewBtn.onclick = async () => {
+    /* Cycle 3 I4: read a pack's prompt summary. */
+    const name = prompt(
+      "Pack name to view (exact, e.g. data-pack-sales):",
+      "");
+    if (!name) return;
+    try {
+      const d = await postJson("/api/eco/datapack/view",
+        { name });
+      $("dataTitle").textContent = "👁 " + name;
+      $("dataOut").textContent = d.error ||
+        d.output || "(empty pack summary)";
+      $("dataPane").classList.remove("hidden");
+    } catch (e) {
+      $("dataOut").textContent =
+        "The pack view failed to reach the server.";
+    }
+  };
 const runSliceBtn = $("runSlice");
 if (runSliceBtn)
   runSliceBtn.onclick = async () => {
@@ -5157,13 +5177,40 @@ async function openRecipesPanel() {
     "Recipes are data-only checklists - rendering one " +
     "never runs its steps.";
   box.appendChild(head);
-  /* Cycle 2 I12: what renders this workspace already has. */
+  /* Cycle 2 I12: what renders this workspace already has.
+     Cycle 3 I5: renders arrive as JSON and each opens. */
   const rendersBtn = document.createElement("button");
   rendersBtn.className = "ghostbtn";
   rendersBtn.textContent = "Recent renders";
   rendersBtn.onclick = async () => {
-    box.textContent = await studioCall(
-      "ghostrecipes", "renders");
+    const out = await studioCall("ghostrecipes", "renders");
+    let renders = null;
+    try { renders = JSON.parse(out); } catch (e) {}
+    if (!Array.isArray(renders)) {
+      box.textContent = out;
+      return;
+    }
+    box.textContent = "";
+    const rh = document.createElement("div");
+    rh.className = "dim";
+    rh.textContent = renders.length
+      ? renders.length + " render(s) in .ghostide, " +
+        "newest first. Open reads the checklist."
+      : "No renders yet in this workspace.";
+    box.appendChild(rh);
+    for (const r of renders) {
+      const row = document.createElement("div");
+      row.className = "todorow";
+      const lab = document.createElement("span");
+      lab.textContent = r.name + " - " + r.size + " B";
+      row.appendChild(lab);
+      const ob = document.createElement("button");
+      ob.className = "ghostbtn";
+      ob.textContent = "Open";
+      ob.onclick = () => openFile(".ghostide/" + r.name);
+      row.appendChild(ob);
+      box.appendChild(row);
+    }
   };
   box.appendChild(rendersBtn);
   for (const r of items) {
@@ -5454,6 +5501,27 @@ openMcpPanel = async function () {
     note.textContent = "Live sessions: " + d.sessions.map(
       (s) => s.server + " (" + s.calls + " calls)").join(", ");
     todoResults.appendChild(note);
+    /* Cycle 3 I1: restart one session at a time. */
+    for (const s of d.sessions) {
+      const row = document.createElement("div");
+      row.className = "todorow";
+      const lab = document.createElement("span");
+      lab.textContent = s.server + " session";
+      row.appendChild(lab);
+      const rb = document.createElement("button");
+      rb.className = "ghostbtn";
+      rb.textContent = "Restart";
+      rb.onclick = async () => {
+        rb.disabled = true;
+        try {
+          await postJson("/api/mcp/restart",
+            { server: s.server });
+        } catch (e) {}
+        openMcpPanel();
+      };
+      row.appendChild(rb);
+      todoResults.appendChild(row);
+    }
   } catch (e) { /* the panel already explains errors */ }
 };
 
@@ -5529,6 +5597,23 @@ if (setMcpRestartBtn)
   };
 if (settingsBtnEl)
   settingsBtnEl.addEventListener("click", refreshMcpInfo);
+/* Cycle 3 I2: paired guests readout (roles + expiry;
+   token values never reach the client). */
+async function refreshPairInfo() {
+  const el = $("setPairInfo");
+  if (!el) return;
+  try {
+    const d = await (await fetch("/api/pair/devices")).json();
+    const devs = (d && d.devices) || [];
+    el.textContent = devs.length
+      ? devs.map((x) => x.role + " until " +
+          new Date(x.expires * 1000).toLocaleTimeString())
+          .join(", ")
+      : "none paired";
+  } catch (e) { el.textContent = "unavailable"; }
+}
+if (settingsBtnEl)
+  settingsBtnEl.addEventListener("click", refreshPairInfo);
 const runFixBtn = $("runFix");
 if (runFixBtn)
   runFixBtn.onclick = () => {
@@ -10100,6 +10185,15 @@ async function runAgent(task, opts) {
     const bd = await postJson("/api/eco/board", {});
     const line = boardSummaryLine(bd);
     if (line) memText += "\n\nStudio board: " + line + ".";
+  } catch (e) { /* optional */ }
+  /* Git briefing (Cycle 3 I3): branch + how much is
+     uncommitted, so the agent plans around dirty state. */
+  try {
+    const gs = await (await fetch("/api/git/status")).json();
+    if (gs && gs.branch)
+      memText += "\n\nGit: on branch " + gs.branch + ", " +
+        ((gs.changes || []).length) +
+        " changed file(s) not yet committed.";
   } catch (e) { /* optional */ }
   if (memText)
     addMsg("SYSTEM", "📚 Agent primed with project memory " +

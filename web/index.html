@@ -139,6 +139,7 @@ setTimeout(function () {
       <div class="run-head"><span id="dataTitle">Data view</span>
         <span><button id="dataPack" title="GhostData: build the full pack (manifest, prompt summary, bounded sample) into .ghostide">📦 Pack</button>
         <button id="dataPacks" title="List the packs in this workspace and delete one by name">🗂 Packs</button>
+        <button id="dataPackView" title="Read a pack's prompt summary by its exact name">👁 View pack</button>
         <button id="dataAsk" title="Put this report in the chat box so you can ask Ghost about it">💬 Ask Ghost</button>
         <button id="dataClose">✕</button></span></div>
       <pre id="dataOut"></pre>
@@ -920,6 +921,7 @@ setTimeout(function () {
     <span id="setUpdateOut"></span></p>
   <p class="dim">Ecosystem bundle: <span id="setEcoInfo">…</span></p>
   <p class="dim">MCP sessions: <span id="setMcpInfo">…</span> <button id="setMcpRestart" title="Drop every persistent MCP session (desktop) and clear the phone's list cache">Restart sessions</button></p>
+  <p class="dim">Paired devices: <span id="setPairInfo">…</span></p>
   <p class="dim">Desktop AI model (Qwen2.5-Coder-7B, 4.7 GB, optional):
     <span id="setModelDlOut"></span>
     <button id="setModelDlBtn">Download 7B model</button></p>
