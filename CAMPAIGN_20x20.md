@@ -591,3 +591,18 @@ upload is attempted unless he asks for a link.
       version/workspace on the title, red with the
       failure explained. CYCLE 4 IMPROVEMENTS COMPLETE
       (v2.71-v2.74).
+
+## Cycle 4 audits (v2.75-v2.78)
+- [x] A1-A5 PASS (v2.75): Cycle 4 added no new routes
+      (fields and flags on existing ones); pair gate
+      still wraps both verbs once each, viewer role
+      check intact, deny-all rides the per-id decide
+      route, refresh widens only list reads.
+- [x] A6-A10 PASS (v2.76), A6 DEEPENED: git status
+      parity (desktop live ahead 1 / honest zeros;
+      Java same parse, compiled). A7 canary sweep over
+      git status, health, eco info and files on the
+      live fixture server: zero hits. A8 sink census
+      unchanged at 101 - all Cycle 4 UI is textContent.
+      A9 pins hold (29 tools, ghostmcp 0.3.2, e13).
+      A10 atomic writes intact.
