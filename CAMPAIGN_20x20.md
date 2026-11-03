@@ -930,3 +930,36 @@ here. Agent GIT is status|diff|log only.
       run first; the confirm states the exact count
       and file total, and a zero-count run stops
       with a plain message instead of a dialog.
+- [x] C7-I16 DONE (v2.98): cursor positions ride
+      the session - saveSession records each tab's
+      selection head; restore parks them in
+      pendingPos and activateTab applies each once,
+      clamped to the document as it exists now.
+- [x] C7-I17 DONE (v2.98): find query + replacement
+      persist across reloads (ghostide.findText).
+- [x] C7-I18 DONE (v2.98): the Git copy-status line
+      carries the stash depth.
+- [x] C7-I19 DONE (v2.98): agent priming names
+      stashed work alongside branch/dirty state.
+- [x] C7-I20 DONE (v2.98): non-repo refresh clears
+      the Stash section and count too, so a
+      workspace switch leaves no stale entries.
+      CYCLE 7 IMPROVEMENTS COMPLETE (v2.95-v2.98).
+
+## Cycle 7 audits (v2.99-v3.02) - standard re-run + flow rails
+- [x] C7-A1 PASS (v2.99): pair gate intact.
+- [x] C7-A2 PASS (v2.99): traversal + hash pin.
+- [x] C7-A3 PASS (v2.99): atomic writes intact.
+- [x] C7-A4 PASS (v2.99): canary sweep live on
+      v2.98 code - 0 hits on five routes including
+      the new branches and stash routes.
+- [x] C7-A5 PASS (v2.99): eco pins unchanged; full
+      gate re-run green this cycle.
+- [x] C7-A6 PASS (v3.00): timeouts intact.
+- [x] C7-A7 PASS (v3.00): lineage constants intact.
+- [x] C7-A8 PASS (v3.00): sink census UNCHANGED at
+      101 with all Flow features in the bundle.
+- [x] C7-A9 PASS (v3.00): eco stamp e13 consistent.
+- [x] C7-A10 PASS (v3.00): bundle freshness - the
+      built bundle carries renderBranches,
+      renderStashes, findJump and pendingPos.

@@ -723,6 +723,18 @@ function renderTabs() {
 function activateTab(path) {
   currentFile = path;
   view.setState(tabStates.get(path));
+  /* Cycle 7 I16: a restored cursor position applies
+     once, the first time its tab becomes active. */
+  if (pendingPos[path] != null) {
+    const hp = pendingPos[path];
+    delete pendingPos[path];
+    try {
+      view.dispatch({
+        selection: { anchor: Math.min(
+          hp, view.state.doc.length) },
+        scrollIntoView: true });
+    } catch (e) { /* position is best-effort */ }
+  }
   dirty = !!tabDirty.get(path);
   $("currentFile").textContent = path;
   setSaveState(dirty ? "unsaved changes" : "saved");
@@ -3043,7 +3055,10 @@ if (gitCopyBtn)
       (d.ahead ? ", " + d.ahead + " ahead" : "") +
       (d.behind ? ", " + d.behind + " behind" : "") +
       ": " + ((d.changes || []).length) +
-      " uncommitted change(s).";
+      " uncommitted change(s)" +
+      /* Cycle 7 I18: the stash depth joins the
+         one-line summary. */
+      (d.stash ? ", " + d.stash + " stashed" : "") + ".";
     try {
       await navigator.clipboard.writeText(line);
       gitCopyBtn.textContent = "✓";
@@ -3210,6 +3225,13 @@ async function refreshGit() {
       $("gitLog").textContent = "";
       const bl = $("branchList");
       if (bl) bl.textContent = "";
+      /* Cycle 7 I20: the Stash section clears too -
+         stale entries in a non-repo workspace would
+         be a lie left over from the last one. */
+      const sl = $("stashList");
+      if (sl) sl.textContent = "";
+      const sc = $("stashCount");
+      if (sc) sc.textContent = "";
       $("gitAiMsg").disabled = true;
       $("branchChip").classList.add("hidden");
       box.innerHTML = "";
@@ -3539,6 +3561,24 @@ async function switchWorkspace(p) {
 /* Project find / replace (2.5) */
 $("findBtn").onclick = () => $("findPanel").classList.toggle("hidden");
 $("findClose").onclick = () => $("findPanel").classList.add("hidden");
+/* Cycle 7 I17: the find text itself persists - a
+   reload mid-hunt should not cost you the query. */
+try {
+  const ft = JSON.parse(
+    localStorage.getItem("ghostide.findText") || "{}");
+  if (ft.q) $("findQuery").value = ft.q;
+  if (ft.rep) $("findReplacement").value = ft.rep;
+} catch (e) { /* storage off */ }
+for (const fid of ["findQuery", "findReplacement"]) {
+  const fel = $(fid);
+  if (fel) fel.addEventListener("input", () => {
+    try {
+      localStorage.setItem("ghostide.findText", JSON.stringify({
+        q: $("findQuery").value,
+        rep: $("findReplacement").value }));
+    } catch (e) { /* storage off */ }
+  });
+}
 function jumpToLine(n) {
   try {
     const line = view.state.doc.line(n);
@@ -9807,10 +9847,22 @@ function updateCrumbs() {
 
 /* Session restore: the open tabs + current file persist locally
    and reopen on launch (paths that no longer exist are skipped). */
+/* Cycle 7 I16: cursor positions ride the session -
+   reopening a workspace should land you where you
+   were, not at the top of every file. Positions for
+   background tabs wait in pendingPos until the tab
+   is first activated. */
+let pendingPos = {};
 function saveSession() {
   try {
+    const pos = {};
+    for (const p of tabOrder) {
+      const st = p === currentFile
+        ? view.state : tabStates.get(p);
+      if (st) pos[p] = st.selection.main.head;
+    }
     localStorage.setItem("ghostide-session", JSON.stringify({
-      tabs: [...tabOrder], current: currentFile }));
+      tabs: [...tabOrder], current: currentFile, pos }));
   } catch (e) { /* best-effort */ }
 }
 (async () => {
@@ -9818,6 +9870,7 @@ function saveSession() {
     const s = JSON.parse(
       localStorage.getItem("ghostide-session") || "null");
     if (!s || !s.tabs || !s.tabs.length) return;
+    pendingPos = s.pos || {};
     const fr = await fetch("/api/files");
     const fd = await fr.json();
     const known = new Set((fd.files || [])
@@ -11488,6 +11541,10 @@ async function runAgent(task, opts) {
           "of upstream." : "") +
         (gs.behind ? " " + gs.behind + " commit(s) " +
           "behind upstream." : "") +
+        /* Cycle 7 I19: stashed work is part of the
+           lay of the land too. */
+        (gs.stash ? " " + gs.stash + " stash " +
+          "entries shelved." : "") +
         /* Cycle 5 I20: name the first few changed
            paths, not just the count. */
         ((gs.changes || []).length

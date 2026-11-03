@@ -26,6 +26,8 @@ ck("I9 approve text filter targets data-kind rows",
 ck("I10 git status copy uses the last live payload",
    html.includes('id="gitCopyStatus"') &&
    src.includes("lastGitStatus = d") &&
-   src.includes('" uncommitted change(s)."'));
+   /* Cycle 7 I18 appended the stash depth before
+      the final period; the pin follows the line. */
+   src.includes('" uncommitted change(s)"'));
 console.log(`RESULT ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
