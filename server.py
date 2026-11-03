@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "3.05.0"
+APP_VERSION = "3.06.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2050,6 +2050,7 @@ SQL_RUNNER = (
 _TEST_RUNNER = r'''
 import importlib.util, json, os, re, sys, traceback, unittest
 path = sys.argv[1]
+only = sys.argv[2] if len(sys.argv) > 2 else None
 sys.path.insert(0, os.path.dirname(os.path.abspath(path)))
 sys.path.insert(0, os.getcwd())
 spec = importlib.util.spec_from_file_location("ghost_test_mod", path)
@@ -2070,6 +2071,8 @@ except Exception:
                       "line": None}))
     sys.exit(0)
 for name in sorted(dir(mod)):
+    if only and name != only:
+        continue
     if name.startswith("test_"):
         fn = getattr(mod, name)
         if callable(fn) and getattr(fn, "__module__", None) == mod.__name__:
@@ -2134,13 +2137,15 @@ def discover_tests():
     return files
 
 
-def run_test_file(rel):
+def run_test_file(rel, only=None):
     p = safe_path(rel)
     results = []
     if rel.endswith(".py"):
+        argv = [py_cmd()[0], "-c", _TEST_RUNNER, str(p)]
+        if only:
+            argv.append(only)
         rc, out, err, ms = run_cmd(
-            [py_cmd()[0], "-c", _TEST_RUNNER, str(p)],
-            cwd=str(WORKSPACE), timeout=60)
+            argv, cwd=str(WORKSPACE), timeout=60)
         for line in out.splitlines():
             line = line.strip()
             if line.startswith("{"):
@@ -2157,7 +2162,14 @@ def run_test_file(rel):
                             "line": None, "status": "fail",
                             "message": (err or out).strip()[-200:]})
     else:
-        rc, out, err, ms = run_cmd(["node", "--test", str(p)],
+        js_argv = ["node", "--test"]
+        if only:
+            # node matches names by regex; discovered
+            # names are data, so escape before passing.
+            js_argv += ["--test-name-pattern",
+                        _re_mod.escape(only)]
+        js_argv.append(str(p))
+        rc, out, err, ms = run_cmd(js_argv,
                                    cwd=str(WORKSPACE), timeout=60)
         output = out + err
         # Two output dialects: TAP ("ok 1 - name") and the spec
@@ -2184,6 +2196,11 @@ def run_test_file(rel):
             if m:
                 status = "fail" if m.group(1) else "pass"
                 name = m.group(2)
+                if name.endswith("# SKIP"):
+                    # A name-pattern run reports the
+                    # tests it skipped; they did not run
+                    # and must not count as passes.
+                    continue
             else:
                 m = _re_mod.match(r"^(✔|✖) (.+?) \([\d.]+m?s\)$", s)
                 if m:
@@ -6407,6 +6424,12 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/tests/run":
                 data = self.read_json()
                 want = data.get("path")
+                # Cycle 8 I16: an optional single-test
+                # name narrows the run to one test.
+                only = data.get("name") or None
+                if only and not want:
+                    raise ValueError(
+                        "a single-test run needs its file")
                 targets = [f["path"] for f in discover_tests()
                            if not want or f["path"] == want]
                 if want and not targets:
@@ -6414,7 +6437,7 @@ class Handler(SimpleHTTPRequestHandler):
                 results = []
                 t0 = time.time()
                 for rel in targets:
-                    results.extend(run_test_file(rel))
+                    results.extend(run_test_file(rel, only))
                 passed = sum(1 for r in results
                              if r["status"] == "pass")
                 return self.send_json({

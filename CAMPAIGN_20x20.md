@@ -1083,3 +1083,32 @@ history and tests UI all check out as present.
       (read-only list), verb pinned at BOTH parser
       sites; mutating tag/amend routes have exactly
       one caller each (the UI), pinned.
+- Batch 4 grounded (Nov 2): the tests panel runs
+  whole files only; results are not individually
+  runnable, failures cannot be re-run alone, and
+  no run summary survives the panel. The runner
+  is desktop-only BY DESIGN (the phone server
+  refuses /api/tests/* with an honest message),
+  so this batch is desktop server + frontend.
+- [x] C8-I16 /api/tests/run takes an optional
+      single-test name (Python runner filter,
+      node --test-name-pattern for JS).
+- [x] C8-I17 discover lists individual tests;
+      tapping one runs just it.
+- [x] C8-I18 Re-run failed only, from the results
+      view.
+- [x] C8-I19 last-run summary persists
+      (localStorage) and the status-bar test chip
+      reflects any run, not only test-on-save.
+- [x] C8-I20 results renderer shared by all three
+      run scopes (all / file / single).
+- Batch 4 PROVEN LIVE on a durable fixture
+  (~/workspace/.fixtures/testfx): discover lists
+  the Python tests by name (JS discovery stays
+  file-level - its names arrive via run results),
+  run-all gave 2 pass / 2 fail across both files,
+  single-test runs returned exactly the named test
+  for Python and JS, the skipped JS test did NOT
+  count as a pass, and a name with no file was
+  refused. The phone server keeps its honest
+  desktop-only refusal for /api/tests/*.
