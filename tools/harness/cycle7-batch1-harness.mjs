@@ -31,8 +31,9 @@ ck("I4 branchChip opens the git drawer",
    src.includes("branchChipEl.onclick"));
 ck("I5 agent GIT knows branches, read-only",
    /* Cycle 7 batch 2 extended the verb list with
-      stash; the pin follows the full current list. */
-   src.includes("(status|diff|log|branches|stash)") &&
+      stash, Cycle 8 batch 3 with tags; the pin
+      follows the full current list. */
+   src.includes("(status|diff|log|branches|stash|tags)") &&
    src.includes('act.what === "branches"'));
 console.log(`RESULT ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

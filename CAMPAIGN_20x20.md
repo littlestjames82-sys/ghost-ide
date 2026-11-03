@@ -1047,3 +1047,39 @@ history and tests UI all check out as present.
 - [x] C8-I5 DONE (v3.03): checks fire on edit
       (debounced), on save, and on tab activation;
       all failures are silent by design.
+- [x] C8-I6 DONE (v3.04): codeFolding() +
+      foldGutter() wired via foldComp; the fold
+      state is always present, the gutter is the
+      toggleable part.
+- [x] C8-I7 DONE (v3.04): foldKeymap in the main
+      editor (Ctrl+Shift+[/] and friends).
+- [x] C8-I8 DONE (v3.04): Settings toggle for the
+      folding gutter, reconfiguring both panes.
+- [x] C8-I9 DONE (v3.04): the split pane's OWN
+      extension list gained fold + diag
+      compartments and the fold keymap - it does
+      not inherit baseExtensions and would have
+      silently missed both features.
+- [x] C8-I10 DONE (v3.04): the pre-existing Fold
+      all / Unfold all buttons now have fold state
+      to act on - the half-wired feature is whole.
+- [x] C8-I11 DONE (v3.05): GET /api/git/tags +
+      POST /api/git/tag on both servers; name rides
+      the branch pin, target hash hex-pinned.
+      PROVEN LIVE on the gitshow fixture (create at
+      HEAD, create at hash, bad name/hash refused,
+      list shows targets; fixture restored).
+- [x] C8-I12 DONE (v3.05): panel Tags section
+      (list, Tag HEAD, delete with confirm) and a
+      Tag-this-commit button in the commit viewer.
+- [x] C8-I13 DONE (v3.05): POST /api/git/amend on
+      both servers (staged fold, optional reword,
+      git refusals surface). PROVEN LIVE: amend
+      folded a staged line and reworded HEAD.
+- [x] C8-I14 DONE (v3.05): Amend last button in
+      the commit row; the confirm states exactly
+      what folds and what the message becomes.
+- [x] C8-I15 DONE (v3.05): agent GIT += tags
+      (read-only list), verb pinned at BOTH parser
+      sites; mutating tag/amend routes have exactly
+      one caller each (the UI), pinned.

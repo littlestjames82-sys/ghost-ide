@@ -19,7 +19,8 @@ import { openSearchPanel, selectNextOccurrence } from "@codemirror/search";
 import { lintGutter, setDiagnostics } from "@codemirror/lint";
 import { snippet } from "@codemirror/autocomplete";
 import { foldAll, unfoldAll, indentUnit, HighlightStyle,
-  syntaxHighlighting } from "@codemirror/language";
+  syntaxHighlighting, codeFolding, foldGutter,
+  foldKeymap } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
 import { BEHAVIOR } from "./behavior.js";
 
@@ -300,6 +301,17 @@ const diagComp = new Compartment();
 function diagExt() {
   return settings.diag === false ? [] : lintGutter();
 }
+/* Cycle 8 I6: folding. codeFolding() is the state
+   the Fold buttons have always needed and never
+   had; the gutter is the toggleable part, the fold
+   state itself stays so the commands work either
+   way. */
+const foldComp = new Compartment();
+function foldExt() {
+  return settings.fold === false
+    ? codeFolding()
+    : [codeFolding(), foldGutter()];
+}
 
 const view = new EditorView({
   parent: $("editor"),
@@ -344,6 +356,8 @@ function baseExtensions(path) {
     indentComp.of(indentExt()),
     wsComp.of(wsExt()),
     diagComp.of(diagExt()),
+    foldComp.of(foldExt()),
+    keymap.of(foldKeymap),
     EditorView.updateListener.of((u) => {
       if (u.selectionSet || u.docChanged) {
         const head = u.state.selection.main.head;
@@ -3273,6 +3287,78 @@ const stashPushBtn = $("stashPush");
 if (stashPushBtn)
   stashPushBtn.onclick = () => stashAct("push");
 
+/* Cycle 8 I12: the Tags section + the Amend
+   button. Amending rewrites the last commit, so it
+   confirms with exactly what will happen; the
+   server (and git) refuse on a commit-less repo. */
+async function tagAct(action, name, hash) {
+  const out = $("tagOut");
+  const body = { action: action, name: name };
+  if (hash) body.hash = hash;
+  const d = await postJson("/api/git/tag", body);
+  if (d.error) {
+    if (out) out.textContent = d.error;
+    return false;
+  }
+  if (out) out.textContent = "";
+  const nm = $("tagName");
+  if (nm) nm.value = "";
+  refreshGit();
+  return true;
+}
+async function renderTags() {
+  const box = $("tagList");
+  if (!box) return;
+  try {
+    const r = await fetch("/api/git/tags");
+    const d = await r.json();
+    box.textContent = "";
+    if (!(d.tags || []).length) {
+      box.textContent = "(no tags)";
+      return;
+    }
+    for (const t of d.tags) {
+      const row = document.createElement("div");
+      row.className = "gitRow";
+      const label = document.createElement("span");
+      label.textContent = "🏷 " + t.name + " ";
+      const tag = document.createElement("em");
+      tag.textContent = t.target || "";
+      label.appendChild(tag);
+      row.appendChild(label);
+      const del = document.createElement("button");
+      del.textContent = "Delete";
+      del.onclick = () => {
+        if (confirm("Delete tag " + t.name + "?"))
+          tagAct("delete", t.name);
+      };
+      row.appendChild(del);
+      box.appendChild(row);
+    }
+  } catch (e) { /* git panel is best-effort */ }
+}
+const tagCreateBtn = $("tagCreate");
+if (tagCreateBtn)
+  tagCreateBtn.onclick = () => {
+    const nm = $("tagName").value.trim();
+    if (nm) tagAct("create", nm);
+  };
+const gitAmendBtn = $("gitAmend");
+if (gitAmendBtn)
+  gitAmendBtn.onclick = async () => {
+    const msg = $("commitMsg").value.trim();
+    if (!confirm("Amend the last commit? Staged " +
+        "changes fold into it" +
+        (msg ? ", and its message becomes \"" + msg + "\""
+             : ", keeping its message") + "."))
+      return;
+    const d = await postJson("/api/git/amend",
+      { message: msg });
+    if (d.error) { alert(d.error); return; }
+    $("commitMsg").value = "";
+    refreshGit();
+  };
+
 async function refreshGit() {
   refreshGhRemote();
   const box = $("gitChanges");
@@ -3293,6 +3379,8 @@ async function refreshGit() {
       if (sl) sl.textContent = "";
       const sc = $("stashCount");
       if (sc) sc.textContent = "";
+      const tl = $("tagList");
+      if (tl) tl.textContent = "";
       $("gitAiMsg").disabled = true;
       $("branchChip").classList.add("hidden");
       box.innerHTML = "";
@@ -3325,6 +3413,7 @@ async function refreshGit() {
     renderWorktrees();
     renderBranches();
     renderStashes();
+    renderTags();
     $("gitAiMsg").disabled = false;
     if (d.branch) {
       $("branchChip").textContent = "⎇ " + d.branch;
@@ -3404,6 +3493,22 @@ async function refreshGit() {
                 sd.output || "(empty commit)";
               box.textContent = "";
               box.appendChild(pre);
+              /* Cycle 8 I12: tag the commit you are
+                 looking at, not just HEAD. */
+              if (!sd.error) {
+                const tb = document.createElement("button");
+                tb.className = "ghostbtn";
+                tb.textContent = "🏷 Tag this commit";
+                tb.onclick = async () => {
+                  const nm = prompt("Tag name for " +
+                    c.hash + ":");
+                  if (!nm) return;
+                  const ok = await tagAct("create",
+                    nm.trim(), c.hash);
+                  if (ok) tb.textContent = "🏷 Tagged ✓";
+                };
+                box.appendChild(tb);
+              }
             } catch (e) {
               box.textContent =
                 "Could not reach the server.";
@@ -3865,6 +3970,12 @@ function splitExtensions(path) {
     wrapComp.of(wrapExt()),
     indentComp.of(indentExt()),
     wsComp.of(wsExt()),
+    /* Cycle 8 I9: the split pane gets the same
+       compartments - it has its own extension list
+       and would otherwise silently miss the cycle. */
+    diagComp.of(diagExt()),
+    foldComp.of(foldExt()),
+    keymap.of(foldKeymap),
     langFor(path || ""),
     keymap.of([
       { key: "Mod-s", run: () => { saveSplit(); return true; } },
@@ -4729,6 +4840,15 @@ if (diagChipBtn)
   diagChipBtn.onclick = () => {
     if (diagProblem) jumpToLine(diagProblem.line);
   };
+/* Cycle 8 I8: the folding gutter toggle. */
+$("setFold").checked = settings.fold !== false;
+$("setFold").onchange = (e) => {
+  settings.fold = e.target.checked;
+  saveSettings();
+  const eff = { effects: foldComp.reconfigure(foldExt()) };
+  view.dispatch(eff);
+  if (splitView) splitView.dispatch(eff);
+};
 $("setShort").checked = settings.shortAnswers;
 $("setShort").onchange = (e) => {
   settings.shortAnswers = e.target.checked;
@@ -10686,7 +10806,7 @@ const AGENT_RULES = [
   "CONTEXT - fetch the repo map (GhostAtlas) when you need",
   "  the project's shape mid-task",
   "TEST [path] - run the project tests (one file, or all)",
-  "GIT status / GIT diff / GIT log / GIT branches / GIT stash - repository state",
+  "GIT status / GIT diff / GIT log / GIT branches / GIT stash / GIT tags - repository state",
   "MCP <server> <tool> <json-args> - call a tool on a",
   "  configured MCP server; your briefing lists the servers",
   "  and tools available, if any",
@@ -10721,7 +10841,7 @@ const AGENT_PLAN_RULES = [
   "LIST [path] - list workspace files",
   "REVERSE <path> - inspect a file or binary with GhostRE",
   "ECO <tool> - run an ecosystem tool (ghostindex, ghostdeps)",
-  "GIT status / GIT diff / GIT log / GIT branches / GIT stash - repository state",
+  "GIT status / GIT diff / GIT log / GIT branches / GIT stash / GIT tags - repository state",
   "You may BATCH several read-only actions in one reply, one",
   "per line: READ, SEARCH, LIST, REVERSE, ECO, GIT, TODO.",
   "TODO <text> - add one step of the plan",
@@ -10910,7 +11030,7 @@ window.__ghostApplyEdit = applyEditPatch;
      ECO <tool>       ecosystem runner (ghostindex, ghostdeps)
      VERIFY           the verify pipeline (checks+tests+evidence)
      TEST [path]      the project test runner
-     GIT status|diff|log|branches|stash
+     GIT status|diff|log|branches|stash|tags
      MCP <server> <tool> <json>   call a tool on a configured
      MCP server (.mcp.json); the run briefing lists what is
      available. Act mode only: a tool can have side effects,
@@ -10942,7 +11062,7 @@ function parseAgent3Action(reply) {
   if (/^\s*CONTEXT\s*$/m.test(text)) return { type: "context" };
   m = text.match(/^\s*TEST(?:\s+(\S+))?\s*$/m);
   if (m) return { type: "test", path: m[1] || "" };
-  m = text.match(/^\s*GIT\s+(status|diff|log|branches|stash)\s*$/im);
+  m = text.match(/^\s*GIT\s+(status|diff|log|branches|stash|tags)\s*$/im);
   if (m) return { type: "git", what: m[1].toLowerCase() };
   /* Cycle 6 I11/I12: delegation + the agent's own
      scratchpad. */
@@ -10989,7 +11109,7 @@ function parseAgentLine(line) {
     return { type: "reverse", path: m[1] };
   if ((m = t.match(/^ECO\s+(\S+)$/)))
     return { type: "eco", tool: m[1].toLowerCase() };
-  if ((m = t.match(/^GIT\s+(status|diff|log|branches|stash)$/i)))
+  if ((m = t.match(/^GIT\s+(status|diff|log|branches|stash|tags)$/i)))
     return { type: "git", what: m[1].toLowerCase() };
   if (/^CONTEXT$/.test(t)) return { type: "context" };
   return null;
@@ -11082,6 +11202,15 @@ async function agentToolText(act) {
         return "Stash entries:\n" + ((d.entries || [])
           .map((e) => e.ref + " " + e.message).join("\n")
           || "(nothing stashed)");
+      }
+      if (act.what === "tags") {
+        /* Cycle 8 I15: tag awareness, read-only -
+           tagging and amending stay human acts. */
+        const r = await fetch("/api/git/tags");
+        const d = await r.json();
+        return "Tags:\n" + ((d.tags || [])
+          .map((t) => t.name + " -> " + (t.target || "?"))
+          .join("\n") || "(no tags)");
       }
       if (act.what === "branches") {
         /* Cycle 7 I5: read-only branch awareness -

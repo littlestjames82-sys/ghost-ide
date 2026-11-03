@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "3.03.0"
+APP_VERSION = "3.05.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -4956,6 +4956,22 @@ class Handler(SimpleHTTPRequestHandler):
                         "index": int(m_i.group(1)) if m_i else 0,
                         "ref": ref, "message": msg})
                 return self.send_json({"entries": entries})
+            if parsed.path == "/api/git/tags":
+                # Cycle 8 I11: the tag list, with the
+                # short object each tag points at.
+                rc, out, err, _ = git_out(
+                    ["tag", "--list",
+                     "--format=%(refname:short)"
+                     "%09%(objectname:short)"])
+                if rc != 0:
+                    return self.send_json({"tags": []})
+                tags = []
+                for line in out.splitlines():
+                    if not line.strip():
+                        continue
+                    nm, _, tgt = line.partition("\t")
+                    tags.append({"name": nm, "target": tgt})
+                return self.send_json({"tags": tags})
             if parsed.path == "/api/git/diff-all":
                 # Whole-change diff for the AI commit message tool.
                 rc, out, err, _ = git_out(["diff", "HEAD", "--no-color"])
@@ -5646,6 +5662,52 @@ class Handler(SimpleHTTPRequestHandler):
                                      or "git init failed")
                 return self.send_json({"ok": True,
                                        "output": out.strip()})
+            if parsed.path == "/api/git/tag":
+                # Cycle 8 I11: create / delete a tag.
+                # Names ride the branch pin (same ref
+                # charset); a target hash is hex-pinned
+                # like the commit viewer's.
+                data = self.read_json()
+                action = data.get("action") or ""
+                name = (data.get("name") or "").strip()
+                if not _branch_name_ok(name):
+                    raise ValueError("bad tag name")
+                if action == "create":
+                    args = ["tag", name]
+                    th = (data.get("hash") or "").strip()
+                    if th:
+                        if not _re_mod.fullmatch(
+                                r"[0-9a-f]{7,40}", th):
+                            raise ValueError("bad commit hash")
+                        args.append(th)
+                elif action == "delete":
+                    args = ["tag", "-d", name]
+                else:
+                    raise ValueError("unknown tag action")
+                rc, out, err, _ = git_out(args)
+                if rc != 0:
+                    raise ValueError(
+                        (err or out).strip()[:300]
+                        or "git tag failed")
+                return self.send_json({"ok": True})
+            if parsed.path == "/api/git/amend":
+                # Cycle 8 I13: fold staged changes into
+                # HEAD, optionally rewording it. Git
+                # refuses on a repo with no commits;
+                # that refusal surfaces as-is.
+                data = self.read_json()
+                msg = (data.get("message") or "").strip()
+                args = ["commit", "--amend"]
+                if msg:
+                    args += ["-m", msg[:200]]
+                else:
+                    args.append("--no-edit")
+                rc, out, err, _ = git_out(args)
+                if rc != 0:
+                    raise ValueError(
+                        (err or out).strip()[:300]
+                        or "git amend failed")
+                return self.send_json({"ok": True})
             if parsed.path == "/api/git/stash":
                 # Cycle 7 I6: push / apply / pop / drop.
                 # The index is pinned to a small int and

@@ -33106,6 +33106,10 @@
   function diagExt() {
     return settings.diag === false ? [] : lintGutter();
   }
+  var foldComp = new Compartment();
+  function foldExt() {
+    return settings.fold === false ? codeFolding() : [codeFolding(), foldGutter()];
+  }
   var view = new EditorView({
     parent: $("editor"),
     state: EditorState.create({
@@ -33156,6 +33160,8 @@
       indentComp.of(indentExt()),
       wsComp.of(wsExt()),
       diagComp.of(diagExt()),
+      foldComp.of(foldExt()),
+      keymap.of(foldKeymap),
       EditorView.updateListener.of((u) => {
         if (u.selectionSet || u.docChanged) {
           const head = u.state.selection.main.head;
@@ -35913,6 +35919,76 @@
   var stashPushBtn = $("stashPush");
   if (stashPushBtn)
     stashPushBtn.onclick = () => stashAct("push");
+  async function tagAct(action, name2, hash3) {
+    const out = $("tagOut");
+    const body = { action, name: name2 };
+    if (hash3) body.hash = hash3;
+    const d = await postJson("/api/git/tag", body);
+    if (d.error) {
+      if (out) out.textContent = d.error;
+      return false;
+    }
+    if (out) out.textContent = "";
+    const nm = $("tagName");
+    if (nm) nm.value = "";
+    refreshGit();
+    return true;
+  }
+  async function renderTags() {
+    const box = $("tagList");
+    if (!box) return;
+    try {
+      const r = await fetch("/api/git/tags");
+      const d = await r.json();
+      box.textContent = "";
+      if (!(d.tags || []).length) {
+        box.textContent = "(no tags)";
+        return;
+      }
+      for (const t2 of d.tags) {
+        const row = document.createElement("div");
+        row.className = "gitRow";
+        const label = document.createElement("span");
+        label.textContent = "\u{1F3F7} " + t2.name + " ";
+        const tag = document.createElement("em");
+        tag.textContent = t2.target || "";
+        label.appendChild(tag);
+        row.appendChild(label);
+        const del = document.createElement("button");
+        del.textContent = "Delete";
+        del.onclick = () => {
+          if (confirm("Delete tag " + t2.name + "?"))
+            tagAct("delete", t2.name);
+        };
+        row.appendChild(del);
+        box.appendChild(row);
+      }
+    } catch (e) {
+    }
+  }
+  var tagCreateBtn = $("tagCreate");
+  if (tagCreateBtn)
+    tagCreateBtn.onclick = () => {
+      const nm = $("tagName").value.trim();
+      if (nm) tagAct("create", nm);
+    };
+  var gitAmendBtn = $("gitAmend");
+  if (gitAmendBtn)
+    gitAmendBtn.onclick = async () => {
+      const msg = $("commitMsg").value.trim();
+      if (!confirm("Amend the last commit? Staged changes fold into it" + (msg ? ', and its message becomes "' + msg + '"' : ", keeping its message") + "."))
+        return;
+      const d = await postJson(
+        "/api/git/amend",
+        { message: msg }
+      );
+      if (d.error) {
+        alert(d.error);
+        return;
+      }
+      $("commitMsg").value = "";
+      refreshGit();
+    };
   async function refreshGit() {
     refreshGhRemote();
     const box = $("gitChanges");
@@ -35930,6 +36006,8 @@
         if (sl) sl.textContent = "";
         const sc = $("stashCount");
         if (sc) sc.textContent = "";
+        const tl = $("tagList");
+        if (tl) tl.textContent = "";
         $("gitAiMsg").disabled = true;
         $("branchChip").classList.add("hidden");
         box.innerHTML = "";
@@ -35956,6 +36034,7 @@
       renderWorktrees();
       renderBranches();
       renderStashes();
+      renderTags();
       $("gitAiMsg").disabled = false;
       if (d.branch) {
         $("branchChip").textContent = "\u2387 " + d.branch;
@@ -36035,6 +36114,22 @@
                 pre.textContent = sd.error || sd.output || "(empty commit)";
                 box2.textContent = "";
                 box2.appendChild(pre);
+                if (!sd.error) {
+                  const tb = document.createElement("button");
+                  tb.className = "ghostbtn";
+                  tb.textContent = "\u{1F3F7} Tag this commit";
+                  tb.onclick = async () => {
+                    const nm = prompt("Tag name for " + c.hash + ":");
+                    if (!nm) return;
+                    const ok = await tagAct(
+                      "create",
+                      nm.trim(),
+                      c.hash
+                    );
+                    if (ok) tb.textContent = "\u{1F3F7} Tagged \u2713";
+                  };
+                  box2.appendChild(tb);
+                }
               } catch (e) {
                 box2.textContent = "Could not reach the server.";
               }
@@ -36521,6 +36616,12 @@
       wrapComp.of(wrapExt()),
       indentComp.of(indentExt()),
       wsComp.of(wsExt()),
+      /* Cycle 8 I9: the split pane gets the same
+         compartments - it has its own extension list
+         and would otherwise silently miss the cycle. */
+      diagComp.of(diagExt()),
+      foldComp.of(foldExt()),
+      keymap.of(foldKeymap),
       langFor(path || ""),
       keymap.of([
         { key: "Mod-s", run: () => {
@@ -37311,6 +37412,14 @@
     diagChipBtn.onclick = () => {
       if (diagProblem) jumpToLine(diagProblem.line);
     };
+  $("setFold").checked = settings.fold !== false;
+  $("setFold").onchange = (e) => {
+    settings.fold = e.target.checked;
+    saveSettings();
+    const eff = { effects: foldComp.reconfigure(foldExt()) };
+    view.dispatch(eff);
+    if (splitView) splitView.dispatch(eff);
+  };
   $("setShort").checked = settings.shortAnswers;
   $("setShort").onchange = (e) => {
     settings.shortAnswers = e.target.checked;
@@ -42998,7 +43107,7 @@
     "CONTEXT - fetch the repo map (GhostAtlas) when you need",
     "  the project's shape mid-task",
     "TEST [path] - run the project tests (one file, or all)",
-    "GIT status / GIT diff / GIT log / GIT branches / GIT stash - repository state",
+    "GIT status / GIT diff / GIT log / GIT branches / GIT stash / GIT tags - repository state",
     "MCP <server> <tool> <json-args> - call a tool on a",
     "  configured MCP server; your briefing lists the servers",
     "  and tools available, if any",
@@ -43032,7 +43141,7 @@
     "LIST [path] - list workspace files",
     "REVERSE <path> - inspect a file or binary with GhostRE",
     "ECO <tool> - run an ecosystem tool (ghostindex, ghostdeps)",
-    "GIT status / GIT diff / GIT log / GIT branches / GIT stash - repository state",
+    "GIT status / GIT diff / GIT log / GIT branches / GIT stash / GIT tags - repository state",
     "You may BATCH several read-only actions in one reply, one",
     "per line: READ, SEARCH, LIST, REVERSE, ECO, GIT, TODO.",
     "TODO <text> - add one step of the plan",
@@ -43232,7 +43341,7 @@
     if (/^\s*CONTEXT\s*$/m.test(text)) return { type: "context" };
     m = text.match(/^\s*TEST(?:\s+(\S+))?\s*$/m);
     if (m) return { type: "test", path: m[1] || "" };
-    m = text.match(/^\s*GIT\s+(status|diff|log|branches|stash)\s*$/im);
+    m = text.match(/^\s*GIT\s+(status|diff|log|branches|stash|tags)\s*$/im);
     if (m) return { type: "git", what: m[1].toLowerCase() };
     m = text.match(/^\s*EXPLORE\s+(.+)$/m);
     if (m) return { type: "explore", question: m[1].trim() };
@@ -43291,7 +43400,7 @@
       return { type: "reverse", path: m[1] };
     if (m = t2.match(/^ECO\s+(\S+)$/))
       return { type: "eco", tool: m[1].toLowerCase() };
-    if (m = t2.match(/^GIT\s+(status|diff|log|branches|stash)$/i))
+    if (m = t2.match(/^GIT\s+(status|diff|log|branches|stash|tags)$/i))
       return { type: "git", what: m[1].toLowerCase() };
     if (/^CONTEXT$/.test(t2)) return { type: "context" };
     return null;
@@ -43373,6 +43482,11 @@
           const r2 = await fetch("/api/git/stash");
           const d2 = await r2.json();
           return "Stash entries:\n" + ((d2.entries || []).map((e) => e.ref + " " + e.message).join("\n") || "(nothing stashed)");
+        }
+        if (act.what === "tags") {
+          const r2 = await fetch("/api/git/tags");
+          const d2 = await r2.json();
+          return "Tags:\n" + ((d2.tags || []).map((t2) => t2.name + " -> " + (t2.target || "?")).join("\n") || "(no tags)");
         }
         if (act.what === "branches") {
           const r2 = await fetch("/api/git/branches");
