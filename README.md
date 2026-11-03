@@ -1,3 +1,5 @@
+![GhostIDE — a circuit-trace ghost over a desktop running a code editor](docs/images/banner.png)
+
 # GhostIDE 👻
 
 A fully offline AI code editor from Ghost Developer Studio.
