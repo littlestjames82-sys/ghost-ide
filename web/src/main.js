@@ -3132,6 +3132,71 @@ if (branchChipEl)
     if (vg) vg.click();
   };
 
+/* Cycle 7 I7: the Stash section. Apply never
+   destroys the entry; Pop and Drop are confirm-
+   gated because both remove it. */
+async function stashAct(action, index) {
+  const out = $("stashOut");
+  const body = { action: action };
+  if (index !== undefined) body.index = index;
+  if (action === "push")
+    body.untracked = !!($("stashUntracked") &&
+      $("stashUntracked").checked);
+  const d = await postJson("/api/git/stash", body);
+  if (d.error) {
+    if (out) out.textContent = d.error;
+    return;
+  }
+  if (out) out.textContent = "";
+  refreshGit();
+}
+async function renderStashes() {
+  const box = $("stashList");
+  if (!box) return;
+  try {
+    const r = await fetch("/api/git/stash");
+    const d = await r.json();
+    const entries = d.entries || [];
+    const cnt = $("stashCount");
+    if (cnt) cnt.textContent = entries.length
+      ? "(" + entries.length + ")" : "";
+    box.textContent = "";
+    if (!entries.length) {
+      box.textContent = "(nothing stashed)";
+      return;
+    }
+    for (const e of entries) {
+      const row = document.createElement("div");
+      row.className = "gitRow";
+      const label = document.createElement("span");
+      label.textContent = e.ref + " " + e.message;
+      row.appendChild(label);
+      const ap = document.createElement("button");
+      ap.textContent = "Apply";
+      ap.onclick = () => stashAct("apply", e.index);
+      row.appendChild(ap);
+      const pop = document.createElement("button");
+      pop.textContent = "Pop";
+      pop.onclick = () => {
+        if (confirm("Apply and remove " + e.ref + "?"))
+          stashAct("pop", e.index);
+      };
+      row.appendChild(pop);
+      const dr = document.createElement("button");
+      dr.textContent = "Drop";
+      dr.onclick = () => {
+        if (confirm("Drop " + e.ref + " for good?"))
+          stashAct("drop", e.index);
+      };
+      row.appendChild(dr);
+      box.appendChild(row);
+    }
+  } catch (e) { /* git panel is best-effort */ }
+}
+const stashPushBtn = $("stashPush");
+if (stashPushBtn)
+  stashPushBtn.onclick = () => stashAct("push");
+
 async function refreshGit() {
   refreshGhRemote();
   const box = $("gitChanges");
@@ -3176,6 +3241,7 @@ async function refreshGit() {
         ? "Last Scope: " + d.scope_line : "";
     renderWorktrees();
     renderBranches();
+    renderStashes();
     $("gitAiMsg").disabled = false;
     if (d.branch) {
       $("branchChip").textContent = "⎇ " + d.branch;
@@ -3481,13 +3547,53 @@ function jumpToLine(n) {
     view.focus();
   } catch (e) { /* line out of range after edits */ }
 }
+/* Cycle 7 I12/I13: find options (persisted) and
+   match navigation over the last result set. */
+let findMatches = [];
+let findIdx = -1;
+function findOpts() {
+  return {
+    ignoreCase: !!($("findIgnoreCase") &&
+      $("findIgnoreCase").checked),
+    regex: !!($("findRegex") && $("findRegex").checked),
+  };
+}
+try {
+  const saved = JSON.parse(
+    localStorage.getItem("ghostide.findOpts") || "{}");
+  if ($("findIgnoreCase"))
+    $("findIgnoreCase").checked = !!saved.ignoreCase;
+  if ($("findRegex")) $("findRegex").checked = !!saved.regex;
+} catch (e) { /* storage off */ }
+for (const id of ["findIgnoreCase", "findRegex"]) {
+  const el = $(id);
+  if (el) el.addEventListener("change", () => {
+    try {
+      localStorage.setItem("ghostide.findOpts",
+        JSON.stringify(findOpts()));
+    } catch (e) { /* storage off */ }
+  });
+}
+async function findJump(dir) {
+  if (!findMatches.length) return;
+  findIdx = (findIdx + dir + findMatches.length) %
+    findMatches.length;
+  const m = findMatches[findIdx];
+  await openFile(m.path);
+  jumpToLine(m.line);
+}
+$("findPrev").onclick = () => findJump(-1);
+$("findNext").onclick = () => findJump(1);
 $("findGo").onclick = async () => {
   const q = $("findQuery").value;
   const box = $("findResults");
   if (!q) return;
   box.textContent = "searching…";
-  const d = await postJson("/api/search", { query: q });
+  const d = await postJson("/api/search",
+    Object.assign({ query: q }, findOpts()));
   if (d.error) { box.textContent = d.error; return; }
+  findMatches = d.matches || [];
+  findIdx = -1;
   box.innerHTML = "";
   if (!d.matches.length) { box.textContent = "No matches."; return; }
   /* Cycle 4 I8: group by file under a counted header -
@@ -3611,8 +3717,22 @@ $("findIndexed").onclick = async () => {
 $("findReplace").onclick = async () => {
   const q = $("findQuery").value;
   if (!q) return;
-  if (!confirm("Replace ALL occurrences of \"" + q + "\" across the " +
-      "project? Open tabs keep their in-editor copy until reopened."))
+  /* Cycle 7 I15: preview first - the confirm now
+     states the exact blast radius from a dry run
+     instead of asking blind. */
+  const dry = await postJson("/api/replace", {
+    query: q, replacement: $("findReplacement").value,
+    dryRun: true });
+  if (dry.error) { alert(dry.error); return; }
+  if (!dry.replacements) {
+    $("findResults").textContent =
+      "No occurrences of \"" + q + "\" to replace.";
+    return;
+  }
+  if (!confirm("Replace " + dry.replacements +
+      " occurrence(s) of \"" + q + "\" in " +
+      dry.filesChanged + " file(s)? Open tabs keep " +
+      "their in-editor copy until reopened."))
     return;
   const d = await postJson("/api/replace", {
     query: q, replacement: $("findReplacement").value });
@@ -10427,7 +10547,7 @@ const AGENT_RULES = [
   "CONTEXT - fetch the repo map (GhostAtlas) when you need",
   "  the project's shape mid-task",
   "TEST [path] - run the project tests (one file, or all)",
-  "GIT status / GIT diff / GIT log / GIT branches - repository state",
+  "GIT status / GIT diff / GIT log / GIT branches / GIT stash - repository state",
   "MCP <server> <tool> <json-args> - call a tool on a",
   "  configured MCP server; your briefing lists the servers",
   "  and tools available, if any",
@@ -10462,7 +10582,7 @@ const AGENT_PLAN_RULES = [
   "LIST [path] - list workspace files",
   "REVERSE <path> - inspect a file or binary with GhostRE",
   "ECO <tool> - run an ecosystem tool (ghostindex, ghostdeps)",
-  "GIT status / GIT diff / GIT log / GIT branches - repository state",
+  "GIT status / GIT diff / GIT log / GIT branches / GIT stash - repository state",
   "You may BATCH several read-only actions in one reply, one",
   "per line: READ, SEARCH, LIST, REVERSE, ECO, GIT, TODO.",
   "TODO <text> - add one step of the plan",
@@ -10651,7 +10771,7 @@ window.__ghostApplyEdit = applyEditPatch;
      ECO <tool>       ecosystem runner (ghostindex, ghostdeps)
      VERIFY           the verify pipeline (checks+tests+evidence)
      TEST [path]      the project test runner
-     GIT status|diff|log
+     GIT status|diff|log|branches|stash
      MCP <server> <tool> <json>   call a tool on a configured
      MCP server (.mcp.json); the run briefing lists what is
      available. Act mode only: a tool can have side effects,
@@ -10683,7 +10803,7 @@ function parseAgent3Action(reply) {
   if (/^\s*CONTEXT\s*$/m.test(text)) return { type: "context" };
   m = text.match(/^\s*TEST(?:\s+(\S+))?\s*$/m);
   if (m) return { type: "test", path: m[1] || "" };
-  m = text.match(/^\s*GIT\s+(status|diff|log)\s*$/im);
+  m = text.match(/^\s*GIT\s+(status|diff|log|branches|stash)\s*$/im);
   if (m) return { type: "git", what: m[1].toLowerCase() };
   /* Cycle 6 I11/I12: delegation + the agent's own
      scratchpad. */
@@ -10730,7 +10850,7 @@ function parseAgentLine(line) {
     return { type: "reverse", path: m[1] };
   if ((m = t.match(/^ECO\s+(\S+)$/)))
     return { type: "eco", tool: m[1].toLowerCase() };
-  if ((m = t.match(/^GIT\s+(status|diff|log|branches)$/i)))
+  if ((m = t.match(/^GIT\s+(status|diff|log|branches|stash)$/i)))
     return { type: "git", what: m[1].toLowerCase() };
   if (/^CONTEXT$/.test(t)) return { type: "context" };
   return null;
@@ -10814,6 +10934,15 @@ async function agentToolText(act) {
         return "GIT diff vs HEAD:\n" + (d.diff
           ? d.diff.slice(0, 6000)
           : "(no uncommitted changes)");
+      }
+      if (act.what === "stash") {
+        /* Cycle 7 I9: stash awareness, read-only -
+           pushing and popping stay human acts. */
+        const r = await fetch("/api/git/stash");
+        const d = await r.json();
+        return "Stash entries:\n" + ((d.entries || [])
+          .map((e) => e.ref + " " + e.message).join("\n")
+          || "(nothing stashed)");
       }
       if (act.what === "branches") {
         /* Cycle 7 I5: read-only branch awareness -
@@ -11907,7 +12036,18 @@ async function runPlan(task) {
   let outcome = "cap";
   let nudges = 0;
   for (let step = 1; step <= AGENT_PLAN_MAX_STEPS; step++) {
+    /* Cycle 7 I10: planning honors pause too - the
+       Cycle 6 residual (pill showed for plans but
+       its loop never waited) closes here. Stop
+       still beats pause in the wait condition. */
+    while (agentPause && !agentStop) {
+      agentPillStep("⏸ Planning paused at step " + step +
+        " - tap ▶ to resume");
+      await new Promise((r) => setTimeout(r, 400));
+    }
     if (agentStop) { outcome = "stopped"; break; }
+    agentPillStep("📝 planning step " + step + "/" +
+      AGENT_PLAN_MAX_STEPS + " · " + task.slice(0, 40));
     addMsg("SYSTEM", "📝 planning step " + step + "/" +
       AGENT_PLAN_MAX_STEPS);
     let reply = "";

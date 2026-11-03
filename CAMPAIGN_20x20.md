@@ -890,3 +890,43 @@ here. Agent GIT is status|diff|log only.
       Git drawer (was display-only).
 - [x] C7-I5 DONE (v2.95): agent GIT += branches,
       read-only - switching stays a human act.
+- [x] C7-I6 DONE (v2.96): stash routes both servers
+      (GET list; POST push/apply/pop/drop). The index
+      is pinned to a small int and the ref rebuilt
+      server-side. PROVEN LIVE end to end.
+- [x] C7-I6b FOUND+FIXED (v2.96): git stash push
+      exits 0 having stashed NOTHING when only
+      untracked files differ; both servers now turn
+      "No local changes" into an honest error that
+      points at the include-untracked option.
+- [x] C7-I7 DONE (v2.96): panel Stash section with
+      per-entry Apply/Pop/Drop (Pop/Drop confirm-
+      gated) and an include-untracked toggle.
+- [x] C7-I8 DONE (v2.96): stash depth rides
+      /api/git/status on both servers; the panel
+      section shows the count.
+- [x] C7-I9 DONE (v2.96): agent GIT += stash,
+      read-only, in BOTH parser sites (a batch-1
+      pin had passed on one site alone; the count
+      is pinned now).
+- [x] C7-I10 DONE (v2.96): PLAN loop honors pause
+      and updates the pill per step - the Cycle 6
+      residual is closed.
+- [x] C7-I11 DONE (v2.97): /api/search gains
+      ignoreCase + regex on both servers; defaults
+      keep the historic case-sensitive substring;
+      pattern capped at 200; a bad regex is a clean
+      error on both. PROVEN LIVE (all five cases).
+- [x] C7-I12 DONE (v2.97): find panel Aa / .* 
+      toggles, persisted per device.
+- [x] C7-I13 REPLACED+ DONE (v2.97): the planned
+      "group results by file" already shipped in
+      Cycle 4 (I8) - replaced with Prev/Next match
+      navigation over the last result set.
+- [x] C7-I14 DONE (v2.97): /api/replace dryRun on
+      both servers - counts, never writes. PROVEN
+      LIVE (file unchanged after a dry run).
+- [x] C7-I15 DONE (v2.97): Replace all runs the dry
+      run first; the confirm states the exact count
+      and file total, and a zero-count run stops
+      with a plain message instead of a dialog.

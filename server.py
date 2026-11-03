@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.95.0"
+APP_VERSION = "2.97.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -4851,9 +4851,21 @@ class Handler(SimpleHTTPRequestHandler):
                                 break
                     except OSError:
                         scope_line = ""
+                # Cycle 7 I8: the stash depth rides the
+                # status the panel already polls.
+                stash_n = 0
+                try:
+                    rc_s, out_s, _, _ = git_out(["stash", "list"])
+                    if rc_s == 0:
+                        stash_n = len([ln for ln
+                                         in out_s.splitlines()
+                                         if ln.strip()])
+                except Exception:
+                    stash_n = 0
                 return self.send_json({"repo": True, "branch": branch,
                                        "ahead": ahead, "behind": behind,
                                        "changes": changes,
+                                       "stash": stash_n,
                                        "scope_line": scope_line})
             if parsed.path == "/api/git/remote":
                 rc, out, err, _ = git_out(["remote"])
@@ -4928,6 +4940,22 @@ class Handler(SimpleHTTPRequestHandler):
                         "name": nm,
                         "current": head.strip() == "*"})
                 return self.send_json({"branches": branches})
+            if parsed.path == "/api/git/stash":
+                # Cycle 7 I6: the stash list.
+                rc, out, err, _ = git_out(
+                    ["stash", "list", "--format=%gd%x09%s"])
+                if rc != 0:
+                    return self.send_json({"entries": []})
+                entries = []
+                for line in out.splitlines():
+                    if not line.strip():
+                        continue
+                    ref, _, msg = line.partition("\t")
+                    m_i = _re_mod.search(r"\{(\d+)\}", ref)
+                    entries.append({
+                        "index": int(m_i.group(1)) if m_i else 0,
+                        "ref": ref, "message": msg})
+                return self.send_json({"entries": entries})
             if parsed.path == "/api/git/diff-all":
                 # Whole-change diff for the AI commit message tool.
                 rc, out, err, _ = git_out(["diff", "HEAD", "--no-color"])
@@ -5618,6 +5646,46 @@ class Handler(SimpleHTTPRequestHandler):
                                      or "git init failed")
                 return self.send_json({"ok": True,
                                        "output": out.strip()})
+            if parsed.path == "/api/git/stash":
+                # Cycle 7 I6: push / apply / pop / drop.
+                # The index is pinned to a small int and
+                # rebuilt into the ref here - a raw ref
+                # string from the client never reaches
+                # the command line.
+                data = self.read_json()
+                action = data.get("action") or ""
+                if action == "push":
+                    msg = (data.get("message") or
+                           "GhostIDE stash").strip()[:120]
+                    args = ["stash", "push", "-m", msg or
+                            "GhostIDE stash"]
+                    if data.get("untracked"):
+                        args.append("-u")
+                elif action in ("apply", "pop", "drop"):
+                    idx = data.get("index")
+                    if (isinstance(idx, bool)
+                            or not isinstance(idx, int)
+                            or idx < 0 or idx > 99):
+                        raise ValueError("bad stash index")
+                    args = ["stash", action,
+                            "stash@{%d}" % idx]
+                else:
+                    raise ValueError("unknown stash action")
+                rc, out, err, _ = git_out(args)
+                if rc != 0:
+                    raise ValueError(
+                        (err or out).strip()[:300]
+                        or "git stash failed")
+                if action == "push" and \
+                        "No local changes" in (out or ""):
+                    # git exits 0 having stashed nothing
+                    # (e.g. only untracked files differ);
+                    # saying ok would be a lie.
+                    raise ValueError(
+                        "nothing to stash: no tracked "
+                        "changes (tick 'include untracked' "
+                        "for new files)")
+                return self.send_json({"ok": True})
             if parsed.path == "/api/git/branch":
                 # Cycle 7 I2: create / delete / switch.
                 # The name is pinned (see _branch_name_ok);
@@ -5767,6 +5835,24 @@ class Handler(SimpleHTTPRequestHandler):
                 q = data.get("query", "")
                 if not q:
                     raise ValueError("empty search")
+                # Cycle 7 I11: case + regex options.
+                # Defaults keep the historic behavior
+                # (case-sensitive substring); a bad
+                # regex is a clean error, never a crash,
+                # and the pattern is length-capped.
+                if len(q) > 200:
+                    raise ValueError(
+                        "search pattern too long (200 max)")
+                ign = bool(data.get("ignoreCase"))
+                pat = None
+                if data.get("regex"):
+                    try:
+                        pat = _re_mod.compile(
+                            q, _re_mod.IGNORECASE if ign else 0)
+                    except Exception as e:
+                        raise ValueError(
+                            "bad regex: " + str(e)[:120])
+                ql = q.lower()
                 matches = []
                 for rel, p in iter_text_files():
                     try:
@@ -5774,7 +5860,13 @@ class Handler(SimpleHTTPRequestHandler):
                     except Exception:
                         continue
                     for i, line in enumerate(text.splitlines(), 1):
-                        if q in line:
+                        if pat is not None:
+                            hit = pat.search(line) is not None
+                        elif ign:
+                            hit = ql in line.lower()
+                        else:
+                            hit = q in line
+                        if hit:
                             matches.append({"path": str(rel), "line": i,
                                             "text": line.strip()[:200]})
                             if len(matches) >= 200:
@@ -6217,6 +6309,10 @@ class Handler(SimpleHTTPRequestHandler):
                 rep = data.get("replacement", "")
                 if not q:
                     raise ValueError("empty search")
+                # Cycle 7 I14: dryRun counts without
+                # writing, so Replace all can show its
+                # blast radius before it fires.
+                dry = bool(data.get("dryRun"))
                 files_changed = 0
                 total = 0
                 for rel, p in iter_text_files():
@@ -6226,11 +6322,13 @@ class Handler(SimpleHTTPRequestHandler):
                         continue
                     n = text.count(q)
                     if n:
-                        p.write_text(text.replace(q, rep))
+                        if not dry:
+                            p.write_text(text.replace(q, rep))
                         files_changed += 1
                         total += n
                 return self.send_json({"filesChanged": files_changed,
-                                       "replacements": total})
+                                       "replacements": total,
+                                       "dryRun": dry})
             if parsed.path == "/api/debug/start":
                 data = self.read_json()
                 sid, ev = _dbg_start(data["path"],

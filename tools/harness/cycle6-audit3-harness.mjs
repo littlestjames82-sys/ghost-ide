@@ -20,11 +20,11 @@ const agentBody = src.slice(src.indexOf("async function runAgent"),
 ck("A11 signer is the build.sh keystore constant",
    readFileSync(home + "/workspace/ghostide-apk-build/build.sh", "utf8")
      .includes("debug.keystore"));
-/* Census moved 137/127 -> 139/129 in Cycle 7
-   (branches + branch routes, both servers). */
-ck("A12 census after Cycle 7 additions: 139 desktop / 129 Java",
-   (py.match(/parsed\.path ==/g) || []).length === 139 &&
-   (java.match(/path\.equals\("\/api/g) || []).length === 129);
+/* Census moved by design in Cycle 7: 139/129 after
+   batch 1 (branches), 141/131 after batch 2 (stash). */
+ck("A12 census after Cycle 7 additions: 141 desktop / 131 Java",
+   (py.match(/parsed\.path ==/g) || []).length === 141 &&
+   (java.match(/path\.equals\("\/api/g) || []).length === 131);
 ck("A13 datapack name pins unchanged",
    py.includes('r"data-pack-[A-Za-z0-9_.-]+"') &&
    py.includes('".." in'));
