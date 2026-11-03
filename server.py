@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "2.92.0"
+APP_VERSION = "2.95.0"
 FROZEN = getattr(sys, "frozen", False)
 UPDATE_URL = os.environ.get(
     "GHOST_IDE_UPDATE_URL",
@@ -2488,6 +2488,18 @@ def git_out(args, timeout=30):
                    WORKSPACE, timeout)
 
 
+def _branch_name_ok(name):
+    """Cycle 7: a branch name must never be usable as a
+    git flag (leading dash is excluded by the first
+    character class) or as a path (no dot-dot, no
+    trailing slash or .lock)."""
+    return (bool(_re_mod.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._/-]*", name or ""))
+        and ".." not in name
+        and not name.endswith("/")
+        and not name.endswith(".lock"))
+
+
 # GitHub connect (v2.08): network git with token auth
 # that never lands in .git/config. The token travels
 # in an env var; a tiny askpass script answers git's
@@ -4899,6 +4911,23 @@ class Handler(SimpleHTTPRequestHandler):
                             .strip()[:200]}, status=400)
                 return self.send_json(
                     {"output": (out or "")[:20000]})
+            if parsed.path == "/api/git/branches":
+                # Cycle 7 I1: the branch list - the
+                # panel switcher and the agent read it.
+                rc, out, err, _ = git_out(
+                    ["branch",
+                     "--format=%(refname:short)\t%(HEAD)"])
+                if rc != 0:
+                    return self.send_json({"branches": []})
+                branches = []
+                for line in out.splitlines():
+                    if not line.strip():
+                        continue
+                    nm, _, head = line.partition("\t")
+                    branches.append({
+                        "name": nm,
+                        "current": head.strip() == "*"})
+                return self.send_json({"branches": branches})
             if parsed.path == "/api/git/diff-all":
                 # Whole-change diff for the AI commit message tool.
                 rc, out, err, _ = git_out(["diff", "HEAD", "--no-color"])
@@ -5589,6 +5618,37 @@ class Handler(SimpleHTTPRequestHandler):
                                      or "git init failed")
                 return self.send_json({"ok": True,
                                        "output": out.strip()})
+            if parsed.path == "/api/git/branch":
+                # Cycle 7 I2: create / delete / switch.
+                # The name is pinned (see _branch_name_ok);
+                # git itself refuses a switch that would
+                # clobber work, and its refusal surfaces.
+                data = self.read_json()
+                action = data.get("action") or ""
+                name = (data.get("name") or "").strip()
+                if not _branch_name_ok(name):
+                    raise ValueError("bad branch name")
+                if action == "create":
+                    args = (["switch", "-c", name]
+                            if data.get("switch")
+                            else ["branch", name])
+                elif action == "delete":
+                    rc0, out0, _, _ = git_out(
+                        ["branch", "--show-current"])
+                    if out0.strip() == name:
+                        raise ValueError(
+                            "cannot delete the current branch")
+                    args = ["branch", "-d", name]
+                elif action == "switch":
+                    args = ["switch", name]
+                else:
+                    raise ValueError("unknown branch action")
+                rc, out, err, _ = git_out(args)
+                if rc != 0:
+                    raise ValueError(
+                        (err or out).strip()[:300]
+                        or "git branch failed")
+                return self.send_json({"ok": True})
             if parsed.path == "/api/git/stage":
                 data = self.read_json()
                 if data["path"] != ".":

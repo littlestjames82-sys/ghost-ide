@@ -809,3 +809,84 @@ Same delivery rule: build + push, no uploads.
 - [x] C6-A10 PASS (v2.92): bundle freshness - the
       built bundle carries this cycle's markers
       (runExplore, agentPillShow, doneGate).
+- [x] C6-A11 PASS (v2.93): signer verified LIVE on
+      the v2.92 APK (8ea8684a..., unbroken).
+- [x] C6-A12 PASS (v2.93): census unchanged at
+      137/127 - the Agentic Cycle added no routes.
+- [x] C6-A13 PASS (v2.93): datapack pins unchanged.
+- [x] C6-A14 PASS (v2.93): delta wording honest.
+- [x] C6-A15 PASS (v2.93): malformed JSON probed
+      live this cycle (clean {error}, health up).
+- [x] C6-RAIL PASS (v2.93): DONE-gate exclusivity -
+      exactly one outcome="done" assignment exists
+      in runAgent and it sits behind doneGate();
+      the repair cap is clamped 0..5 and opens at
+      the cap by design (bounded refusal).
+- [x] C6-A16 PASS (v2.94): leak sweep zero hits.
+- [x] C6-A17 PASS (v2.94): one decide route per
+      server; all decisions ride it.
+- [x] C6-A18 PASS (v2.94): caps re-pinned, incl.
+      EXPLORE's 6-step cap and the notes 8 KB cap.
+- [x] C6-A19 PASS (v2.94): new surfaces render via
+      textContent (census held at 101 in A8).
+- [x] C6-A20 PASS (v2.94): version ritual held
+      (2.94.0/199). CYCLE 6 COMPLETE: improvements
+      v2.87-v2.90, audits v2.91-v2.94, suite 121/121.
+      New rails proven: DONE-gate exclusivity,
+      EXPLORE whitelist (negative space), NOTE path
+      pin, queue single-run guard, stop-beats-pause.
+      Residuals: PLAN runs show the pill but do not
+      pause (Stop works); the queue drains even
+      while a review panel from the prior run is
+      open (panels hold their own staged state);
+      EXPLORE reads through the run's staged view,
+      which is intended.
+
+## Cycle 7 - THE FLOW CYCLE (git completeness, search power, continuity)
+Scouted Nov 2, 2026 before building (the Cycle 6
+discipline): git is deep (commit/stage/diff/blame/
+worktrees/show) but has NO branch list/switch/create
+anywhere - /api/git/checkout is per-file revert, not
+branch switching - and NO stash anywhere. Workspace
+search is substring-only on both servers. The Cycle 6
+residual (PLAN runs do not pause) is real and closes
+here. Agent GIT is status|diff|log only.
+- Batch 1 (v2.95) branches: I1 GET /api/git/branches
+  both servers; I2 POST /api/git/branch create/
+  delete/switch, name pinned, both servers;
+  I3 panel Branches section; I4 branchChip tap opens
+  the git drawer; I5 agent GIT += branches (read).
+- Batch 2 (v2.96) stash + pause: I6 stash routes
+  both servers (index pinned); I7 panel Stash
+  section; I8 stash count in git status + panel;
+  I9 agent GIT += stash list; I10 PLAN pause honored
+  (Cycle 6 residual closed).
+- Batch 3 (v2.97) search power: I11 /api/search case
+  + regex options both servers (invalid regex is a
+  clean error, pattern capped); I12 search UI
+  toggles; I13 results grouped by file with counts;
+  I14 /api/replace dry-run preview; I15 replace UI
+  previews before it writes.
+- Batch 4 (v2.98) continuity: grounded at batch-3
+  time, recorded honestly like prior cycles.
+- Audits (v2.99-v3.02): A1-A20 vs Cycle 6 baselines
+  (census moves +4/server by design: 141/131) plus
+  new rails: branch-name pin (no leading dash, no
+  traversal), stash index pin, dirty-switch surfaces
+  git's own refusal, regex error + cap, PLAN pause.
+- [x] C7-I1 DONE (v2.95): GET /api/git/branches on
+      both servers ({name, current} list).
+- [x] C7-I2 DONE (v2.95): POST /api/git/branch
+      create/delete/switch both servers; name pinned
+      identically (no leading dash, no dot-dot, no
+      trailing slash/.lock); current-branch delete
+      refused; git's own switch refusal surfaces.
+      PROVEN LIVE on the fixture repo: list, create,
+      switch, and all three refusals.
+- [x] C7-I3 DONE (v2.95): Git panel Branches section
+      (current marked, Switch/Delete per branch,
+      Create and Create + switch).
+- [x] C7-I4 DONE (v2.95): branchChip tap opens the
+      Git drawer (was display-only).
+- [x] C7-I5 DONE (v2.95): agent GIT += branches,
+      read-only - switching stays a human act.

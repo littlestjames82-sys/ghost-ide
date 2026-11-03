@@ -19,9 +19,12 @@ ck("A11 signer lineage is a build.sh constant, not luck",
 /* Census moved 136/126 -> 137/127 in Cycle 5 when
    I16 added /api/git/show to both servers on purpose;
    the Cycle 5 A12 audit re-derives it independently. */
-ck("A12 route census recorded (137 desktop / 127 Java)",
-   (py.match(/parsed\.path ==/g) || []).length === 137 &&
-   (java.match(/path\.equals\("\/api/g) || []).length === 127);
+/* Census moved 137/127 -> 139/129 in Cycle 7 when
+   I1/I2 added /api/git/branches + /api/git/branch
+   to both servers on purpose. */
+ck("A12 route census recorded (139 desktop / 129 Java)",
+   (py.match(/parsed\.path ==/g) || []).length === 139 &&
+   (java.match(/path\.equals\("\/api/g) || []).length === 129);
 ck("A13 name pins still refuse traversal shapes",
    py.includes('r"data-pack-[A-Za-z0-9_.-]+"') &&
    py.includes('".." in'));

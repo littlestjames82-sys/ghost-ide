@@ -35550,6 +35550,77 @@
         alert("Clipboard was not available here.");
       }
     };
+  async function branchAct(action, name2, extra) {
+    const out = $("branchOut");
+    const d = await postJson(
+      "/api/git/branch",
+      Object.assign({ action, name: name2 }, extra || {})
+    );
+    if (d.error) {
+      if (out) out.textContent = d.error;
+      return;
+    }
+    if (out) out.textContent = "";
+    const nm = $("branchName");
+    if (nm) nm.value = "";
+    refreshGit();
+  }
+  async function renderBranches() {
+    const box = $("branchList");
+    if (!box) return;
+    try {
+      const r = await fetch("/api/git/branches");
+      const d = await r.json();
+      box.textContent = "";
+      for (const b of d.branches || []) {
+        const row = document.createElement("div");
+        row.className = "gitRow";
+        const label = document.createElement("span");
+        label.textContent = (b.current ? "\u25CF " : "") + b.name + " ";
+        if (b.current) {
+          const tag = document.createElement("em");
+          tag.textContent = "current";
+          label.appendChild(tag);
+        }
+        row.appendChild(label);
+        if (!b.current) {
+          const sw = document.createElement("button");
+          sw.textContent = "Switch";
+          sw.onclick = () => branchAct("switch", b.name);
+          row.appendChild(sw);
+          const del = document.createElement("button");
+          del.textContent = "Delete";
+          del.onclick = () => {
+            if (confirm("Delete branch " + b.name + "?"))
+              branchAct("delete", b.name);
+          };
+          row.appendChild(del);
+        }
+        box.appendChild(row);
+      }
+      if (!(d.branches || []).length)
+        box.textContent = "(no branches)";
+    } catch (e) {
+    }
+  }
+  var branchCreateBtn = $("branchCreate");
+  if (branchCreateBtn)
+    branchCreateBtn.onclick = () => {
+      const nm = $("branchName").value.trim();
+      if (nm) branchAct("create", nm);
+    };
+  var branchCreateSwitchBtn = $("branchCreateSwitch");
+  if (branchCreateSwitchBtn)
+    branchCreateSwitchBtn.onclick = () => {
+      const nm = $("branchName").value.trim();
+      if (nm) branchAct("create", nm, { switch: true });
+    };
+  var branchChipEl = $("branchChip");
+  if (branchChipEl)
+    branchChipEl.onclick = () => {
+      const vg = $("viewGit");
+      if (vg) vg.click();
+    };
   async function refreshGit() {
     refreshGhRemote();
     const box = $("gitChanges");
@@ -35561,6 +35632,8 @@
       if (!d.repo) {
         $("gitBranch").textContent = "";
         $("gitLog").textContent = "";
+        const bl = $("branchList");
+        if (bl) bl.textContent = "";
         $("gitAiMsg").disabled = true;
         $("branchChip").classList.add("hidden");
         box.innerHTML = "";
@@ -35585,6 +35658,7 @@
       if (scopeEl)
         scopeEl.textContent = d.scope_line ? "Last Scope: " + d.scope_line : "";
       renderWorktrees();
+      renderBranches();
       $("gitAiMsg").disabled = false;
       if (d.branch) {
         $("branchChip").textContent = "\u2387 " + d.branch;
@@ -42522,7 +42596,7 @@
     "CONTEXT - fetch the repo map (GhostAtlas) when you need",
     "  the project's shape mid-task",
     "TEST [path] - run the project tests (one file, or all)",
-    "GIT status / GIT diff / GIT log - repository state",
+    "GIT status / GIT diff / GIT log / GIT branches - repository state",
     "MCP <server> <tool> <json-args> - call a tool on a",
     "  configured MCP server; your briefing lists the servers",
     "  and tools available, if any",
@@ -42556,7 +42630,7 @@
     "LIST [path] - list workspace files",
     "REVERSE <path> - inspect a file or binary with GhostRE",
     "ECO <tool> - run an ecosystem tool (ghostindex, ghostdeps)",
-    "GIT status / GIT diff / GIT log - repository state",
+    "GIT status / GIT diff / GIT log / GIT branches - repository state",
     "You may BATCH several read-only actions in one reply, one",
     "per line: READ, SEARCH, LIST, REVERSE, ECO, GIT, TODO.",
     "TODO <text> - add one step of the plan",
@@ -42815,7 +42889,7 @@
       return { type: "reverse", path: m[1] };
     if (m = t2.match(/^ECO\s+(\S+)$/))
       return { type: "eco", tool: m[1].toLowerCase() };
-    if (m = t2.match(/^GIT\s+(status|diff|log)$/i))
+    if (m = t2.match(/^GIT\s+(status|diff|log|branches)$/i))
       return { type: "git", what: m[1].toLowerCase() };
     if (/^CONTEXT$/.test(t2)) return { type: "context" };
     return null;
@@ -42892,6 +42966,11 @@
           const r2 = await fetch("/api/git/diff-all");
           const d2 = await r2.json();
           return "GIT diff vs HEAD:\n" + (d2.diff ? d2.diff.slice(0, 6e3) : "(no uncommitted changes)");
+        }
+        if (act.what === "branches") {
+          const r2 = await fetch("/api/git/branches");
+          const d2 = await r2.json();
+          return "Branches:\n" + ((d2.branches || []).map((b) => (b.current ? "* " : "  ") + b.name).join("\n") || "(none)");
         }
         const r = await fetch("/api/git/log");
         const d = await r.json();

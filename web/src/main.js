@@ -3055,6 +3055,83 @@ if (gitCopyBtn)
     }
   };
 
+/* Cycle 7 I3: the Branches section - list, switch,
+   create, delete. Switching needs no confirm dialog:
+   git itself refuses a switch that would clobber
+   uncommitted work, and that refusal is shown as-is.
+   Deleting is confirm-gated here, and the server
+   refuses the current branch and unmerged work (-d). */
+async function branchAct(action, name, extra) {
+  const out = $("branchOut");
+  const d = await postJson("/api/git/branch",
+    Object.assign({ action: action, name: name }, extra || {}));
+  if (d.error) {
+    if (out) out.textContent = d.error;
+    return;
+  }
+  if (out) out.textContent = "";
+  const nm = $("branchName");
+  if (nm) nm.value = "";
+  refreshGit();
+}
+async function renderBranches() {
+  const box = $("branchList");
+  if (!box) return;
+  try {
+    const r = await fetch("/api/git/branches");
+    const d = await r.json();
+    box.textContent = "";
+    for (const b of d.branches || []) {
+      const row = document.createElement("div");
+      row.className = "gitRow";
+      const label = document.createElement("span");
+      label.textContent = (b.current ? "● " : "") + b.name + " ";
+      if (b.current) {
+        const tag = document.createElement("em");
+        tag.textContent = "current";
+        label.appendChild(tag);
+      }
+      row.appendChild(label);
+      if (!b.current) {
+        const sw = document.createElement("button");
+        sw.textContent = "Switch";
+        sw.onclick = () => branchAct("switch", b.name);
+        row.appendChild(sw);
+        const del = document.createElement("button");
+        del.textContent = "Delete";
+        del.onclick = () => {
+          if (confirm("Delete branch " + b.name + "?"))
+            branchAct("delete", b.name);
+        };
+        row.appendChild(del);
+      }
+      box.appendChild(row);
+    }
+    if (!(d.branches || []).length)
+      box.textContent = "(no branches)";
+  } catch (e) { /* git panel is best-effort */ }
+}
+const branchCreateBtn = $("branchCreate");
+if (branchCreateBtn)
+  branchCreateBtn.onclick = () => {
+    const nm = $("branchName").value.trim();
+    if (nm) branchAct("create", nm);
+  };
+const branchCreateSwitchBtn = $("branchCreateSwitch");
+if (branchCreateSwitchBtn)
+  branchCreateSwitchBtn.onclick = () => {
+    const nm = $("branchName").value.trim();
+    if (nm) branchAct("create", nm, { switch: true });
+  };
+/* Cycle 7 I4: the editor's branch chip was display-
+   only; tapping it now opens the Git drawer. */
+const branchChipEl = $("branchChip");
+if (branchChipEl)
+  branchChipEl.onclick = () => {
+    const vg = $("viewGit");
+    if (vg) vg.click();
+  };
+
 async function refreshGit() {
   refreshGhRemote();
   const box = $("gitChanges");
@@ -3066,6 +3143,8 @@ async function refreshGit() {
     if (!d.repo) {
       $("gitBranch").textContent = "";
       $("gitLog").textContent = "";
+      const bl = $("branchList");
+      if (bl) bl.textContent = "";
       $("gitAiMsg").disabled = true;
       $("branchChip").classList.add("hidden");
       box.innerHTML = "";
@@ -3096,6 +3175,7 @@ async function refreshGit() {
       scopeEl.textContent = d.scope_line
         ? "Last Scope: " + d.scope_line : "";
     renderWorktrees();
+    renderBranches();
     $("gitAiMsg").disabled = false;
     if (d.branch) {
       $("branchChip").textContent = "⎇ " + d.branch;
@@ -10347,7 +10427,7 @@ const AGENT_RULES = [
   "CONTEXT - fetch the repo map (GhostAtlas) when you need",
   "  the project's shape mid-task",
   "TEST [path] - run the project tests (one file, or all)",
-  "GIT status / GIT diff / GIT log - repository state",
+  "GIT status / GIT diff / GIT log / GIT branches - repository state",
   "MCP <server> <tool> <json-args> - call a tool on a",
   "  configured MCP server; your briefing lists the servers",
   "  and tools available, if any",
@@ -10382,7 +10462,7 @@ const AGENT_PLAN_RULES = [
   "LIST [path] - list workspace files",
   "REVERSE <path> - inspect a file or binary with GhostRE",
   "ECO <tool> - run an ecosystem tool (ghostindex, ghostdeps)",
-  "GIT status / GIT diff / GIT log - repository state",
+  "GIT status / GIT diff / GIT log / GIT branches - repository state",
   "You may BATCH several read-only actions in one reply, one",
   "per line: READ, SEARCH, LIST, REVERSE, ECO, GIT, TODO.",
   "TODO <text> - add one step of the plan",
@@ -10650,7 +10730,7 @@ function parseAgentLine(line) {
     return { type: "reverse", path: m[1] };
   if ((m = t.match(/^ECO\s+(\S+)$/)))
     return { type: "eco", tool: m[1].toLowerCase() };
-  if ((m = t.match(/^GIT\s+(status|diff|log)$/i)))
+  if ((m = t.match(/^GIT\s+(status|diff|log|branches)$/i)))
     return { type: "git", what: m[1].toLowerCase() };
   if (/^CONTEXT$/.test(t)) return { type: "context" };
   return null;
@@ -10734,6 +10814,16 @@ async function agentToolText(act) {
         return "GIT diff vs HEAD:\n" + (d.diff
           ? d.diff.slice(0, 6000)
           : "(no uncommitted changes)");
+      }
+      if (act.what === "branches") {
+        /* Cycle 7 I5: read-only branch awareness -
+           switching and creating stay human acts in
+           the Git panel. */
+        const r = await fetch("/api/git/branches");
+        const d = await r.json();
+        return "Branches:\n" + ((d.branches || [])
+          .map((b) => (b.current ? "* " : "  ") + b.name)
+          .join("\n") || "(none)");
       }
       const r = await fetch("/api/git/log");
       const d = await r.json();

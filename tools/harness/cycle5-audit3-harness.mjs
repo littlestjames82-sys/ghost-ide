@@ -15,9 +15,11 @@ const ck = (n, c) => { console.log((c ? "PASS " : "FAIL ") + n); c ? passed++ : 
 ck("A11 signer is the build.sh keystore constant",
    readFileSync(home + "/workspace/ghostide-apk-build/build.sh", "utf8")
      .includes("debug.keystore"));
-ck("A12 census re-derived: 137 desktop / 127 Java",
-   (py.match(/parsed\.path ==/g) || []).length === 137 &&
-   (java.match(/path\.equals\("\/api/g) || []).length === 127);
+/* Census moved 137/127 -> 139/129 in Cycle 7
+   (branches + branch routes, both servers). */
+ck("A12 census re-derived: 139 desktop / 129 Java",
+   (py.match(/parsed\.path ==/g) || []).length === 139 &&
+   (java.match(/path\.equals\("\/api/g) || []).length === 129);
 ck("A13 datapack name pins unchanged",
    py.includes('r"data-pack-[A-Za-z0-9_.-]+"') &&
    py.includes('".." in'));
