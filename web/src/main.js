@@ -16,6 +16,7 @@ import { rust } from "@codemirror/lang-rust";
 import { go } from "@codemirror/lang-go";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { openSearchPanel, selectNextOccurrence } from "@codemirror/search";
+import { lintGutter, setDiagnostics } from "@codemirror/lint";
 import { snippet } from "@codemirror/autocomplete";
 import { foldAll, unfoldAll, indentUnit, HighlightStyle,
   syntaxHighlighting } from "@codemirror/language";
@@ -293,6 +294,12 @@ const wsComp = new Compartment();
 function wsExt() {
   return settings.whitespace ? highlightWhitespace() : [];
 }
+/* Cycle 8 I1: the diagnostics gutter rides the same
+   compartment pattern (and the same TDZ rule). */
+const diagComp = new Compartment();
+function diagExt() {
+  return settings.diag === false ? [] : lintGutter();
+}
 
 const view = new EditorView({
   parent: $("editor"),
@@ -336,6 +343,7 @@ function baseExtensions(path) {
     wrapComp.of(wrapExt()),
     indentComp.of(indentExt()),
     wsComp.of(wsExt()),
+    diagComp.of(diagExt()),
     EditorView.updateListener.of((u) => {
       if (u.selectionSet || u.docChanged) {
         const head = u.state.selection.main.head;
@@ -363,6 +371,7 @@ function baseExtensions(path) {
           renderTabs();
         }
         if (currentFile) queueDraftSave();
+        if (currentFile) queueDiagnostics();
         if (currentFile) queueAutosave();
       }
     }),
@@ -742,6 +751,7 @@ function activateTab(path) {
   loadFiles();
   noteRecentFile(path);
   updateCrumbs();
+  refreshDiagnostics();
 }
 
 function closeTab(p) {
@@ -883,6 +893,56 @@ function getJson(url) {
   return fetch(url).then((r) => r.json());
 }
 
+/* Cycle 8 I2/I5: live syntax diagnostics. The
+   checker is /api/check-content over the CURRENT
+   editor text (not the disk copy), debounced so it
+   never fights typing, and best-effort throughout:
+   a failed check changes nothing on screen. The
+   gutter shows the first syntax problem; the chip
+   in the status bar names its line and jumps to it. */
+let diagTimer = null;
+let diagProblem = null;
+function queueDiagnostics() {
+  clearTimeout(diagTimer);
+  diagTimer = setTimeout(refreshDiagnostics, 1200);
+}
+async function refreshDiagnostics() {
+  const chip = $("diagChip");
+  if (!currentFile || settings.diag === false) {
+    diagProblem = null;
+    if (chip) chip.classList.add("hidden");
+    return;
+  }
+  const path = currentFile;
+  try {
+    const d = await postJson("/api/check-content", {
+      path: path, content: view.state.doc.toString() });
+    if (path !== currentFile) return;
+    let diags = [];
+    diagProblem = null;
+    if (d && d.ok === false && d.line) {
+      const ln = Math.max(1,
+        Math.min(d.line, view.state.doc.lines));
+      const line = view.state.doc.line(ln);
+      diags = [{ from: line.from, to: line.to,
+        severity: "error",
+        message: d.message || "syntax problem" }];
+      diagProblem = { line: ln,
+        message: d.message || "syntax problem" };
+    }
+    view.dispatch(setDiagnostics(view.state, diags));
+    if (chip) {
+      if (diagProblem) {
+        chip.textContent = "⚠ line " + diagProblem.line;
+        chip.title = diagProblem.message;
+        chip.classList.remove("hidden");
+      } else {
+        chip.classList.add("hidden");
+      }
+    }
+  } catch (e) { /* checks are best-effort */ }
+}
+
 async function saveFile() {
   if (!currentFile) return;
   if (settings.trimOnSave) {
@@ -910,6 +970,7 @@ async function saveFile() {
   renderTabs();
   try { localStorage.removeItem(draftKey(currentFile)); } catch (e) {}
   setSaveState("saved ✓ " + new Date().toLocaleTimeString());
+  refreshDiagnostics();
   if (settings.formatOnSave) {
     const d = await postJson("/api/format", { path: currentFile });
     if (d.formatted) {
@@ -4643,6 +4704,31 @@ $("setWrap").onchange = (e) => {
   view.dispatch(eff);
   if (splitView) splitView.dispatch(eff);
 };
+/* Cycle 8 I4: the diagnostics toggle reconfigures
+   the gutter and clears any shown problem when it
+   goes off - a setting that hides the marker but
+   leaves the chip would be a stale lie. */
+$("setDiag").checked = settings.diag !== false;
+$("setDiag").onchange = (e) => {
+  settings.diag = e.target.checked;
+  saveSettings();
+  const eff = { effects: diagComp.reconfigure(diagExt()) };
+  view.dispatch(eff);
+  if (splitView) splitView.dispatch(eff);
+  if (!settings.diag) {
+    diagProblem = null;
+    view.dispatch(setDiagnostics(view.state, []));
+    const chip = $("diagChip");
+    if (chip) chip.classList.add("hidden");
+  } else {
+    refreshDiagnostics();
+  }
+};
+const diagChipBtn = $("diagChip");
+if (diagChipBtn)
+  diagChipBtn.onclick = () => {
+    if (diagProblem) jumpToLine(diagProblem.line);
+  };
 $("setShort").checked = settings.shortAnswers;
 $("setShort").onchange = (e) => {
   settings.shortAnswers = e.target.checked;

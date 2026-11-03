@@ -963,3 +963,87 @@ here. Agent GIT is status|diff|log only.
 - [x] C7-A10 PASS (v3.00): bundle freshness - the
       built bundle carries renderBranches,
       renderStashes, findJump and pendingPos.
+- [x] C7-A11 PASS (v3.01): signer verified LIVE on
+      the v3.00 APK (8ea8684a..., unbroken).
+- [x] C7-A12 PASS (v3.01): census at the Cycle 7
+      level, 141/131 (branches + stash by design).
+- [x] C7-A13 PASS (v3.01): datapack pins unchanged.
+- [x] C7-A14 PASS (v3.01): delta wording honest.
+- [x] C7-A15 PASS (v3.01): malformed JSON probed
+      live this cycle (clean {error}, health up).
+- [x] C7-RAIL PASS (v3.01): branch pin identical in
+      shape on both servers incl. the current-
+      branch delete refusal; stash refs rebuilt
+      from pinned indexes on both (bool and
+      fractional indexes refused).
+- [x] C7-A16 PASS (v3.02): leak sweep zero hits.
+- [x] C7-A17 PASS (v3.02): one decide route per
+      server; all decisions ride it.
+- [x] C7-A18 PASS (v3.02): caps re-pinned, incl.
+      the search pattern cap on both servers.
+- [x] C7-A19 PASS (v3.02): new surfaces render via
+      textContent (census held at 101 in A8).
+- [x] C7-A20 PASS (v3.02): version ritual held
+      (3.02.0/207). CYCLE 7 COMPLETE: improvements
+      v2.95-v2.98, audits v2.99-v3.02, suite 129/129.
+      New rails proven: branch pin parity + current
+      protection, stash ref rebuilding, the honest
+      no-op stash refusal, PLAN pause, agent git
+      read-only by negative space. Residuals: the
+      Java branch/stash routes are compile- and
+      pin-proven with desktop parity (device proof
+      stacks with Cycles 3-6); CI live proof of the
+      Cycle 5 fix is still pending its next run.
+
+## Cycle 8 - THE CRAFT CYCLE (editor craft, git finish)
+Scouted Nov 2, 2026: @codemirror/lint is installed
+but never imported - the editor has no inline
+diagnostics, while /api/check-content already
+syntax-checks unsaved content. Fold All / Unfold
+All buttons exist and foldAll is imported, but
+codeFolding() is in no extension list, so the
+buttons are dead - a half-wired feature. Git tags
+and amend do not exist. Wrap, sessions, chat
+history and tests UI all check out as present.
+- Batch 1 (v3.03) editor diagnostics: I1 lint
+  gutter via a settings compartment; I2 live syntax
+  diagnostics from check-content (debounced, on
+  open/save/edit); I3 problems chip that jumps to
+  the line; I4 settings toggle that also clears;
+  I5 diagnostics never block typing or saving
+  (best-effort, failures silent).
+- Batch 2 (v3.04) folding completed: I6
+  codeFolding() + foldGutter in baseExtensions;
+  I7 fold keymap; I8 settings toggle; I9 split
+  pane inherits via baseExtensions; I10 the dead
+  Fold buttons come alive (proof by construction).
+- Batch 3 (v3.05) git finish: I11 tags routes
+  both servers (name pinned like branches); I12
+  panel Tags section + tag-the-commit in the
+  commit viewer; I13 amend route both servers;
+  I14 panel Amend with confirm; I15 agent GIT
+  += tags (read-only).
+- Batch 4 (v3.06) tests craft: grounded at
+  batch-3 time from the tests UI as it stands.
+- Audits (v3.07-v3.10): A1-A20 vs Cycle 7 baselines
+  (census moves +3/server by design: 144/134) plus
+  rails: diagnostics are compute-only (no writes),
+  tag pin parity, amend surfaces git refusals,
+  fold/diag are view-only state.
+- [x] C8-I1 DONE (v3.03): lintGutter imported from
+      @codemirror/lint and wired through a settings
+      compartment (diagComp), same pattern and TDZ
+      discipline as wrap/indent/whitespace.
+- [x] C8-I2 DONE (v3.03): live syntax diagnostics -
+      /api/check-content over the current editor
+      text, debounced 1200 ms, first problem mapped
+      into the gutter as an error diagnostic.
+- [x] C8-I3 DONE (v3.03): status-bar problems chip
+      names the line, carries the message as its
+      title, and jumps to the line on tap.
+- [x] C8-I4 DONE (v3.03): Settings toggle
+      reconfigures both panes and clears diagnostics
+      + chip when switched off.
+- [x] C8-I5 DONE (v3.03): checks fire on edit
+      (debounced), on save, and on tab activation;
+      all failures are silent by design.
