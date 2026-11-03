@@ -787,3 +787,25 @@ Same delivery rule: build + push, no uploads.
       repairs, seconds) now shows on every completion
       line, not only when changes are staged.
       CYCLE 6 IMPROVEMENTS COMPLETE (v2.87-v2.90).
+
+## Cycle 6 audits (v2.91-v2.94) - standard re-run + the new loop rails
+- [x] C6-A1 PASS (v2.91): pair gate wraps both
+      handlers once each; viewer check intact.
+- [x] C6-A2 PASS (v2.91): traversal refused; commit
+      hash pin intact both servers (live refusal).
+- [x] C6-A3 PASS (v2.91): atomic writes intact.
+- [x] C6-A4 PASS (v2.91): canary sweep live on
+      v2.90 code - 0 hits on all five routes.
+- [x] C6-A5 PASS (v2.91): eco pins unchanged
+      (e13 / 29 tools / ghostmcp 0.3.2); full gate
+      re-run green this cycle.
+- [x] C6-A6 PASS (v2.92): timeouts intact.
+- [x] C6-A7 PASS (v2.92): push modes and signer
+      remain script constants.
+- [x] C6-A8 PASS (v2.92): sink census UNCHANGED at
+      101 on the bundle carrying all twenty agentic
+      features.
+- [x] C6-A9 PASS (v2.92): eco stamp e13 consistent.
+- [x] C6-A10 PASS (v2.92): bundle freshness - the
+      built bundle carries this cycle's markers
+      (runExplore, agentPillShow, doneGate).

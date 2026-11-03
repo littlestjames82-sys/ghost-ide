@@ -3,6 +3,18 @@
  "kind": "changelog",
  "entries": [
   {
+   "version": "2.92.0",
+   "date": "Nov 2, 2026",
+   "goal": "Campaign Cycle 6 audit batch 2: timeouts, lineage, sink census, bundle freshness",
+   "summary": "Timeouts and signing lineage re-proven, the ecosystem stamp is consistent, and two freshness facts worth stating plainly: the shipped bundle provably contains this cycle's agent features, and its HTML-sink census is unchanged at 101 - every new surface, from the status pill to the notes viewer, renders through safe text APIs only."
+  },
+  {
+   "version": "2.91.0",
+   "date": "Nov 2, 2026",
+   "goal": "Campaign Cycle 6 audit batch 1: pairing, traversal, atomic writes, secret sweep, bundle pins",
+   "summary": "The Agentic Cycle's audits open on current code: the pairing gate still wraps every request, traversal and the commit route's hash pin refuse bad input live, writes stay atomic on both servers, the planted secret canary appears in none of the probed responses, and the ecosystem bundle pins are unchanged."
+  },
+  {
    "version": "2.90.0",
    "date": "Nov 2, 2026",
    "goal": "Campaign Cycle 6 (Agentic) batch 4: background runs and control",
