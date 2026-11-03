@@ -12,6 +12,11 @@ repo). No cloud, no API key, no account.
 
 **Your code never leaves the device. The AI lives here.**
 
+**▶ Watch it run: [the 55-second demo](docs/media/ghostide-demo.mp4)** —
+the real app, driven live: editor diagnostics on a real syntax
+error, the git client, a live test run, the ecosystem catalog,
+and the agent's approval controls. Narrated by Ryan.
+
 This repo is the shared heart of both editions: the
 frontend bundle built from `web/src` ships in the desktop
 app *and* inside the Android APK, and `server.py` is the
