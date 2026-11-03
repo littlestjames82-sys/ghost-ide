@@ -1112,3 +1112,28 @@ history and tests UI all check out as present.
   count as a pass, and a name with no file was
   refused. The phone server keeps its honest
   desktop-only refusal for /api/tests/*.
+- [x] C8-A1-A5 PASS (v3.07): pair gate count 2
+      with the new routes inside it; pins intact;
+      live canary sweep incl. the new routes 0
+      hits; diagnostics compute-only pinned.
+- [x] C8-A6-A10 PASS (v3.08): timeouts, script
+      constants, sink census exactly 101, stamp
+      e13, craft markers fresh; eco gate re-run
+      standalone GREEN for all 29 packages.
+- [x] C8-A11-A15 PASS (v3.09): signer constant +
+      live-verified on the v3.08 APK; census at
+      the deliberate 144/134; tag pin parity;
+      amend force-free; single-test selection
+      bounded by discovery.
+- [x] C8-A16-A20 PASS (v3.10): no canary strings,
+      decide route singular, caps intact, pair
+      TTL + replay shape hold; agent git surface
+      read-only incl. tags; the two status chips
+      are independent state.
+- CYCLE 8 CLOSED at v3.10.0. Residuals: JS test
+  discovery stays file-level (names arrive via
+  run results); Java tags/amend routes are compile-
+  and pin-proven with desktop parity (live proof
+  was desktop, as with Cycle 7); the stacked
+  device pass now covers Cycles 3-8; the Cycle 5
+  CI live proof is still pending a CI run.
