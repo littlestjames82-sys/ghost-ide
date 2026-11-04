@@ -313,9 +313,9 @@ body.zen #files, body.zen #chat { display: none; }
 }
 .gitRow em { color: #f0dfa0; font-style: normal; font-size: 11px; }
 .gitRow button { padding: 2px 7px; font-size: 11px; }
-.git-commit { display: flex; gap: 6px; margin-top: 6px; }
+.git-commit { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .git-commit input {
-  flex: 1; min-width: 0; background: var(--bg); color: #e6e6e6;
+  flex: 1 1 150px; min-width: 0; background: var(--bg); color: #e6e6e6;
   border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px;
   font-size: 12px;
 }

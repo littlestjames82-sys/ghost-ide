@@ -3,6 +3,12 @@
  "kind": "changelog",
  "entries": [
   {
+   "version": "3.10.1",
+   "date": "Nov 4, 2026",
+   "goal": "Hotfix: Git panel commit row clipped on phone-width sidebars",
+   "summary": "The commit row in the Git panel (Commit staged, Amend last, Review, Verdict, Scope, AI) was a single no-wrap flex row, wider than the sidebar on phones, so the Scope and AI buttons were cut off at the panel edge. The row now wraps: the message box takes the first line and any buttons that do not fit flow onto the next line, fully visible and tappable at any width."
+  },
+  {
    "version": "3.10.0",
    "date": "Nov 2, 2026",
    "goal": "Campaign Cycle 8 (Craft) audit batch 4: cycle close",
