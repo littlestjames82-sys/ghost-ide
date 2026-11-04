@@ -1,7 +1,7 @@
 ![GhostIDE — a circuit-trace ghost over a desktop running a code editor](docs/images/banner.png)
 
 # GhostIDE 👻
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![CI](https://github.com/littlestjames82-sys/ghost-ide/actions/workflows/build-desktop.yml/badge.svg)](https://github.com/littlestjames82-sys/ghost-ide/actions/workflows/build-desktop.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Desktop build](https://github.com/littlestjames82-sys/ghost-ide/actions/workflows/build-desktop.yml/badge.svg)](https://github.com/littlestjames82-sys/ghost-ide/actions/workflows/build-desktop.yml) [![Android release](https://img.shields.io/github/v/release/littlestjames82-sys/ghostide-android?label=Android%20release)](https://github.com/littlestjames82-sys/ghostide-android/releases)
 
 A fully offline AI code editor from Ghost Developer Studio.
 The editor, the chat, the agent, and the autocomplete all
