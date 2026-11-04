@@ -1,0 +1,6 @@
+# CodeQL configuration for ghost-ide.
+paths-ignore:
+  # web/app.js is the generated esbuild bundle of web/src (npm run build).
+  # Scanning the bundle duplicates every source finding at minified
+  # offsets; the source tree is what gets analyzed.
+  - web/app.js
