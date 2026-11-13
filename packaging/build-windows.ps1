@@ -2,11 +2,10 @@
 # Run ON Windows in PowerShell:  .\packaging\build-windows.ps1
 # Produces packaging\GhostIDE-windows.zip. Unsigned - SmartScreen
 # will ask on first run, as with any unsigned open-source app.
+# llama.cpp is NOT bundled: the app fetches a pinned release
+# on first use (see LLAMA_CATALOG in server.py).
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
-$LlamaVer = "b11429"
-$LlamaAsset = "llama-$LlamaVer-bin-win-cpu-x64.zip"
-$LlamaUrl = "https://github.com/ggml-org/llama.cpp/releases/download/$LlamaVer/$LlamaAsset"
 
 if (-not (Test-Path "packaging\.venv\Scripts\pyinstaller.exe")) {
     python -m venv packaging\.venv
@@ -15,14 +14,6 @@ if (-not (Test-Path "packaging\.venv\Scripts\pyinstaller.exe")) {
 
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 & packaging\.venv\Scripts\pyinstaller.exe packaging\ghostide.spec
-
-New-Item -ItemType Directory -Force dist\GhostIDE\llama | Out-Null
-$cache = "packaging\.cache\$LlamaAsset"
-if (-not (Test-Path $cache)) {
-    New-Item -ItemType Directory -Force packaging\.cache | Out-Null
-    Invoke-WebRequest $LlamaUrl -OutFile $cache
-}
-Expand-Archive $cache -DestinationPath dist\GhostIDE\llama -Force
 
 @'
 @echo off

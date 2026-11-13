@@ -33920,6 +33920,7 @@
   $("settingsBtn").onclick = () => {
     $("settingsPanel").classList.toggle("hidden");
     refreshModelDl();
+    refreshLlamaDl();
   };
   $("settingsClose").onclick = () => $("settingsPanel").classList.add("hidden");
   {
@@ -34048,6 +34049,51 @@
     }
     refreshModelDl();
   };
+  var llamaDlTimer = null;
+  async function refreshLlamaDl() {
+    try {
+      const r = await fetch("/api/llama/download");
+      const d = await r.json();
+      const out = $("setLlamaDlOut");
+      const btn = $("setLlamaDlBtn");
+      if (d.present) {
+        out.textContent = "ready \u2713 (" + d.path + ")";
+        btn.classList.add("hidden");
+      } else if (d.state === "downloading") {
+        btn.classList.remove("hidden");
+        out.textContent = "downloading\u2026 " + Math.round(100 * (d.done || 0) / (d.total || 1)) + "% of " + Math.round((d.bytes || 0) / 1048576) + " MB";
+        btn.textContent = "Downloading\u2026";
+      } else if (d.state === "verifying") {
+        btn.classList.remove("hidden");
+        out.textContent = "verifying checksum\u2026";
+        btn.textContent = "Verifying\u2026";
+      } else if (d.state === "error") {
+        btn.classList.remove("hidden");
+        out.textContent = "error: " + d.error;
+        btn.textContent = "Retry download";
+      } else {
+        btn.classList.remove("hidden");
+        out.textContent = "not downloaded yet - the editor works without it; the AI waits for this one-time download (goes to " + d.path + ")";
+        btn.textContent = "Download llama.cpp";
+      }
+      if (d.state === "downloading" || d.state === "verifying") {
+        if (!llamaDlTimer)
+          llamaDlTimer = setInterval(refreshLlamaDl, 2e3);
+      } else if (llamaDlTimer) {
+        clearInterval(llamaDlTimer);
+        llamaDlTimer = null;
+      }
+    } catch (e) {
+    }
+  }
+  $("setLlamaDlBtn").onclick = async () => {
+    const d = await postJson("/api/llama/download", {});
+    if (d.error) {
+      alert(d.error);
+      return;
+    }
+    refreshLlamaDl();
+  };
   function shortModelLabel(modelName) {
     const name2 = String(modelName || "");
     const m = name2.match(/(\d+(?:\.\d+)?)\s*B\b/i);
@@ -34066,7 +34112,7 @@
       modelUp = d.model === "up";
       if (d.version)
         $("setVersion").textContent = "v" + d.version;
-      $("modelInfo").textContent = "Model: " + d.modelName + " \xB7 status: " + d.model;
+      $("modelInfo").textContent = "Model: " + d.modelName + " \xB7 status: " + d.model + (d.llama === "missing" ? " \xB7 llama.cpp is not downloaded yet - the editor works, the AI waits (Settings)" : d.llama === "downloading" ? " \xB7 downloading llama.cpp\u2026" : d.llama === "error" ? " \xB7 llama.cpp download failed (Settings)" : "");
       const pill = $("modelPill");
       pill.textContent = modelUp ? shortModelLabel(d.modelName) : "model: down";
       pill.title = d.modelName || "";

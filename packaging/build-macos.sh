@@ -3,17 +3,11 @@
 # Run ON a Mac:  bash packaging/build-macos.sh
 # Produces packaging/GhostIDE-macos.tar.gz. Unsigned -
 # first launch needs right-click, Open (Gatekeeper), as
-# with any unsigned open-source app.
+# with any unsigned open-source app. llama.cpp is NOT
+# bundled: the app fetches a pinned release on first
+# use (see LLAMA_CATALOG in server.py).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-LLAMA_VER="b11429"
-ARCH="$(uname -m)"
-if [ "$ARCH" = "arm64" ]; then
-  LLAMA_ASSET="llama-${LLAMA_VER}-bin-macos-arm64.tar.gz"
-else
-  LLAMA_ASSET="llama-${LLAMA_VER}-bin-macos-x64.tar.gz"
-fi
-LLAMA_URL="https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_VER}/${LLAMA_ASSET}"
 
 if [ ! -x packaging/.venv/bin/pyinstaller ]; then
   python3 -m venv packaging/.venv
@@ -22,13 +16,6 @@ fi
 
 rm -rf build dist
 packaging/.venv/bin/pyinstaller packaging/ghostide.spec
-
-mkdir -p dist/GhostIDE/llama
-if [ ! -f "packaging/.cache/${LLAMA_ASSET}" ]; then
-  mkdir -p packaging/.cache
-  curl -sL "$LLAMA_URL" -o "packaging/.cache/${LLAMA_ASSET}"
-fi
-tar -xzf "packaging/.cache/${LLAMA_ASSET}" -C dist/GhostIDE/llama --strip-components=1 --no-same-owner
 
 cat > dist/GhostIDE/install.sh <<'EOS'
 #!/usr/bin/env bash

@@ -1066,6 +1066,7 @@ $("acceptChip").onclick = () => acceptGhost(view);
 $("settingsBtn").onclick = () => {
   $("settingsPanel").classList.toggle("hidden");
   refreshModelDl();
+  refreshLlamaDl();
 };
 $("settingsClose").onclick = () =>
   $("settingsPanel").classList.add("hidden");
@@ -1199,6 +1200,57 @@ $("setModelDlBtn").onclick = async () => {
   refreshModelDl();
 };
 
+/* llama.cpp runtime download (G18): the desktop package
+   no longer bundles the runtime; it is fetched once, on
+   first use, with the same verified-download discipline
+   as the model above. The editor works without it. */
+let llamaDlTimer = null;
+async function refreshLlamaDl() {
+  try {
+    const r = await fetch("/api/llama/download");
+    const d = await r.json();
+    const out = $("setLlamaDlOut");
+    const btn = $("setLlamaDlBtn");
+    if (d.present) {
+      out.textContent = "ready ✓ (" + d.path + ")";
+      btn.classList.add("hidden");
+    } else if (d.state === "downloading") {
+      btn.classList.remove("hidden");
+      out.textContent = "downloading… "
+        + Math.round(100 * (d.done || 0) / (d.total || 1))
+        + "% of " + Math.round((d.bytes || 0) / 1048576)
+        + " MB";
+      btn.textContent = "Downloading…";
+    } else if (d.state === "verifying") {
+      btn.classList.remove("hidden");
+      out.textContent = "verifying checksum…";
+      btn.textContent = "Verifying…";
+    } else if (d.state === "error") {
+      btn.classList.remove("hidden");
+      out.textContent = "error: " + d.error;
+      btn.textContent = "Retry download";
+    } else {
+      btn.classList.remove("hidden");
+      out.textContent = "not downloaded yet - the editor "
+        + "works without it; the AI waits for this "
+        + "one-time download (goes to " + d.path + ")";
+      btn.textContent = "Download llama.cpp";
+    }
+    if (d.state === "downloading" || d.state === "verifying") {
+      if (!llamaDlTimer)
+        llamaDlTimer = setInterval(refreshLlamaDl, 2000);
+    } else if (llamaDlTimer) {
+      clearInterval(llamaDlTimer);
+      llamaDlTimer = null;
+    }
+  } catch (e) { /* backend hiccup; reopening Settings retries */ }
+}
+$("setLlamaDlBtn").onclick = async () => {
+  const d = await postJson("/api/llama/download", {});
+  if (d.error) { alert(d.error); return; }
+  refreshLlamaDl();
+};
+
 /* ---------------- model status ---------------- */
 /*@@CHIP@@*/
 /* v1.49 polish: the header chip shows the short label
@@ -1223,7 +1275,15 @@ async function pollHealth() {
     if (d.version)
       $("setVersion").textContent = "v" + d.version;
     $("modelInfo").textContent =
-      "Model: " + d.modelName + " · status: " + d.model;
+      "Model: " + d.modelName + " · status: " + d.model
+      + (d.llama === "missing"
+          ? " · llama.cpp is not downloaded yet - the "
+            + "editor works, the AI waits (Settings)"
+          : d.llama === "downloading"
+            ? " · downloading llama.cpp…"
+            : d.llama === "error"
+              ? " · llama.cpp download failed (Settings)"
+              : "");
     const pill = $("modelPill");
     pill.textContent = modelUp
       ? shortModelLabel(d.modelName) : "model: down";

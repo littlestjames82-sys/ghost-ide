@@ -524,6 +524,92 @@ def _find_llama():
 
 LLAMA_BIN = _find_llama()
 
+# ------------- llama.cpp runtime fetch (G18) -------------
+# The desktop packages no longer bundle llama.cpp (it was
+# 46 MB of the October package). Like the 7B model, the
+# runtime is fetched on first use from a PINNED upstream
+# release and verified by SHA-256 before it is used. It
+# lands in the app folder's llama/ directory, the first
+# place _find_llama() searches. A llama-server that is
+# already present (LLAMA_SERVER_BIN, a user's own install,
+# or an earlier fetch) is honoured as-is: never downloaded
+# over, never overwritten.
+LLAMA_RELEASE = "b11429"
+LLAMA_CATALOG = {
+    "linux-x64": {
+        "file": "llama-b11429-bin-ubuntu-x64.tar.gz",
+        "bytes": 17693462,
+        "sha256": "f6d25dde8f51133143d1453da4fd5f73b14512717"
+                  "7612a283bf7995957af3392",
+    },
+    "macos-arm64": {
+        "file": "llama-b11429-bin-macos-arm64.tar.gz",
+        "bytes": 11971406,
+        "sha256": "740288ec6887be94280a5dfa25b5e23a78285cab"
+                  "104519e6c7e218904ee82459",
+    },
+    "macos-x64": {
+        "file": "llama-b11429-bin-macos-x64.tar.gz",
+        "bytes": 11487431,
+        "sha256": "29ac3ea02be6bd143e824973f2cc5fa74bc409439"
+                  "3a9eaab0ff6814f19dd8522",
+    },
+    "win-x64": {
+        "file": "llama-b11429-bin-win-cpu-x64.zip",
+        "bytes": 19398918,
+        "sha256": "1283323272b04cd07905816a597a0da810918102"
+                  "de958f4ff6f7bbaa70ed2efe",
+    },
+}
+for _llama_entry in LLAMA_CATALOG.values():
+    _llama_entry["url"] = (
+        "https://github.com/ggml-org/llama.cpp/releases/"
+        "download/" + LLAMA_RELEASE + "/"
+        + _llama_entry["file"])
+
+LLAMA_DL_STATE = {"state": "idle", "done": 0, "total": 0,
+                  "error": ""}
+
+
+def _llama_platform_key():
+    import platform as _pf
+    machine = _pf.machine().lower()
+    if sys.platform.startswith("linux"):
+        return ("linux-x64" if machine in ("x86_64", "amd64")
+                else None)
+    if sys.platform == "darwin":
+        return ("macos-arm64" if machine == "arm64"
+                else "macos-x64")
+    if os.name == "nt":
+        return ("win-x64" if machine in ("amd64", "x86_64")
+                else None)
+    return None
+
+
+def _llama_dir():
+    """Where a fetched llama.cpp lands: the llama/ folder
+    of the app folder (beside the executable when frozen,
+    the repo root in dev)."""
+    base = ROOT.parent if FROZEN else ROOT
+    return base / "llama"
+
+
+def llama_present():
+    """Re-resolve on every call, so a runtime fetched
+    while the server is running is picked up without a
+    restart, and a pre-existing install always wins."""
+    global LLAMA_BIN
+    LLAMA_BIN = _find_llama()
+    return Path(LLAMA_BIN).is_file()
+
+
+def llama_status():
+    if llama_present():
+        return "present"
+    st = LLAMA_DL_STATE["state"]
+    return st if st in ("downloading", "verifying",
+                        "error") else "missing"
+
 
 def _default_model():
     env = os.environ.get("GHOST_IDE_MODEL")
@@ -571,6 +657,24 @@ def start_model():
         return {"model": "up", "started": False}
     if _model_proc and _model_proc.poll() is None:
         return {"model": "loading", "started": False}
+    if not llama_present():
+        # G18: the runtime is not bundled any more; the
+        # first Start model fetches it (the Settings row
+        # shows progress). The editor keeps working
+        # without it - only the AI waits.
+        if os.environ.get("LLAMA_SERVER_BIN"):
+            return {"model": "down", "llama": "missing",
+                    "error": "LLAMA_SERVER_BIN points at a "
+                             "missing llama-server"}
+        if LLAMA_DL_STATE["state"] not in ("downloading",
+                                           "verifying"):
+            import threading
+            threading.Thread(target=_llama_dl_worker,
+                             daemon=True).start()
+        return {"model": "down", "llama": "fetching",
+                "error": "llama.cpp is not downloaded yet - "
+                         "fetching it now; Settings shows "
+                         "progress"}
     log = open(ROOT / "llama-server.log", "ab")
     _model_proc = subprocess.Popen(
         [LLAMA_BIN, "--model", MODEL, "--host", "127.0.0.1", "--port",
@@ -2631,6 +2735,124 @@ def _dl_worker(mid):
         DL_STATE.update({"state": "error", "error": str(e)})
 
 
+def _llama_dl_worker():
+    """Background llama.cpp fetch (Roadmap G18): the same
+    discipline as the model download - streams to a .part
+    file with resume, an exact-size gate and SHA-256
+    verification, and only then extraction into the app
+    folder's llama/ directory. Never runs when a
+    llama-server is already present."""
+    import hashlib
+    import tarfile
+    import zipfile
+    if os.environ.get("LLAMA_SERVER_BIN"):
+        LLAMA_DL_STATE.update({
+            "state": "error",
+            "error": "LLAMA_SERVER_BIN is set; GhostIDE "
+                     "uses that llama-server instead"})
+        return
+    if llama_present():
+        LLAMA_DL_STATE.update({"state": "done"})
+        return
+    key = _llama_platform_key()
+    entry = LLAMA_CATALOG.get(key or "")
+    if entry is None:
+        LLAMA_DL_STATE.update({
+            "state": "error",
+            "error": "no prebuilt llama.cpp for this "
+                     "platform; install llama.cpp and set "
+                     "LLAMA_SERVER_BIN"})
+        return
+    try:
+        dest_dir = _llama_dir()
+        stage = dest_dir.parent / ".llama-download"
+        stage.mkdir(parents=True, exist_ok=True)
+        part = stage / (entry["file"] + ".part")
+        have = part.stat().st_size if part.exists() else 0
+        if have > entry["bytes"]:
+            part.unlink()
+            have = 0
+        LLAMA_DL_STATE.update({"state": "downloading",
+                               "done": have,
+                               "total": entry["bytes"],
+                               "error": ""})
+        req = urllib.request.Request(entry["url"])
+        if have:
+            req.add_header("Range", "bytes=%d-" % have)
+        with urllib.request.urlopen(req, timeout=60) as r:
+            if have and r.status != 206:
+                have = 0
+            with open(part, "ab" if have else "wb") as f:
+                done = have
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    LLAMA_DL_STATE["done"] = done
+        if part.stat().st_size != entry["bytes"]:
+            LLAMA_DL_STATE.update({
+                "state": "error",
+                "error": "download incomplete - try again "
+                         "to resume"})
+            return
+        LLAMA_DL_STATE["state"] = "verifying"
+        h = hashlib.sha256()
+        with open(part, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 22), b""):
+                h.update(chunk)
+        if h.hexdigest() != entry["sha256"]:
+            part.unlink(missing_ok=True)
+            LLAMA_DL_STATE.update({
+                "state": "error",
+                "error": "checksum mismatch - the file was "
+                         "deleted; download again"})
+            return
+        tmp = stage / "extract"
+        if tmp.exists():
+            shutil.rmtree(tmp)
+        tmp.mkdir()
+        if entry["file"].endswith(".zip"):
+            # The Windows asset carries its files at the
+            # archive root, like the old package layout.
+            with zipfile.ZipFile(part) as z:
+                z.extractall(tmp)
+        else:
+            # The tar assets carry one top folder
+            # (llama-<release>/); strip it, as the old
+            # build scripts did.
+            with tarfile.open(part) as t:
+                members = []
+                for m in t.getmembers():
+                    pieces = m.name.split("/", 1)
+                    if len(pieces) == 2 and pieces[1]:
+                        m.name = pieces[1]
+                        members.append(m)
+                try:
+                    t.extractall(tmp, members=members,
+                                 filter="data")
+                except TypeError:
+                    t.extractall(tmp, members=members)
+        name = ("llama-server.exe" if os.name == "nt"
+                else "llama-server")
+        if not (tmp / name).is_file():
+            raise ValueError(
+                "llama-server not found in the downloaded "
+                "archive")
+        if os.name != "nt":
+            (tmp / name).chmod(0o755)
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        tmp.rename(dest_dir)
+        part.unlink(missing_ok=True)
+        LLAMA_DL_STATE.update({"state": "done",
+                               "done": entry["bytes"]})
+    except Exception as e:
+        LLAMA_DL_STATE.update({"state": "error",
+                               "error": str(e)})
+
+
 # ---------------- Roadmap ECO E1: ecosystem tool runner -------
 # The Ghost ecosystem companions are zero-dependency Python.
 # The IDE runs the tools themselves (never a reimplementation)
@@ -4543,6 +4765,7 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/health":
                 return self.send_json(
                     {"model": "up" if llama_health() else "down",
+                     "llama": llama_status(),
                      "modelName": MODEL_NAME, "version": APP_VERSION,
                      "pairRequired": True,
                      "backupFormats": [1, 2],
@@ -4822,6 +5045,15 @@ class Handler(SimpleHTTPRequestHandler):
                     "path": str(dest),
                     "bytes": entry["bytes"],
                     "modelsDir": str(MODELS_DIR)})
+            if parsed.path == "/api/llama/download":
+                entry = LLAMA_CATALOG.get(
+                    _llama_platform_key() or "") or {}
+                return self.send_json({
+                    **LLAMA_DL_STATE,
+                    "present": llama_present(),
+                    "path": str(_llama_dir()),
+                    "bytes": entry.get("bytes", 0),
+                    "release": LLAMA_RELEASE})
             if parsed.path == "/api/model/info":
                 mp = Path(MODEL)
                 return self.send_json({
@@ -5197,6 +5429,19 @@ class Handler(SimpleHTTPRequestHandler):
                     target=_dl_worker, args=(mid,),
                     daemon=True).start()
                 return self.send_json({**DL_STATE,
+                                       "state": "downloading"})
+            if parsed.path == "/api/llama/download":
+                if llama_present():
+                    return self.send_json(
+                        {**LLAMA_DL_STATE, "present": True})
+                if LLAMA_DL_STATE["state"] in ("downloading",
+                                               "verifying"):
+                    return self.send_json({**LLAMA_DL_STATE})
+                import threading
+                threading.Thread(
+                    target=_llama_dl_worker,
+                    daemon=True).start()
+                return self.send_json({**LLAMA_DL_STATE,
                                        "state": "downloading"})
             if parsed.path == "/api/model/start":
                 return self.send_json(start_model())

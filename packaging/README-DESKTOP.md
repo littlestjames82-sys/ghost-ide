@@ -16,12 +16,24 @@ window. Your first workspace is created in ~/GhostIDE
 (Windows: %USERPROFILE%\GhostIDE); open any other folder
 from inside the IDE.
 
-## The AI model
+## The AI model and llama.cpp
 
-The 7B model (Qwen2.5-Coder-7B, 4.7 GB) is NOT in this
-package. In the IDE: Settings, "Download 7B model". The
-download is verified by SHA-256 before it is used, and
-it resumes if interrupted. Prefer your own GGUF? Point
+Neither the 7B model nor the llama.cpp runtime is in
+this package - that is what keeps it small. Both are
+one-time downloads, and the editor works without either
+of them; only the AI waits.
+
+The llama.cpp runtime (about 18 MB) is fetched the
+first time you press "Start model", or ahead of time in
+Settings, "Download llama.cpp". It is a pinned release
+(llama.cpp b11429), verified by SHA-256 before it is
+used, and it resumes if interrupted. If you already
+have a llama-server of your own, point
+LLAMA_SERVER_BIN at it and nothing is downloaded.
+
+The 7B model (Qwen2.5-Coder-7B, 4.7 GB): in the IDE,
+Settings, "Download 7B model". Verified by SHA-256 and
+resumable, the same way. Prefer your own GGUF? Point
 Settings, "Model file" at it instead, or set
 GHOST_IDE_MODEL.
 

@@ -3,9 +3,11 @@
 #   pyinstaller packaging/ghostide.spec
 # Produces dist/GhostIDE/ (one-folder build): the GhostIDE
 # executable plus _internal/ with server.py's data files.
-# The build scripts then place a llama/ folder beside the
+# The build scripts add the installer. llama.cpp is not
+# part of the package: on first use the app fetches a
+# pinned release into a llama/ folder beside the
 # executable (server.py looks for ROOT/llama and
-# ROOT.parent/llama) and add the installer.
+# ROOT.parent/llama), verified by SHA-256.
 import os
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))

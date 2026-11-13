@@ -31,4 +31,6 @@ EOF
 echo "GhostIDE installed."
 echo "Run it with:  ghostide   (or find GhostIDE in your app menu)"
 echo "It opens at http://127.0.0.1:5173 with a workspace in ~/GhostIDE."
-echo "The 7B AI model is an optional in-app download (Settings)."
+echo "The llama.cpp AI runtime is a one-time in-app download, fetched"
+echo "on first Start model (or in Settings). The 7B AI model is an"
+echo "optional in-app download (Settings)."
