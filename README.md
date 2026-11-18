@@ -24,6 +24,36 @@ reference implementation of the API the Android app's
 Java server mirrors. One behavior pack (`BEHAVIOR.md`)
 drives both, so the editions cannot silently drift.
 
+## Download
+
+Current version: **3.21.0** (desktop and Android move on one
+train; Android versionCode 220).
+
+- **Downloads site:** https://downloads.ghostdeveloperstudio.com/
+  carries the desktop packages (Linux, macOS, Windows), the
+  Android APK, and the update manifests both editions check.
+  Every file there is SHA-256 listed on the page.
+- **From this repo:** the
+  [`downloads`](https://github.com/littlestjames82-sys/ghost-ide/tree/downloads)
+  branch carries the same binaries with a SHA256SUMS file per
+  version, and the
+  [v3.20.0 release](https://github.com/littlestjames82-sys/ghost-ide/releases/tag/v3.20.0)
+  notes describe the current feature set.
+- **Android:** the APK also lives in the
+  [`ghostide-android`](https://github.com/littlestjames82-sys/ghostide-android)
+  repo (its `downloads` branch). It installs over any earlier
+  build; the app checks for updates itself, at most once a day.
+
+Recent additions: Git depth (stage individual hunks, a
+three-pane merge conflict editor on desktop and a card-based
+resolver on phones), a phone layout gate with a configurable
+symbol row and 40px touch targets, the in-app APK update
+check, and the Git phone pack: your GitHub token stored in
+the Android Keystore (never readable back, never written to
+a repo config or log), shallow clone by default, and
+per-card conflict resolution. See `CHANGELOG.md` for the
+3.11 to 3.21 run.
+
 ## The model store (Qwen2.5-Coder-Instruct, Q4_K_M GGUF)
 
 | Model | Download | RAM while running | Notes |
@@ -39,8 +69,8 @@ Settings ("Download 7B model"), switch models any time
 with a GGUF path in Settings or `GHOST_IDE_MODEL`, or use
 the in-app model switcher.
 
-Desktop 3.16.0 adds a model store (Tools, or Settings,
-"Open the model store"): all four sizes as Q4_K_M
+The model store (Tools, or Settings, "Open the model
+store", added in desktop 3.16.0) offers all four sizes as Q4_K_M
 downloads (0.5B 0.46 GB, 1.5B 1.04 GB, 3B 1.96 GB, 7B
 4.36 GB) plus the nomic embedding model, one card each
 with an estimated RAM figure and a fit mark read from
