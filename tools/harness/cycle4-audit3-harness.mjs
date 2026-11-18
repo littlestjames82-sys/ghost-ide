@@ -23,9 +23,9 @@ ck("A11 signer lineage is a build.sh constant, not luck",
    Cycle 7 batch 1 (branches), -> 141/131 in batch 2
    (stash), -> 144/134 in Cycle 8 batch 3 (tags GET,
    tag POST, amend POST), both servers each time. */
-ck("A12 route census recorded (183 desktop / 136 Java; re-derived Desktop Cycle 2: +12 LSP routes, +2 run-record routes in D2, +10 MCP routes in D8) (Desktop Cycle 3 D5: +5 embed routes)",
-   (py.match(/parsed\.path ==/g) || []).length === 194 &&
-   (java.match(/path\.equals\("\/api/g) || []).length === 136);
+ck("A12 route census recorded (183 desktop / 136 Java; re-derived Desktop Cycle 2: +12 LSP routes, +2 run-record routes in D2, +10 MCP routes in D8) (Desktop Cycle 3 D5: +5 embed routes) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes, census 197 / 138)",
+   (py.match(/parsed\.path ==/g) || []).length === 197 &&
+   (java.match(/path\.equals\("\/api/g) || []).length === 138);
 ck("A13 name pins still refuse traversal shapes",
    py.includes('r"data-pack-[A-Za-z0-9_.-]+"') &&
    py.includes('".." in'));

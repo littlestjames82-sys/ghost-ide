@@ -276,7 +276,7 @@ class GitDepthServerCase(unittest.TestCase):
             "\n".join(lines) + "\n")
         port = self.start_server()
         st, health = call(port, "GET", "/api/health")
-        self.assertEqual(health["version"], "3.23.0")
+        self.assertEqual(health["version"], "3.24.0")
 
         h = self.hunks(port, "f.txt", "worktree")
         self.assertEqual(len(h["hunks"]), 2)

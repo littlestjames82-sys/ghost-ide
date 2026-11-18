@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "3.23.0"
+APP_VERSION = "3.24.0"
 FROZEN = getattr(sys, "frozen", False)
 
 # Desktop Cycle 1 (v3.11.0): portable mode, the desktop
@@ -205,6 +205,232 @@ def _list_agent_runs():
     out.sort(key=lambda r: r["endedAt"] or r["startedAt"],
              reverse=True)
     return out[:100]
+
+
+# Mobile Cycle 3, S1 (portable task/session format): task
+# records. ONE schema both platforms - docs/TASK_FORMAT.md
+# is the definition and IdeServer.java mirrors it. A task
+# record is DATA in the D2 sense: shape-checked strictly,
+# stored verbatim under .ghostide/tasks/<id>.json, never
+# executed. It describes work; it does not resume work
+# (resuming is M2). Like the run records, writing one is a
+# plain workspace file write, so these routes are not
+# trust-gated either.
+TASK_MAX_BYTES = 256 * 1024
+TASK_SCHEMA = "ghostide.task"
+TASK_SCHEMA_VERSION = 1
+TASK_KINDS = ("agent-run", "plan", "note")
+TASK_STATUSES = ("draft", "running", "waiting-approval",
+                 "stopped", "done", "failed")
+TASK_ID_RE = _agent_run_re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+_TASK_TS_RE = _agent_run_re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+    r"(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$")
+
+
+def _tasks_dir():
+    return WORKSPACE / ".ghostide" / "tasks"
+
+
+def _task_path(task_id):
+    if not TASK_ID_RE.match(task_id or "") \
+            or ".." in task_id:
+        raise ValueError("bad task id")
+    return _tasks_dir() / (task_id + ".json")
+
+
+def _task_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _validate_task(data, raw_len):
+    """The shared strict validation from
+    docs/TASK_FORMAT.md, in the document's order, refusing
+    with the document's words. Returns the record."""
+    if raw_len > TASK_MAX_BYTES:
+        raise ValueError(
+            "task record too large (limit %d bytes)"
+            % TASK_MAX_BYTES)
+    if not isinstance(data, dict):
+        raise ValueError("task record must be a JSON object")
+    if data.get("schema") != TASK_SCHEMA:
+        raise ValueError("not a GhostIDE task record")
+    ver = data.get("schemaVersion")
+    if not _task_int(ver):
+        raise ValueError(
+            "task record has no readable schema version")
+    if ver > TASK_SCHEMA_VERSION:
+        raise ValueError(
+            "task record was written by a newer GhostIDE "
+            "(task schema version %d); this build reads "
+            "version %d" % (ver, TASK_SCHEMA_VERSION))
+    if ver < 1:
+        raise ValueError(
+            "task record schema version %d is older than "
+            "any this build can read" % ver)
+    task_id = data.get("id")
+    if not isinstance(task_id, str) \
+            or not TASK_ID_RE.match(task_id) \
+            or ".." in task_id:
+        raise ValueError("bad task id")
+    if data.get("kind") not in TASK_KINDS:
+        raise ValueError(
+            "task record kind must be one of "
+            + ", ".join(TASK_KINDS))
+    title = data.get("title")
+    if not isinstance(title, str) \
+            or not 1 <= len(title) <= 200:
+        raise ValueError(
+            "task record title must be a string of 1 to "
+            "200 characters")
+    goal = data.get("goal")
+    if not isinstance(goal, str) or len(goal) > 20000:
+        raise ValueError(
+            "task record goal must be a string of at "
+            "most 20000 characters")
+    ws = data.get("workspace")
+    if not isinstance(ws, str) or len(ws) > 1000:
+        raise ValueError(
+            "task record workspace must be a string of "
+            "at most 1000 characters")
+    if data.get("createdBy") not in ("desktop", "android"):
+        raise ValueError(
+            "task record createdBy must be desktop or "
+            "android")
+    if data.get("status") not in TASK_STATUSES:
+        raise ValueError(
+            "task record status must be one of "
+            + ", ".join(TASK_STATUSES))
+    budget = data.get("budget")
+    if not isinstance(budget, dict) \
+            or not _task_int(budget.get("stepCap")) \
+            or not 0 <= budget["stepCap"] <= 100000:
+        raise ValueError(
+            "task record budget.stepCap must be an "
+            "integer from 0 to 100000")
+    appr = data.get("approvals")
+    if not isinstance(appr, dict) or any(
+            not _task_int(appr.get(k)) or appr.get(k) < 0
+            for k in ("asked", "allowed", "denied")):
+        raise ValueError(
+            "task record approvals must be an object "
+            "with asked, allowed and denied counts at "
+            "or above 0")
+    steps = data.get("steps")
+    if not isinstance(steps, dict) \
+            or not _task_int(steps.get("count")) \
+            or steps["count"] < 0 \
+            or not isinstance(steps.get("lastLabel"), str) \
+            or len(steps["lastLabel"]) > 300:
+        raise ValueError(
+            "task record steps must be an object with "
+            "a count at or above 0 and a lastLabel "
+            "string of at most 300 characters")
+    for key in ("checkpoint", "planPath"):
+        v = data.get(key)
+        if v is not None and (not isinstance(v, str)
+                              or len(v) > 1000):
+            raise ValueError(
+                "task record %s must be a string of at "
+                "most 1000 characters or null" % key)
+    for key in ("createdAt", "updatedAt"):
+        v = data.get(key)
+        if not isinstance(v, str) or not _TASK_TS_RE.match(v):
+            raise ValueError(
+                "task record %s must be an ISO 8601 "
+                "timestamp string" % key)
+    if "provenance" in data \
+            and not isinstance(data["provenance"], dict):
+        raise ValueError(
+            "task record provenance must be an object")
+    if "payload" in data \
+            and not isinstance(data["payload"], dict):
+        raise ValueError(
+            "task record payload must be an object")
+    return data
+
+
+def _save_task(data, raw_len, must_exist=False):
+    rec = _validate_task(data, raw_len)
+    p = _task_path(str(rec["id"]))
+    if must_exist and not p.is_file():
+        raise FileNotFoundError("no such task record")
+    if not must_exist and p.is_file():
+        raise FileExistsError(
+            "a task record with this id already exists; "
+            "update it instead")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.parent / (".%s.tmp-%d" % (p.name, os.getpid()))
+    try:
+        tmp.write_text(json.dumps(rec, indent=1))
+        os.replace(tmp, p)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+    return ".ghostide/tasks/" + str(rec["id"]) + ".json"
+
+
+def _list_tasks():
+    d = _tasks_dir()
+    out = []
+    if d.is_dir():
+        for p in sorted(d.glob("*.json")):
+            try:
+                rec = json.loads(p.read_text())
+                # Shape only (raw_len 0): the size cap is
+                # enforced on the way in by _save_task,
+                # and the stored pretty-printed file can
+                # be larger than the posted body.
+                _validate_task(rec, 0)
+            except Exception:
+                continue
+            steps = rec.get("steps") or {}
+            out.append({
+                "id": rec["id"],
+                "kind": rec["kind"],
+                "title": rec["title"],
+                "status": rec["status"],
+                "createdBy": rec["createdBy"],
+                "createdAt": rec["createdAt"],
+                "updatedAt": rec["updatedAt"],
+                "steps": steps.get("count", 0),
+            })
+    out.sort(key=lambda r: r["updatedAt"], reverse=True)
+    return out[:100]
+
+
+def _task_canonical(v):
+    """The canonical form from docs/TASK_FORMAT.md:
+    sorted keys, no spare whitespace, integral numbers
+    without a decimal point. IdeServer's TaskStore
+    implements the same form; the shared fixture proves
+    the two agree byte for byte."""
+    if v is None:
+        return "null"
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if v == int(v) and abs(v) < 1e15:
+            return str(int(v))
+        return repr(v)
+    if isinstance(v, str):
+        return json.dumps(v, ensure_ascii=False)
+    if isinstance(v, list):
+        return "[" + ",".join(
+            _task_canonical(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return "{" + ",".join(
+            json.dumps(k, ensure_ascii=False) + ":"
+            + _task_canonical(v[k])
+            for k in sorted(v)) + "}"
+    raise TypeError("not a JSON value: %r" % type(v))
 
 
 _UPDATER = None
@@ -7674,6 +7900,31 @@ class Handler(SimpleHTTPRequestHandler):
                         {"record": json.loads(p.read_text())})
                 return self.send_json(
                     {"runs": _list_agent_runs()})
+            if parsed.path == "/api/tasks":
+                # S1: list task record summaries, or fetch
+                # one with ?id=<task id>. Records are data;
+                # reading them executes nothing.
+                qs = urllib.parse.parse_qs(parsed.query)
+                tid = (qs.get("id") or [""])[0]
+                if tid:
+                    try:
+                        p = _task_path(tid)
+                    except ValueError as e:
+                        return self.send_json(
+                            {"error": str(e)}, status=400)
+                    if not p.is_file():
+                        return self.send_json(
+                            {"error": "no such task record"},
+                            status=404)
+                    try:
+                        rec = _validate_task(
+                            json.loads(p.read_text()), 0)
+                    except ValueError as e:
+                        return self.send_json(
+                            {"error": str(e)}, status=400)
+                    return self.send_json({"record": rec})
+                return self.send_json(
+                    {"tasks": _list_tasks()})
             if parsed.path == "/api/instructions":
                 # D7: which instruction files are in force
                 # for this workspace (AGENTS.md, with the
@@ -8287,6 +8538,44 @@ class Handler(SimpleHTTPRequestHandler):
                 data = self.read_json()
                 path = _save_agent_run(data, raw_len)
                 return self.send_json({"ok": True, "path": path})
+            if parsed.path == "/api/tasks" \
+                    or parsed.path == "/api/tasks/update":
+                # S1: create (or, on /update, replace) one
+                # task record - data only; see the note at
+                # _validate_task. Oversize bodies are
+                # refused before parsing, like run records.
+                cls = self.headers.get_all("Content-Length") \
+                    or []
+                raw_len = 0
+                if len(cls) == 1:
+                    try:
+                        raw_len = int(cls[0])
+                    except Exception:
+                        raw_len = 0
+                if raw_len > TASK_MAX_BYTES:
+                    return self.send_json(
+                        {"error": "task record too large "
+                                  "(limit %d bytes)"
+                                  % TASK_MAX_BYTES},
+                        status=413)
+                data = self.read_json()
+                try:
+                    path = _save_task(
+                        data, raw_len,
+                        must_exist=parsed.path.endswith(
+                            "/update"))
+                except FileNotFoundError:
+                    return self.send_json(
+                        {"error": "no such task record"},
+                        status=404)
+                except FileExistsError as e:
+                    return self.send_json(
+                        {"error": str(e)}, status=409)
+                except ValueError as e:
+                    return self.send_json(
+                        {"error": str(e)}, status=400)
+                return self.send_json(
+                    {"ok": True, "path": path, "record": data})
             if parsed.path == "/api/file":
                 data = self.read_json()
                 p = safe_path(data["path"])

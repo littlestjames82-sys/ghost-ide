@@ -1,0 +1,9 @@
+{
+ "apkUrl": "https://downloads.ghostdeveloperstudio.com/ghostide/ghostide-v3.24.0.apk",
+ "publishedAt": "2026-11-18T23:02:00Z",
+ "notes": "Mobile Cycle 3 (S1): portable task records. One format (ghostide.task, docs/TASK_FORMAT.md) now describes a unit of agent work on both platforms: every agent or plan run leaves a task record beside its D2 run record, written by the same code from the same run, stored under .ghostide/tasks/ and validated strictly and identically by the desktop and phone servers. Records export as a single JSON file and import on the other platform unchanged except a fresh local id, the mapping kept in the record's provenance; a newer format version is refused by name. The Tasks panel (Tools) lists, views, exports and imports them, and says plainly that resuming a run from a record arrives with supervision (M2).",
+ "sha256": "e768c5a8a9c07932ff81a37b309769c1592bde7be292d2224e6200b71f5646e7",
+ "sizeBytes": 20513387,
+ "version": "3.24.0",
+ "versionCode": 223
+}

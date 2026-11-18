@@ -2,7 +2,27 @@
 
 GhostIDE desktop and Android ship on one version train. The
 in-app changelog (Settings, then About) carries the full
-190-entry history; this file covers the current run.
+191-entry history; this file covers the current run.
+
+## 3.24.0 — Nov 18, 2026 — Portable task format
+
+- One record format for agent work on both platforms:
+  ghostide.task, defined in docs/TASK_FORMAT.md and
+  validated strictly and identically by the desktop and
+  phone servers. Every agent or plan run now leaves a
+  task record beside its run record, written by the same
+  code from the same run.
+- Records carry the goal, the status, the step budget in
+  force, the approvals summary, the step summary and the
+  checkpoint link. A record written by a newer format
+  version is refused by name, never mangled.
+- Export is the record itself, one JSON file. Importing
+  on the other platform changes only the id, and keeps
+  the mapping in the record's provenance.
+- A Tasks panel (Tools, Task records) lists, views,
+  exports and imports the workspace's records, and says
+  plainly that a record is data: resuming a run from a
+  record arrives with supervision (M2).
 
 ## 3.23.0 — Nov 18, 2026 — Voice-to-prompt
 

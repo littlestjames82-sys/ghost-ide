@@ -30,8 +30,8 @@ ck("D6 version: desktop train agreement (3.16.0 at D6), phone train re-synced at
    vjson.version === vjson.desktop.version &&
    vjson.latest === vjson.desktop.version &&
    vjson.android && vjson.android.version === vjson.desktop.version);
-ck("D6 route census re-derived: 194 (190 + 4 git depth routes in D9)",
-   (py.match(/parsed\.path ==/g) || []).length === 194);
+ck("D6 route census re-derived: 194 (190 + 4 git depth routes in D9) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes)",
+   (py.match(/parsed\.path ==/g) || []).length === 197);
 ck("D6 server: catalog pins for the full Qwen2.5-Coder family",
    py.includes('"bytes": 491400064') &&
    py.includes("1d9614638d18024d0fbb36575a15f1302a3adf044") &&

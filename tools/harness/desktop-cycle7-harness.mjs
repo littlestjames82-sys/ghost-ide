@@ -34,8 +34,8 @@ ck("D9 version: all trains agree on the shared version (M1 re-sync)",
    vjson.version === appVer &&
    vjson.latest === appVer &&
    vjson.android && vjson.android.version === appVer);
-ck("D9 route census re-derived: 194 (190 + 4 git depth routes)",
-   (py.match(/parsed\.path ==/g) || []).length === 194);
+ck("D9 route census re-derived: 194 (190 + 4 git depth routes) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes)",
+   (py.match(/parsed\.path ==/g) || []).length === 197);
 ck("D9 server: hunk endpoints and the apply discipline",
    py.includes('"/api/git/hunks"') &&
    py.includes('"/api/git/hunks/apply"') &&

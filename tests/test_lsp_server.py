@@ -155,7 +155,7 @@ class LspServerCase(unittest.TestCase):
     def test_lsp_round_trip_over_http(self):
         port = self.start_server({})
         st, health = call(port, "GET", "/api/health")
-        self.assertEqual(health["version"], "3.23.0")
+        self.assertEqual(health["version"], "3.24.0")
         self.assertIn("lsp", health)
 
         # Status is read-only: nothing has spawned yet.

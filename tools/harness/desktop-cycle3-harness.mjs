@@ -31,8 +31,8 @@ ck("D2 version: desktop train moved past 3.13.0, phone train re-synced at M1",
    vjson.version === vjson.desktop.version &&
    vjson.latest === vjson.desktop.version &&
    vjson.android && vjson.android.version === vjson.desktop.version);
-ck("D2 route census re-derived (166 + 2 run-record routes in D2, +10 MCP in D8, +12 LSP in D4, +5 embed in D5 = 183)",
-   (py.match(/parsed\.path ==/g) || []).length === 194);
+ck("D2 route census re-derived (166 + 2 run-record routes in D2, +10 MCP in D8, +12 LSP in D4, +5 embed in D5 = 183) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes)",
+   (py.match(/parsed\.path ==/g) || []).length === 197);
 ck("D2 server: run records validated, capped, stored as data",
    py.includes('"/api/agent-runs"') &&
    py.includes("AGENT_RUN_MAX_BYTES = 256 * 1024") &&
@@ -53,7 +53,13 @@ ck("D2 client: lazy run-checkpoint capture on write/edit/delete",
 ck("D2 client: run record posted at the end of act and plan runs",
    (src.match(/postRunRecord\(\{ id: runId, mode: "act"/g) || []).length === 1 &&
    src.includes('postRunRecord({ id: planRunId, mode: "plan"') &&
-   src.includes('postJson("/api/agent-runs", buildRunRecord(fields))'));
+   /* S1 (3.24.0) moved the literal: postRunRecord now binds
+      const rec = buildRunRecord(fields) once and posts that
+      same record to /api/agent-runs and derives the portable
+      task record from it (one writer, no drift). The pin
+      follows the measured truth. */
+   src.includes("const rec = buildRunRecord(fields)") &&
+   src.includes('postJson("/api/agent-runs", rec)'));
 ck("D2 client: approvals are recorded (run, delete, mcp; queued too)",
    src.includes('runApprovals.push({ kind: "run",') &&
    src.includes('runApprovals.push({ kind: "delete",') &&

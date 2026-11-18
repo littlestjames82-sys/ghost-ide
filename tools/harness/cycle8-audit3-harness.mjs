@@ -21,10 +21,15 @@ ck("A11 signer is the build.sh keystore constant",
    Java 134 -> 136 - IdeServer gained the D9 conflict
    pair (GET /api/git/conflict, POST
    /api/git/conflict/resolve) it was missing; desktop
-   unchanged at 194 comparisons (183 routes). */
-ck("A12 census at the Desktop Cycle 2 level: 183 desktop / 136 Java (Desktop Cycle 3 D5: +5 embed routes)",
-   (py.match(/parsed\.path ==/g) || []).length === 194 &&
-   (java.match(/path\.equals\("\/api/g) || []).length === 136);
+   unchanged at 194 comparisons (183 routes).
+   Census moved again by design in Mobile Cycle 3
+   (S1): desktop 194 -> 197 (GET /api/tasks, POST
+   /api/tasks, POST /api/tasks/update) and Java
+   136 -> 138 (the same task routes, one path.equals
+   per route with the method dispatch inside). */
+ck("A12 census at the Desktop Cycle 2 level: 183 desktop / 136 Java (Desktop Cycle 3 D5: +5 embed routes) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes, census 197 / 138)",
+   (py.match(/parsed\.path ==/g) || []).length === 197 &&
+   (java.match(/path\.equals\("\/api/g) || []).length === 138);
 ck("A13 datapack name pins unchanged",
    py.includes('r"data-pack-[A-Za-z0-9_.-]+"') &&
    py.includes('".." in'));
