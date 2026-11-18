@@ -2,7 +2,27 @@
 
 GhostIDE desktop and Android ship on one version train. The
 in-app changelog (Settings, then About) carries the full
-188-entry history; this file covers the current run.
+190-entry history; this file covers the current run.
+
+## 3.23.0 — Nov 18, 2026 — Voice-to-prompt
+
+- The chat composer's mic now dictates into the prompt
+  box itself: words appear while you speak, and the
+  finished transcript lands as ordinary text you edit
+  and send yourself. Voice never sends a message, runs
+  the agent, or acts as a command in the composer.
+- A status line under the composer says which
+  recognition is in use: the on-device recogniser
+  (Android 12 and up, where the phone offers one), or
+  the system speech service, which may use the network.
+  It also names every way a session can end, including
+  microphone permission off, with the Settings path to
+  grant it.
+- Cleanup is light: whitespace tidied, a missing space
+  after a full stop restored. Words are never
+  rewritten.
+- The editor's dictation button keeps the older
+  behaviour, spoken commands included.
 
 ## 3.22.0 — Nov 18, 2026 — Phone model guards
 

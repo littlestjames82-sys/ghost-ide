@@ -19146,7 +19146,13 @@ $("dbRunBtn").onclick = () => {
    chat; exact phrases ("save file", "run it", "new file")
    act as commands; anything else is dictation into the
    target (chat box or editor cursor). Desktop has no bridge
-   and gets a polite note instead. */
+   and gets a polite note instead.
+   Mobile Cycle 2 (M7): the CHAT COMPOSER mic no longer
+   comes through here. The composer runs the VOICEPROMPT
+   block below instead (live partials, named states, and
+   review-before-send: no commands, no auto-send). This
+   legacy path remains exactly what it was for its one
+   remaining caller, the editor's dictation button. */
 function startDictation(target) {
   if (window.GhostVoice && window.GhostVoice.dictate) {
     window.GhostVoice.dictate(target);
@@ -19156,7 +19162,6 @@ function startDictation(target) {
       + "typing is the way.");
   }
 }
-$("chatMic").onclick = () => startDictation("chat");
 $("voiceBtn").onclick = () => startDictation("editor");
 
 const VOICE_COMMANDS = [
@@ -19189,6 +19194,207 @@ window.__ghostVoiceResult = (target, text) => {
     box.focus();
   }
 };
+
+/*@@VOICEPROMPT@@*/
+/* Mobile Cycle 2, M7: voice-to-prompt in the chat
+   composer. The G13 dictation above runs the system's
+   speech ACTIVITY through GhostVoice.dictate: one
+   finished string back, every failure a silent null,
+   and a result handler that treats "Ask Ghost ..." as
+   a send and exact phrases as commands. That is the
+   wrong contract for the composer, so the composer mic
+   runs the native side's in-process recogniser instead
+   (GhostVoice.startComposerDictation): partial results
+   stream into the prompt box while the user speaks,
+   the final result replaces them, and every way the
+   session can end arrives as a named state the status
+   line under the composer states in plain words,
+   including which recognition is in use (the on-device
+   recogniser, whose audio stays on the phone, or the
+   system speech service, which may use the network;
+   the native side reports the kind, this block never
+   guesses it). REVIEW BEFORE SEND, ALWAYS: the
+   transcript lands in the box as ordinary editable
+   text. Nothing here sends a message, runs the agent,
+   or interprets anything as a command; the G13
+   commands stay scoped to the editor dictation path
+   that already had them. Cleanup is deliberately
+   light and visible in the result: whitespace is
+   tidied and a missing space after sentence-ending
+   punctuation is restored; words are never rewritten
+   and spoken punctuation is never converted (a
+   leftover idea, not built). The mic shows only where
+   the composer recogniser exists (the phone's bridge);
+   the viewport gate and the harness force the context
+   through window.__ghostVoicePrompt, the M5/M6
+   pattern. */
+let voicePromptForce = false;
+let voicePromptSession = null; // { base } while live
+
+function voicePromptAvailable() {
+  if (voicePromptForce) return true;
+  try {
+    return !!(window.GhostVoice &&
+      typeof window.GhostVoice.startComposerDictation
+        === "function");
+  } catch (e) { return false; }
+}
+function voicePromptForced(v) {
+  voicePromptForce = !!v;
+  applyVoicePromptVisibility();
+}
+function voiceCleanup(text) {
+  let t = String(text == null ? "" : text);
+  t = t.replace(/\s+/g, " ").trim();
+  t = t.replace(/([.!?])([A-Za-z])/g, "$1 $2");
+  return t;
+}
+function voiceJoin(base, addition) {
+  const b = String(base == null ? "" : base);
+  const a = String(addition == null ? "" : addition);
+  if (!a) return b;
+  if (!b) return a;
+  return /\s$/.test(b) ? b + a : b + " " + a;
+}
+function voicePartialText(base, partial) {
+  return voiceJoin(base, String(partial == null
+    ? "" : partial).replace(/\s+/g, " "));
+}
+function voiceFinalText(base, heard) {
+  return voiceJoin(base, voiceCleanup(heard));
+}
+function voiceStateMessage(state, kind) {
+  switch (state) {
+    case "listening":
+      return kind === "device"
+        ? "Listening. On-device recognition: your "
+          + "voice stays on this phone."
+        : "Listening. The system speech service is "
+          + "hearing you, and it may use the network.";
+    case "done":
+      return "Dictated text is in the box above. Edit "
+        + "it, then tap Send when you are ready.";
+    case "unavailable":
+      return "No speech recogniser is available on "
+        + "this phone, so dictation cannot run.";
+    case "denied":
+      return "Microphone permission is off, so "
+        + "dictation cannot start. You can grant it "
+        + "in Android Settings, Apps, GhostIDE, "
+        + "Permissions, Microphone.";
+    case "network":
+      return "The speech service needs a network "
+        + "connection and could not get one. Nothing "
+        + "was dictated.";
+    case "nomatch":
+      return "I did not catch that. Nothing was added "
+        + "to the box.";
+    case "busy":
+      return "The speech recogniser is busy right "
+        + "now. Give it a moment and try again.";
+    default:
+      return "Dictation stopped with an error. "
+        + "Nothing was sent.";
+  }
+}
+function setVoiceStatus(text) {
+  const el = $("voiceStatus");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("hidden", !text);
+}
+function setVoiceMicListening(on) {
+  const mic = $("chatMic");
+  if (!mic) return;
+  mic.classList.toggle("listening", !!on);
+  mic.textContent = on ? "⏹" : "🎤";
+  mic.title = on ? "Stop dictating"
+    : "Dictate a message (phone)";
+}
+function applyVoicePromptVisibility() {
+  const mic = $("chatMic");
+  if (!mic) return;
+  mic.classList.toggle("hidden",
+    !voicePromptAvailable());
+}
+function endVoicePromptSession(restore) {
+  if (voicePromptSession && restore) {
+    const box = $("chatText");
+    if (box) box.value = voicePromptSession.base;
+  }
+  voicePromptSession = null;
+  setVoiceMicListening(false);
+}
+function toggleVoicePrompt() {
+  if (voicePromptSession) {
+    /* Second tap: ask the recogniser to stop; its
+       final result (or an error state) ends the
+       session through the callbacks below. */
+    try { window.GhostVoice.stopComposerDictation(); }
+    catch (e) {}
+    return;
+  }
+  if (!voicePromptAvailable()) return;
+  const box = $("chatText");
+  voicePromptSession = { base: box ? box.value : "" };
+  setVoiceMicListening(true);
+  setVoiceStatus("");
+  try {
+    window.GhostVoice.startComposerDictation();
+  } catch (e) {
+    endVoicePromptSession(true);
+    setVoiceStatus(voiceStateMessage("error"));
+  }
+}
+window.__ghostVoicePromptState = (state, kind) => {
+  if (state === "listening") {
+    if (!voicePromptSession) {
+      const box = $("chatText");
+      voicePromptSession = { base: box ? box.value : "" };
+    }
+    setVoiceMicListening(true);
+    setVoiceStatus(voiceStateMessage("listening", kind));
+    return;
+  }
+  /* Every other state ends the session; any partial
+     still showing is dropped, so the box holds exactly
+     what the user had before dictating. */
+  endVoicePromptSession(true);
+  setVoiceStatus(voiceStateMessage(state, kind));
+};
+window.__ghostVoicePromptPartial = (text) => {
+  if (!voicePromptSession) return;
+  const box = $("chatText");
+  if (box) box.value = voicePartialText(
+    voicePromptSession.base, text);
+};
+window.__ghostVoicePromptFinal = (text) => {
+  if (!voicePromptSession) return;
+  const box = $("chatText");
+  const base = voicePromptSession.base;
+  voicePromptSession = null;
+  setVoiceMicListening(false);
+  if (box) {
+    box.value = voiceFinalText(base, text);
+    box.focus();
+    try {
+      box.setSelectionRange(box.value.length,
+        box.value.length);
+    } catch (e) {}
+  }
+  setVoiceStatus(voiceStateMessage("done"));
+};
+try {
+  const mic = $("chatMic");
+  if (mic) mic.onclick = () => toggleVoicePrompt();
+  applyVoicePromptVisibility();
+  window.__ghostVoicePrompt = {
+    voicePromptAvailable, voicePromptForced,
+    voiceCleanup, voiceJoin, voicePartialText,
+    voiceFinalText, voiceStateMessage,
+    toggleVoicePrompt };
+} catch (e) {}
+/*@@VOICEPROMPT-END@@*/
 
 /* ---------------- Roadmap G16: pair mode ----------------
    Two devices, one workspace: everyone opens the SAME
