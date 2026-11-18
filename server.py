@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "3.20.0"
+APP_VERSION = "3.21.0"
 FROZEN = getattr(sys, "frozen", False)
 
 # Desktop Cycle 1 (v3.11.0): portable mode, the desktop
@@ -9050,8 +9050,24 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError(
                         "target folder exists and is not empty: "
                         + target)
+                # Mobile Cycle 2 (M4): shallow by default
+                # (depth 1, single branch), full history
+                # only on the explicit opt-in - the same
+                # arguments GitSupport.cloneArgs builds on
+                # the phone for the same request body.
+                clone_args = ["clone"]
+                if not data.get("full"):
+                    try:
+                        depth = int(data.get("depth") or 0)
+                    except (TypeError, ValueError):
+                        depth = 0
+                    clone_args += ["--depth",
+                                   str(depth if depth > 0
+                                       else 1),
+                                   "--single-branch"]
+                clone_args += [url, target]
                 rc, out, err, _ = git_net(
-                    ["clone", url, target],
+                    clone_args,
                     token=(data.get("token") or "").strip(),
                     timeout=300)
                 if rc != 0:

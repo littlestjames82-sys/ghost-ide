@@ -3514,6 +3514,54 @@ export function validRemoteUrl(url) {
 }
 // @@GHCONNECT-END@@
 
+// @@GITPACK@@ Mobile Cycle 2 (M4): pure helpers for the
+// git phone pack - Keystore token accounts, the shallow
+// clone default, and the card conflict resolver's
+// navigation math. The wiring lives further down; these
+// helpers are the harness-pinned core.
+//
+// Token rule, stated once: on Android the bundle NEVER
+// holds a stored token. It can ask the native bridge to
+// save one (write-only) and whether one exists; there is
+// no read path, and git requests from the phone carry no
+// token at all - the on-device server resolves the token
+// from its Keystore store by remote host. On desktop the
+// historic panel field flow is unchanged.
+export function gitAccountsBridge(g) {
+  return !!g && typeof g.saveGitToken === "function" &&
+    typeof g.hasGitToken === "function" &&
+    typeof g.removeGitToken === "function";
+}
+export function cloneRequestBody(url, dir, full) {
+  /* Shallow is the default: full is present and true
+     only when the user explicitly opted into a full
+     clone. Both servers read the same body. */
+  return { url: url, dir: dir, full: !!full };
+}
+export function conflictSegIndices(segs) {
+  const out = [];
+  segs.forEach((s, i) => {
+    if (s.kind === "conflict") out.push(i);
+  });
+  return out;
+}
+export function nextConflictSeg(segs, fromIdx) {
+  /* The card to show: the first unresolved block at or
+     after fromIdx, wrapping to the first block overall
+     when the tail is done (Prev/Next browsing relies on
+     the same rule). -1 when nothing is unresolved. */
+  const idxs = conflictSegIndices(segs);
+  if (!idxs.length) return -1;
+  for (const i of idxs) if (i >= fromIdx) return i;
+  return idxs[0];
+}
+export function cardProgress(totalAtOpen, segs) {
+  const remaining = conflictSegIndices(segs).length;
+  return { total: totalAtOpen, remaining: remaining,
+           resolved: Math.max(0, totalAtOpen - remaining) };
+}
+// @@GITPACK-END@@
+
 /*@@ABOUT@@*/
 /* About this build (v2.07): the Settings info line
    plus the newest changelog entry, in the chat.
@@ -4663,6 +4711,7 @@ function splitConflictBlocks(text) {
     if (lines[i].startsWith("<<<<<<<")) {
       const raw = [lines[i]];
       const ours = [];
+      const base = [];
       const theirs = [];
       let side = 0;
       i++;
@@ -4684,6 +4733,7 @@ function splitConflictBlocks(text) {
           continue;
         }
         if (side === 0) ours.push(ln);
+        else if (side === 1) base.push(ln);
         else if (side === 2) theirs.push(ln);
       }
       if (!closed) {
@@ -4691,8 +4741,13 @@ function splitConflictBlocks(text) {
         break;
       }
       flush();
+      /* M4: the base section rides along (it used to be
+         parsed and dropped) so the phone card resolver
+         can show it; the desktop rows ignore the field,
+         and the round-trip still uses raw, unchanged. */
       segs.push({ kind: "conflict",
                   ours: ours.join("\n"),
+                  base: base.join("\n"),
                   theirs: theirs.join("\n"),
                   raw: raw.join("\n") });
     } else {
@@ -4740,6 +4795,7 @@ function renderConflictBlocks() {
     box.appendChild(row);
   });
   updateConflictCount();
+  renderConflictCards();
 }
 
 function applyConflictChoice(segIdx, choice) {
@@ -4785,6 +4841,123 @@ function updateConflictCount() {
   }
 }
 
+/* M4: the card conflict resolver (phone widths). One
+   card per unresolved block, stacked readable sections
+   instead of three side-by-side panes; the choices are
+   the desktop rows' choices and land through the same
+   applyConflictChoice, so the Result text, the counter
+   and the save path are shared - only the presentation
+   differs. CSS shows the cards at phone widths and the
+   panes everywhere else. */
+let conflictTotal = 0;
+let conflictCardSeg = -1;
+
+function renderConflictCards() {
+  const box = $("conflictCards");
+  if (!box) return;
+  box.textContent = "";
+  if (!conflictPath || !conflictTotal) return;
+  const ta = $("conflictResult");
+  const segs = splitConflictBlocks(ta.value);
+  const prog = cardProgress(conflictTotal, segs);
+  const head = document.createElement("div");
+  head.className = "conflictCardHead";
+  const title = document.createElement("span");
+  if (!prog.remaining) {
+    title.textContent = "All " + prog.total +
+      " conflicts resolved";
+    head.appendChild(title);
+    box.appendChild(head);
+    const done = document.createElement("div");
+    done.className = "dim";
+    done.textContent = "Save the result to stage it. " +
+      "Nothing is committed until you commit it.";
+    box.appendChild(done);
+    conflictCardSeg = -1;
+    return;
+  }
+  if (conflictCardSeg < 0 ||
+      !segs[conflictCardSeg] ||
+      segs[conflictCardSeg].kind !== "conflict")
+    conflictCardSeg = nextConflictSeg(segs, 0);
+  const segIdx = conflictCardSeg;
+  const seg = segs[segIdx];
+  title.textContent = "Conflict " + (prog.resolved + 1) +
+    " of " + prog.total;
+  head.appendChild(title);
+  const left = document.createElement("span");
+  left.className = "dim";
+  left.textContent = prog.remaining + " remaining";
+  head.appendChild(left);
+  box.appendChild(head);
+  const card = document.createElement("div");
+  card.className = "conflictCard";
+  const sections = [
+    ["Ours (current branch)",
+     seg.ours === "" ? "(empty)" : seg.ours],
+    ["Base (common ancestor)",
+     seg.base ? seg.base
+       : "(no base recorded for this block)"],
+    ["Theirs (incoming)",
+     seg.theirs === "" ? "(empty)" : seg.theirs]];
+  for (const pair of sections) {
+    const lab = document.createElement("div");
+    lab.className = "dim";
+    lab.textContent = pair[0];
+    card.appendChild(lab);
+    const pre = document.createElement("pre");
+    pre.className = "conflictCardPre";
+    pre.textContent = pair[1];
+    card.appendChild(pre);
+  }
+  const btns = document.createElement("div");
+  btns.className = "conflictCardBtns";
+  const choices = [
+    ["Use ours", "ours"],
+    ["Use theirs", "theirs"],
+    ["Use both (ours first)", "ours-theirs"],
+    ["Use both (theirs first)", "theirs-ours"]];
+  for (const pair of choices) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = pair[0];
+    b.onclick = () => {
+      applyConflictChoice(segIdx, pair[1]);
+      /* The chosen block is text now; the next card is
+         the next unresolved block from here. */
+      conflictCardSeg = nextConflictSeg(
+        splitConflictBlocks(ta.value), segIdx);
+    };
+    btns.appendChild(b);
+  }
+  card.appendChild(btns);
+  const nav = document.createElement("div");
+  nav.className = "conflictCardBtns";
+  const idxs = conflictSegIndices(segs);
+  const pos = idxs.indexOf(segIdx);
+  const prev = document.createElement("button");
+  prev.type = "button";
+  prev.textContent = "Previous";
+  prev.disabled = idxs.length < 2;
+  prev.onclick = () => {
+    conflictCardSeg =
+      idxs[(pos - 1 + idxs.length) % idxs.length];
+    renderConflictCards();
+  };
+  const next = document.createElement("button");
+  next.type = "button";
+  next.textContent = "Next";
+  next.disabled = idxs.length < 2;
+  next.onclick = () => {
+    conflictCardSeg = idxs[(pos + 1) % idxs.length];
+    renderConflictCards();
+  };
+  nav.appendChild(prev);
+  nav.appendChild(next);
+  card.appendChild(nav);
+  box.appendChild(card);
+}
+
 async function openConflict(path) {
   let d = null;
   try {
@@ -4798,6 +4971,8 @@ async function openConflict(path) {
     return;
   }
   conflictPath = path;
+  conflictTotal = countConflictBlocks(d.working || "");
+  conflictCardSeg = -1;
   $("conflictTitle").textContent =
     "Resolve conflict: " + path;
   $("conflictBase").textContent = d.base == null
@@ -4846,10 +5021,15 @@ $("conflictSave").onclick = async () => {
   loadFiles();
 };
 
-// GitHub connect (v2.08): panel wiring. The token
-// persists on this device only (localStorage) and is
-// sent per request to the local server.
+// GitHub connect (v2.08): panel wiring. On desktop the
+// token persists on this device only (localStorage) and
+// is sent per request to the local server. On Android
+// (M4) the panel field is gone: the token lives in the
+// Keystore store (Settings, Git accounts), requests
+// carry no token, and the on-device server resolves it
+// by remote host - so this function answers "" there.
 function ghToken() {
+  if (gitAccountsBridge(window.GhostNative)) return "";
   const el = $("ghToken");
   return el ? el.value.trim() : "";
 }
@@ -4888,14 +5068,23 @@ async function refreshGhRemote() {
 (function wireGhConnect() {
   const tok = $("ghToken");
   if (!tok) return;
-  try {
-    tok.value = localStorage.getItem("ghostide-gh-token") || "";
-  } catch (e) { /* storage off */ }
-  tok.addEventListener("change", function () {
+  if (gitAccountsBridge(window.GhostNative)) {
+    /* Android (M4): no token field in the panel. The
+       note points at Settings, Git accounts, where the
+       Keystore-backed store is managed. */
+    tok.classList.add("hidden");
+    const note = $("ghTokenNote");
+    if (note) note.classList.remove("hidden");
+  } else {
     try {
-      localStorage.setItem("ghostide-gh-token", tok.value.trim());
+      tok.value = localStorage.getItem("ghostide-gh-token") || "";
     } catch (e) { /* storage off */ }
-  });
+    tok.addEventListener("change", function () {
+      try {
+        localStorage.setItem("ghostide-gh-token", tok.value.trim());
+      } catch (e) { /* storage off */ }
+    });
+  }
   $("ghSaveRemote").onclick = async () => {
     const url = $("ghRemoteUrl").value.trim();
     if (!validRemoteUrl(url)) {
@@ -4913,8 +5102,10 @@ async function refreshGhRemote() {
     const dir = prompt("Clone into folder:",
       repoNameFromUrl(url));
     if (!dir) return;
+    const fullEl = $("ghFullClone");
     const r = await ghPost("/api/git/clone",
-      { url: url, dir: dir.trim() });
+      cloneRequestBody(url, dir.trim(),
+        !!(fullEl && fullEl.checked)));
     if (r) { loadFiles(); refreshGit(); }
   };
   $("ghFetch").onclick = async () => {
@@ -4929,6 +5120,99 @@ async function refreshGhRemote() {
     if (r) refreshGit();
   };
 })();
+
+/* M4: Settings, Git accounts. Android only: the token
+   goes straight from the password field to the native
+   Keystore store through the write-only bridge, and the
+   status line is the bridge's has-answer. A token saved
+   by the old panel flow (localStorage) is moved into the
+   store on first run and deleted from web storage. On
+   desktop the section shows one explanatory line and
+   nothing else changes. */
+let gitAcctMigrated = false;
+function gitAcctHost() {
+  const el = $("gitAcctHost");
+  const h = el ? el.value.trim() : "";
+  return h || "github.com";
+}
+function refreshGitAcctStatus() {
+  const el = $("gitAcctStatus");
+  if (!el) return;
+  if (!gitAccountsBridge(window.GhostNative)) return;
+  const host = gitAcctHost();
+  let msg;
+  try {
+    msg = window.GhostNative.hasGitToken(host)
+      ? "Token saved for " + host + "."
+      : "No token saved for " + host + ".";
+  } catch (e) {
+    msg = "Secure token storage is not available.";
+  }
+  if (gitAcctMigrated)
+    msg += " Your previously saved token was moved " +
+      "here from the Git panel.";
+  el.textContent = msg;
+}
+function initGitAccounts() {
+  const sec = $("gitAcctAndroid");
+  if (!sec) return;
+  const note = $("gitAcctDesktopNote");
+  if (!gitAccountsBridge(window.GhostNative)) {
+    sec.classList.add("hidden");
+    if (note) note.classList.remove("hidden");
+    return;
+  }
+  if (note) note.classList.add("hidden");
+  try {
+    const legacy =
+      localStorage.getItem("ghostide-gh-token");
+    if (legacy && legacy.trim()) {
+      if (window.GhostNative.saveGitToken(
+          "github.com", legacy.trim())) {
+        gitAcctMigrated = true;
+        const tok = $("ghToken");
+        if (tok) tok.value = "";
+      }
+    }
+    if (legacy !== null)
+      localStorage.removeItem("ghostide-gh-token");
+  } catch (e) { /* storage off: nothing to migrate */ }
+  const save = $("gitAcctSave");
+  if (save) save.onclick = () => {
+    const fld = $("gitAcctToken");
+    const token = fld ? fld.value.trim() : "";
+    if (!token) {
+      $("gitAcctStatus").textContent =
+        "Paste a token first.";
+      return;
+    }
+    let okSave = false;
+    try {
+      okSave = window.GhostNative.saveGitToken(
+        gitAcctHost(), token);
+    } catch (e) { okSave = false; }
+    if (fld) fld.value = "";
+    if (!okSave) {
+      $("gitAcctStatus").textContent =
+        "That token could not be saved. Check the " +
+        "host name and try again.";
+      return;
+    }
+    refreshGitAcctStatus();
+  };
+  const remove = $("gitAcctRemove");
+  if (remove) remove.onclick = () => {
+    try {
+      window.GhostNative.removeGitToken(gitAcctHost());
+    } catch (e) { /* status line tells the truth */ }
+    refreshGitAcctStatus();
+  };
+  const hostEl = $("gitAcctHost");
+  if (hostEl) hostEl.addEventListener("change",
+    refreshGitAcctStatus);
+  refreshGitAcctStatus();
+}
+initGitAccounts();
 
 $("commitBtn").onclick = async () => {
   const msg = $("commitMsg").value.trim();
