@@ -164,7 +164,8 @@ const settings = Object.assign(
     chatWidth: "360", accent: "green", notifySound: "soft", autoScroll: true, density: false, chatFont: "default", bubbles: false, wrapChat: false,
     roleLabels: true, sliceBudget: 6000,
     attachSelection: true, attachDiff: false,
-    agentRepairRounds: 3, agentMaxSteps: 50, lsp: true },
+    agentRepairRounds: 3, agentMaxSteps: 50,
+    agentStepsChosen: false, lsp: true },
   JSON.parse(localStorage.getItem("ghostide-settings") || "{}"));
 /*@@AUTOSAVE@@*/
 /* Autosave has ONE shape (v2.37 untangle): a mode
@@ -1963,6 +1964,20 @@ async function renderModelsStore() {
   const box = $("todoResults");
   if (!box || $("todoTitle").textContent !== "Model store")
     return;
+  /* Mobile Cycle 2, M6: on the phone the store is the
+     native Models screen (see the PHONEGUARD block);
+     point there instead of fetching a listing the
+     phone server does not serve. */
+  if (phoneGuardOnAndroid()) {
+    box.textContent = "";
+    msNote(box, "On the phone, models live in the "
+      + "native Models store: open the app menu, then "
+      + "Models. That screen shows this phone's RAM "
+      + "and free storage, which model is recommended "
+      + "for it, and the downloads, with a heat and "
+      + "battery warning before a download starts.");
+    return;
+  }
   let d;
   try {
     d = await (await fetch("/api/models/store")).json();
@@ -2102,6 +2117,78 @@ async function renderModelsStore() {
   }
 }
 /*@@MODELSTORE-END@@*/
+
+/*@@PHONEGUARD@@*/
+/* Mobile Cycle 2, M6: the phone model guards on the
+   bundle side. The phone's model store is the native
+   Models screen: the phone server answers the web
+   store's own routes with "models live in the native
+   Models store", and before M6 the web panel fetched
+   a listing the phone cannot serve and showed the
+   server's "no such route" error. On the phone the
+   panel now points at the native store, where the
+   guards live (real RAM and storage readouts, the
+   RAM-based recommendation, the 7B caution, and the
+   heat and battery warning before a download or a
+   large model load). The bundle-side guard is the
+   agent's burst default: on the phone a run defaults
+   to 25 steps instead of the desktop's 50, because
+   every step is a full on-device generation. A budget
+   the user picks in Chat options always wins, on both
+   platforms, and a run that reaches the cap still
+   ends with the existing "hit the cap" message,
+   never a silent cut. The Android signal is the
+   GhostNative bridge on the on-device (loopback)
+   origin, the same signal M5 uses; pair mode, where
+   the phone renders a desktop server over the LAN,
+   is not the phone context and keeps desktop
+   behaviour. */
+const PHONE_AGENT_DEFAULT_STEPS = 25;
+let phoneGuardForce = false;
+function phoneGuardOnAndroid() {
+  if (phoneGuardForce) return true;
+  try {
+    if (typeof window === "undefined" ||
+        !window.GhostNative) return false;
+    const host = (window.location &&
+      window.location.hostname) || "";
+    return host === "127.0.0.1" || host === "localhost";
+  } catch (e) { return false; }
+}
+function phoneGuardForced(v) { phoneGuardForce = !!v; }
+function agentStepDefault() {
+  return phoneGuardOnAndroid()
+    ? PHONE_AGENT_DEFAULT_STEPS : AGENT_MAX_STEPS;
+}
+function agentStepCap() {
+  const raw = settings.agentStepsChosen
+    ? Number(settings.agentMaxSteps)
+    : agentStepDefault();
+  return Math.max(10, Math.min(120,
+    raw || agentStepDefault()));
+}
+function applyAgentStepsPhoneNote() {
+  const el = $("agentStepsPhoneNote");
+  if (!el) return;
+  if (phoneGuardOnAndroid()) {
+    el.textContent =
+      "On this phone, agent runs default to " +
+      PHONE_AGENT_DEFAULT_STEPS + " steps, to keep runs " +
+      "short on battery and heat. Pick any value above " +
+      "to use it instead.";
+    el.classList.remove("hidden");
+  } else {
+    el.classList.add("hidden");
+  }
+}
+try {
+  window.__ghostPhoneGuard = {
+    phoneGuardOnAndroid, phoneGuardForced,
+    agentStepDefault, agentStepCap,
+    applyAgentStepsPhoneNote,
+    PHONE_AGENT_DEFAULT_STEPS };
+} catch (e) {}
+/*@@PHONEGUARD-END@@*/
 
 /* ---------------- model status ---------------- */
 /*@@CHIP@@*/
@@ -14088,12 +14175,23 @@ if (agentPillTxtEl)
    rounds from batch 1, both in Chat options. */
 const agentStepsSel = $("agentStepsSel");
 if (agentStepsSel) {
-  agentStepsSel.value = String(settings.agentMaxSteps || 50);
+  /* Mobile Cycle 2, M6: the select shows the budget
+     that will actually govern the next run (the
+     platform default until the user picks one). */
+  agentStepsSel.value = String(agentStepCap());
   agentStepsSel.onchange = () => {
     settings.agentMaxSteps = Number(agentStepsSel.value) || 50;
+    settings.agentStepsChosen = true;
     saveSettings();
   };
 }
+/* Mobile Cycle 2, M6: on the phone, say plainly that
+   the default burst is shorter here, and that picking
+   a value above replaces it. Desktop never sees it.
+   (The function lives in the PHONEGUARD block; the
+   viewport gate re-runs it through the hook after
+   forcing the phone context.) */
+applyAgentStepsPhoneNote();
 const agentRepairSel = $("agentRepairSel");
 if (agentRepairSel) {
   agentRepairSel.value = String(settings.agentRepairRounds ?? 3);
@@ -14661,6 +14759,10 @@ async function runAgent(task, opts) {
   if (memText)
     addMsg("SYSTEM", "📚 Agent primed with project memory " +
       "(GhostRecall + error memory).");
+  /* Mobile Cycle 2, M6: the run's step budget is
+     computed once, here, so the briefing and the loop
+     can never disagree about it. */
+  const stepCap = agentStepCap();
   const messages = [
     { role: "system", content: BEHAVIOR.systemPrompt + "\n\n" +
       AGENT_RULES + (mapText ? "\n\n" + mapText : "") +
@@ -14668,10 +14770,12 @@ async function runAgent(task, opts) {
         memText.slice(0, 8000) : "") +
       (opts.plan ? "\n\nApproved plan:\n" + opts.plan : "") +
       /* Cycle 6 I6: state the run's real budget when
-         the user's setting moves it off the default. */
-      ((Number(settings.agentMaxSteps) || 50) !== AGENT_MAX_STEPS
+         it moves off the built-in default. Mobile
+         Cycle 2, M6: on the phone that is the normal
+         case (25, not 50), so the model is told. */
+      (stepCap !== AGENT_MAX_STEPS
         ? "\n\nYour step budget for this run is " +
-          (Number(settings.agentMaxSteps) || 50) + " actions."
+          stepCap + " actions."
         : "") },
     { role: "user", content: "Task: " + task +
       (currentFile ? "\nThe user is currently editing: "
@@ -14713,10 +14817,11 @@ async function runAgent(task, opts) {
       "then finish with DONE again." });
     return false;
   }
-  /* Cycle 6 I6: the run's step budget comes from the
-     user's setting (default 50, the old constant). */
-  const stepCap = Math.max(10, Math.min(120,
-    Number(settings.agentMaxSteps) || 50));
+  /* The step budget itself was computed at briefing
+     time (stepCap, above) so the two can never drift:
+     the user's chosen budget when they picked one,
+     else the platform default (25 on the phone, 50 on
+     the desktop), clamped to the historical 10..120. */
   for (let step = 1; step <= stepCap; step++) {
     if (thermalWatchdog() === "stop") {
       addMsg("SYSTEM", "🌡 Agent stopped: the device " +

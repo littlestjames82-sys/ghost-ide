@@ -4,6 +4,25 @@ GhostIDE desktop and Android ship on one version train. The
 in-app changelog (Settings, then About) carries the full
 188-entry history; this file covers the current run.
 
+## 3.22.0 — Nov 18, 2026 — Phone model guards
+
+- The phone's model store now reads the device it is on:
+  real RAM and free storage on the store and download
+  screens, a fit mark per model, and a recommended model
+  that is the largest one fitting this phone's RAM. The
+  first-run default follows it (the 1.5B on a 4 GB phone,
+  the 3B on 6 GB and up), never the 7B; an install that
+  already has a model keeps it.
+- The 7B stays in the store with a plain caution: "Large
+  for a phone: expect heat and fast battery drain."
+- Before a model download starts, and before the 7B
+  loads, a hot phone or a low, unplugged battery draws a
+  warning with a go-ahead choice. Nothing is blocked.
+- Agent runs on the phone default to 25 steps instead
+  of 50; a budget picked in Chat options wins on both
+  platforms. The web model store panel on the phone now
+  points at the native store instead of showing an error.
+
 ## 3.21.0 — Nov 18, 2026 — Git phone pack
 
 - GitHub tokens now live in the Android Keystore: encrypted,
