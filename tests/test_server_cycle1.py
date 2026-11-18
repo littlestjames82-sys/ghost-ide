@@ -148,19 +148,19 @@ class ServerCase(unittest.TestCase):
         feed = self.td / "feed.json"
         feed.write_text(json.dumps({
             "version": "1.0.0", "latest": "3.10.1",
-            "desktop": {"version": "3.20.0"}}))
+            "desktop": {"version": "3.21.0"}}))
         port = self.start_server({
             "GHOST_IDE_WORKSPACE": str(ws1),
             "GHOST_IDE_UPDATE_URL": "file://" + str(feed)})
         st, health = call(port, "GET", "/api/health")
-        self.assertEqual(health["version"], "3.19.0")
+        self.assertEqual(health["version"], "3.20.0")
         self.assertTrue(health["trusted"])  # startup = trusted
         self.assertFalse(health["portable"])
 
         # The update check follows the desktop train.
         st, chk = call(port, "GET", "/api/update/check")
         self.assertTrue(chk["ok"])
-        self.assertEqual(chk["latest"], "3.20.0")
+        self.assertEqual(chk["latest"], "3.21.0")
         self.assertTrue(chk["updateAvailable"])
 
         # A folder opened later starts untrusted.

@@ -202,7 +202,7 @@ class ModelStoreServerCase(unittest.TestCase):
     def test_store_import_active_delete(self):
         port = self.start_server()
         st, health = call(port, "GET", "/api/health")
-        self.assertEqual(health["version"], "3.19.0")
+        self.assertEqual(health["version"], "3.20.0")
 
         d = self.store(port)
         cards = {c["id"]: c for c in d["models"]}

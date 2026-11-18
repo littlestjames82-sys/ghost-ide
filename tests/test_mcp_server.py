@@ -429,7 +429,7 @@ class TestMcpServerE2E(unittest.TestCase):
                     "web": {"url": httpfx.url}}}))
             port = self.start_server(ws)
             st, health = call(port, "GET", "/api/health")
-            self.assertEqual(health["version"], "3.19.0")
+            self.assertEqual(health["version"], "3.20.0")
             self.assertTrue(health["trusted"])
 
             # Tools carry annotations + policy defaults.

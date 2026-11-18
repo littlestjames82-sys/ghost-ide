@@ -1445,6 +1445,13 @@ $("modelSwitch").onclick = async () => {
    The update check only ever REPORTS; it never downloads
    or installs anything by itself. */
 $("setUpdateBtn").onclick = async () => {
+  /* Mobile Cycle 1 (M5): on the phone this button
+     runs the APK update check instead - the route
+     below belongs to the desktop feed. */
+  if (apkUpdateOnAndroid()) {
+    await apkUpdateManualCheck();
+    return;
+  }
   const out = $("setUpdateOut");
   out.textContent = "checking…";
   try {
@@ -9095,6 +9102,264 @@ function initSymbolRow() {
   renderSymbolRow();
 }
 initSymbolRow();
+
+/*@@APKUPDATE@@*/
+/* Mobile Cycle 1 (M5): the in-app APK update check.
+   A sideloaded app gets no store updates, so the app
+   checks itself: it fetches a small manifest,
+   android-latest.json (a sibling of the desktop
+   latest.json but a separate file - the desktop
+   publish owns latest.json), and compares its
+   versionCode numerically against the installed
+   build. The installed code comes from /api/health,
+   where the native server reads it from the package
+   manager; the bundle itself carries only version
+   names, never the code. The fetch rides the house
+   /api/http proxy (the API client's route, present
+   on both servers) because the WebView page is
+   served locally and a direct cross-origin fetch
+   would die on CORS - the same reason the desktop
+   check is proxied by its server.
+   Rules: Android only (the GhostNative bridge is
+   the signal, so the desktop client never shows APK
+   notices); automatic checks at most once a day;
+   Later snoozes one versionCode, never the next;
+   every failure is silent on an automatic check and
+   plainly spoken only on a manual one. The app never
+   downloads or installs anything here: Download
+   hands the APK URL to the system browser and the
+   user installs it over this build themselves. The
+   manifest's sha256 and sizeBytes are published for
+   a future verified in-app download step; this
+   check verifies no download it never made. */
+const APK_UPDATE_KEY = "ghostide-apkupdate";
+const APK_UPDATE_URL_KEY = "ghostide-apkupdate-url";
+const APK_UPDATE_MANIFEST_URL =
+  "https://downloads.ghostdeveloperstudio.com/ghostide/android-latest.json";
+const APK_UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+function apkUpdateOnAndroid() {
+  try {
+    return typeof window !== "undefined" &&
+      !!window.GhostNative;
+  } catch (e) { return false; }
+}
+function apkUpdateManifestUrl() {
+  try {
+    const o = localStorage.getItem(APK_UPDATE_URL_KEY);
+    if (o && /^https?:\/\//i.test(o)) return o;
+  } catch (e) {}
+  return APK_UPDATE_MANIFEST_URL;
+}
+function apkUpdateState() {
+  let st = {};
+  try {
+    st = JSON.parse(
+      localStorage.getItem(APK_UPDATE_KEY) || "{}") || {};
+  } catch (e) { st = {}; }
+  return {
+    lastCheck: typeof st.lastCheck === "number"
+      ? st.lastCheck : 0,
+    snoozedCode: typeof st.snoozedCode === "number"
+      ? st.snoozedCode : 0,
+  };
+}
+function saveApkUpdateState(st) {
+  try {
+    localStorage.setItem(APK_UPDATE_KEY, JSON.stringify({
+      lastCheck: st.lastCheck || 0,
+      snoozedCode: st.snoozedCode || 0,
+    }));
+  } catch (e) {}
+}
+function apkUpdateEvaluate(manifest, currentCode) {
+  /* Pure decision: does this manifest describe a
+     newer build than the one running? Returns the
+     notice payload, or null. An https apkUrl is
+     required - the Download hand-off refuses
+     anything else, so anything else is not a
+     notice. */
+  if (!manifest || typeof manifest !== "object")
+    return null;
+  const code = manifest.versionCode;
+  if (typeof code !== "number" || !isFinite(code))
+    return null;
+  if (typeof currentCode !== "number" ||
+      !(currentCode > 0)) return null;
+  if (code <= currentCode) return null;
+  if (!manifest.version || !manifest.apkUrl ||
+      !/^https:\/\//i.test(String(manifest.apkUrl)))
+    return null;
+  return { version: String(manifest.version),
+    versionCode: code,
+    apkUrl: String(manifest.apkUrl),
+    notesUrl: typeof manifest.notesUrl === "string"
+      ? manifest.notesUrl : "" };
+}
+function apkUpdateManualMessage(res, currentVersion) {
+  if (!res || res.error)
+    return "Could not reach the update server. " +
+      "Check the connection and try again.";
+  if (res.notice)
+    return "Update available: GhostIDE v" +
+      res.notice.version + " is ready to download.";
+  return "You are up to date (" + currentVersion + ").";
+}
+async function apkUpdateRun(opts) {
+  /* opts: { manual, fetchText, now, currentCode,
+     currentVersion }. fetchText(url) resolves to
+     { status, text } or throws. Automatic runs are
+     throttled to one a day and their failures are
+     returned, never rendered, by the wiring; only
+     the manual path speaks. A performed check (any
+     outcome) restarts the day, so a dead server is
+     not retried on every launch. */
+  const o = opts || {};
+  const now = typeof o.now === "number"
+    ? o.now : Date.now();
+  const st = apkUpdateState();
+  if (!o.manual &&
+      now - st.lastCheck < APK_UPDATE_INTERVAL_MS)
+    return { skipped: true };
+  let notice = null, error = null;
+  try {
+    const r = await o.fetchText(apkUpdateManifestUrl());
+    if (!r || r.status !== 200)
+      throw new Error("status " + (r && r.status));
+    notice = apkUpdateEvaluate(
+      JSON.parse(r.text), o.currentCode);
+  } catch (e) {
+    error = String((e && e.message) || e);
+  }
+  st.lastCheck = now;
+  if (notice && notice.versionCode <= st.snoozedCode)
+    notice = null;
+  saveApkUpdateState(st);
+  return { notice, error,
+    currentVersion: o.currentVersion };
+}
+try {
+  window.__ghostApkUpdate = { APK_UPDATE_MANIFEST_URL,
+    APK_UPDATE_KEY, APK_UPDATE_INTERVAL_MS,
+    apkUpdateOnAndroid, apkUpdateManifestUrl,
+    apkUpdateState, saveApkUpdateState,
+    apkUpdateEvaluate, apkUpdateManualMessage,
+    apkUpdateRun, showApkUpdateNotice,
+    hideApkUpdateNotice };
+} catch (e) {}
+/*@@APKUPDATE-END@@*/
+
+/* M5 wiring: the banner, the Download hand-off to
+   the system browser, the Settings button's Android
+   branch and the once-a-day automatic check. DOM is
+   built with textContent and createElement only. */
+let apkUpdateNoticeData = null;
+function showApkUpdateNotice(notice) {
+  const b = $("updateBanner");
+  if (!b || !notice) return;
+  apkUpdateNoticeData = notice;
+  $("updateBannerBody").textContent =
+    "GhostIDE v" + notice.version + " is available. " +
+    "Download opens the new APK in your browser; " +
+    "install it over this build to update. The app " +
+    "itself never downloads or installs updates.";
+  b.classList.remove("hidden");
+}
+function hideApkUpdateNotice() {
+  const b = $("updateBanner");
+  if (b) b.classList.add("hidden");
+}
+function apkUpdateOpenDownload() {
+  const n = apkUpdateNoticeData;
+  if (!n || !/^https:\/\//i.test(n.apkUrl)) return;
+  try {
+    if (window.GhostNative &&
+        window.GhostNative.openExternal) {
+      window.GhostNative.openExternal(n.apkUrl);
+      return;
+    }
+  } catch (e) {}
+  try { window.open(n.apkUrl, "_blank"); } catch (e) {}
+}
+async function apkUpdateFetchText(url) {
+  /* The manifest fetch rides /api/http (see the
+     block comment). A 10 second local cap bounds
+     the wait; the proxy's own timeouts bound the
+     remote side. */
+  const ctl = typeof AbortController !== "undefined"
+    ? new AbortController() : null;
+  const t = ctl
+    ? setTimeout(() => ctl.abort(), 10000) : null;
+  try {
+    const r = await fetch("/api/http", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "GET", url,
+        headers: { "User-Agent": "GhostIDE-Updater" } }),
+      signal: ctl ? ctl.signal : undefined,
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    return { status: d.status, text: d.body || "" };
+  } finally { if (t) clearTimeout(t); }
+}
+async function apkUpdateCurrentBuild() {
+  const d = await (await fetch("/api/health")).json();
+  return { code: typeof d.versionCode === "number"
+      ? d.versionCode : 0,
+    version: d.version || "?" };
+}
+async function apkUpdateCheckNow(manual) {
+  if (!apkUpdateOnAndroid()) return { skipped: true };
+  let cur = { code: 0, version: "?" };
+  try { cur = await apkUpdateCurrentBuild(); }
+  catch (e) { /* health failed: the fetch would too */ }
+  if (!(cur.code > 0))
+    return { error: "no version code",
+      currentVersion: cur.version };
+  const res = await apkUpdateRun({ manual: !!manual,
+    fetchText: apkUpdateFetchText, now: Date.now(),
+    currentCode: cur.code,
+    currentVersion: cur.version });
+  if (res.notice) showApkUpdateNotice(res.notice);
+  return res;
+}
+async function apkUpdateManualCheck() {
+  const out = $("setUpdateOut");
+  if (out) out.textContent = "checking…";
+  const res = await apkUpdateCheckNow(true);
+  if (!out) return;
+  out.textContent = apkUpdateManualMessage(
+    res, res.currentVersion || "?");
+  if (res.notice) {
+    out.appendChild(document.createTextNode(" "));
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Download v" + res.notice.version;
+    btn.onclick = () => {
+      apkUpdateNoticeData = res.notice;
+      apkUpdateOpenDownload();
+    };
+    out.appendChild(btn);
+  }
+}
+const updDlBtn = $("updateDownloadBtn");
+if (updDlBtn) updDlBtn.onclick = () => {
+  apkUpdateOpenDownload();
+  hideApkUpdateNotice();
+};
+const updLaterBtn = $("updateLaterBtn");
+if (updLaterBtn) updLaterBtn.onclick = () => {
+  if (apkUpdateNoticeData) {
+    const st = apkUpdateState();
+    st.snoozedCode = apkUpdateNoticeData.versionCode;
+    saveApkUpdateState(st);
+  }
+  hideApkUpdateNotice();
+};
+const updDismissBtn = $("updateDismissBtn");
+if (updDismissBtn)
+  updDismissBtn.onclick = hideApkUpdateNotice;
+setTimeout(() => { apkUpdateCheckNow(false); }, 5000);
 
 $("setDelay").value = settings.infillDelay;
 $("setDelay").onchange = (e) => {
