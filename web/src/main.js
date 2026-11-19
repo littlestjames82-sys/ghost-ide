@@ -13972,16 +13972,17 @@ function buildTaskRecordFromRun(rec, ctx) {
         ? (String(last.type || "") + " " +
            String(last.target || "")).trim().slice(0, 300)
         : "" },
-    createdAt: rec.startedAt || new Date().toISOString(),
+    createdAt: ctx.createdAt || rec.startedAt ||
+      new Date().toISOString(),
     updatedAt: rec.endedAt || rec.startedAt ||
       new Date().toISOString(),
-    payload: { runId: rec.id || "",
+    payload: Object.assign({ runId: rec.id || "",
       outcome: rec.outcome || "",
       summary: rec.summary || "",
       filesChanged: Array.isArray(rec.filesChanged)
         ? rec.filesChanged : [],
       skipped: Array.isArray(rec.skipped)
-        ? rec.skipped : [] },
+        ? rec.skipped : [] }, ctx.payloadExtra || {}),
   };
 }
 function validateTaskRecord(rec, rawLen) {
@@ -14108,17 +14109,343 @@ function postRunRecord(fields) {
        record in the shared format. postRunRecord is
        the ONE writer of run-derived task records: it
        builds both records from the same sanitized run
-       record, so the two stores cannot drift apart. */
+       record, so the two stores cannot drift apart.
+       M2: a supervised phone run already created its
+       record when it started (the SUPERVISION block
+       below writes its progress during the run); when
+       fields.taskId names that record, this final
+       write UPDATES it instead of creating a second
+       one, with the record's own createdAt, step cap
+       and supervision payload carried across. */
     const task = buildTaskRecordFromRun(rec, {
+      id: fields.taskId || undefined,
+      createdAt: fields.taskCreatedAt || undefined,
+      payloadExtra: fields.taskPayloadExtra || undefined,
       platform: taskPlatform(),
       workspace: historyScope ||
         (window.GhostNative ? "on-device" : ""),
-      stepCap: agentStepCap(),
+      stepCap: fields.taskStepCap != null
+        ? fields.taskStepCap : agentStepCap(),
       rand: Math.random().toString(36).slice(2, 8),
     });
-    postJson("/api/tasks", task).catch(() => {});
+    if (fields.taskId)
+      postJson("/api/tasks/update", task).catch(() => {});
+    else
+      postJson("/api/tasks", task).catch(() => {});
   } catch (e) { /* as above */ }
 }
+
+/* ---------------- Mobile Cycle 3, M2: on-device
+   supervision ----------------
+   A supervised run is a phone agent run whose S1 task
+   record is written when the run STARTS and updated at
+   step boundaries as it proceeds, so the record is a
+   live account of the work, not just its obituary. The
+   run's resumable context (goal, plan, todos, the
+   staged change set, the trail and approvals so far)
+   rides the D2 checkpoint rails: one JSON file per
+   task at .ghostide/checkpoints/runctx-<task id>.json,
+   written through /api/file like every checkpoint.
+   Persistence happens at step boundaries and at
+   approval waits, never per token.
+   If the app comes back to a record still marked
+   running (or waiting-approval) with no live run
+   behind it, the run was interrupted: the app closed
+   or Android stopped it. The panel derives that state
+   (taskDisplayState), says when the record was last
+   updated, and offers Resume. Resume starts a NEW
+   segment of the same task: the record and its step
+   budget carry over (the cap is per task, so segments
+   cannot launder extra steps), the staged changes are
+   restored, and the model is briefed with a summary of
+   the prior steps (buildResumeBriefing), never a blind
+   replay of the old conversation.
+   Approvals that pend while the user is away post a
+   system notification through the GhostNative bridge;
+   the native side (Supervision.java) owns the final
+   decision and the text, which carries the task title
+   only. Desktop runs are not supervised: they keep
+   the S1 end-of-run record exactly as before. */
+/*@@SUPERVISION@@*/
+const RUN_CONTEXT_KIND = "ghostide-run-context";
+const RUN_CONTEXT_VERSION = 1;
+const RUN_CONTEXT_MAX_CHARS = 1200000;
+const SUP_ARC_MAX = 40;
+let supLiveTaskId = null;
+function supSetLiveTask(id) { supLiveTaskId = id; }
+function supLiveTask() { return supLiveTaskId; }
+function supContextPath(taskId) {
+  return ".ghostide/checkpoints/runctx-" + taskId +
+    ".json";
+}
+function supClone(rec) {
+  return JSON.parse(JSON.stringify(rec));
+}
+function supArcPush(rec, status, at) {
+  const out = supClone(rec);
+  if (!out.payload) out.payload = {};
+  const arc = Array.isArray(out.payload.arc)
+    ? out.payload.arc : [];
+  if (!arc.length ||
+      arc[arc.length - 1].status !== status)
+    arc.push({ status, at });
+  while (arc.length > SUP_ARC_MAX) arc.splice(1, 1);
+  out.payload.arc = arc;
+  return out;
+}
+function supSetStatus(rec, status, at) {
+  const out = supArcPush(rec, status, at);
+  out.status = status;
+  out.updatedAt = at;
+  return out;
+}
+function supApplyStep(rec, s) {
+  const out = supClone(rec);
+  out.steps = { count: s.count | 0,
+    lastLabel: String(s.lastLabel || "").slice(0, 300) };
+  if (s.approvals) out.approvals = s.approvals;
+  if (s.checkpoint) out.checkpoint = s.checkpoint;
+  out.updatedAt = s.at;
+  return out;
+}
+function supNewRecord(o) {
+  const firstLine = String(o.task || "")
+    .split("\n")[0].trim();
+  return {
+    schema: TASK_SCHEMA,
+    schemaVersion: TASK_SCHEMA_VERSION,
+    id: o.id, kind: "agent-run",
+    title: (firstLine || "Agent run").slice(0, 200),
+    goal: String(o.task || "").slice(0, 20000),
+    workspace: String(o.workspace || ""),
+    createdBy: o.platform || "desktop",
+    status: "running",
+    budget: { stepCap: o.stepCap | 0 },
+    approvals: { asked: 0, allowed: 0, denied: 0 },
+    checkpoint: null,
+    planPath: o.planPath || null,
+    steps: { count: 0, lastLabel: "" },
+    createdAt: o.at, updatedAt: o.at,
+    payload: { runId: o.runId || "", outcome: "",
+      summary: "", filesChanged: [], skipped: [],
+      segments: 1, contextPath: supContextPath(o.id),
+      arc: [{ status: "running", at: o.at }] },
+  };
+}
+function taskDisplayState(rec, liveTaskId) {
+  /* The derived display state of a record. A record
+     still marked running or waiting-approval whose
+     run is not live in this page was interrupted:
+     the stored status is a snapshot of the moment
+     the app went away, and honesty is showing the
+     derived word, with the stored one named. */
+  const status = rec && rec.status;
+  if (status === "running" ||
+      status === "waiting-approval") {
+    if (liveTaskId && rec.id === liveTaskId)
+      return { word: status, interrupted: false,
+        wasWaiting: false };
+    return { word: "interrupted", interrupted: true,
+      wasWaiting: status === "waiting-approval" };
+  }
+  return { word: status || "", interrupted: false,
+    wasWaiting: false };
+}
+function resumeBudget(rec) {
+  const cap = rec && rec.budget
+    ? rec.budget.stepCap | 0 : 0;
+  const used = rec && rec.steps
+    ? rec.steps.count | 0 : 0;
+  return { cap, used,
+    remaining: Math.max(0, cap - used) };
+}
+function buildRunContext(o) {
+  const capStr = (s, n) => String(s == null ? "" : s)
+    .slice(0, n);
+  return {
+    kind: RUN_CONTEXT_KIND,
+    version: RUN_CONTEXT_VERSION,
+    taskId: o.taskId, runId: o.runId || "",
+    task: String(o.task || ""),
+    plan: String(o.plan || ""),
+    todos: Array.isArray(o.todos) ? o.todos : [],
+    staged: o.staged || {},
+    deletions: Array.isArray(o.deletions)
+      ? o.deletions : [],
+    trail: (Array.isArray(o.trail) ? o.trail : [])
+      .slice(-200).map((t) => ({
+        step: (t && t.step) | 0,
+        type: capStr(t && t.type, 40),
+        target: capStr(t && t.target, 200) })),
+    approvals: Array.isArray(o.approvals)
+      ? o.approvals : [],
+    stepCount: o.stepCount | 0,
+    savedAt: o.at || "",
+  };
+}
+function fitRunContext(ctx) {
+  /* The context must fit its cap honestly: first the
+     trail gives up its oldest entries; if the staged
+     contents alone are too large, there is no honest
+     context and the caller stores the tombstone
+     instead (validateRunContext names it). */
+  if (JSON.stringify(ctx).length <=
+      RUN_CONTEXT_MAX_CHARS) return ctx;
+  const trimmed = Object.assign({}, ctx,
+    { trail: (ctx.trail || []).slice(-40) });
+  if (JSON.stringify(trimmed).length <=
+      RUN_CONTEXT_MAX_CHARS) return trimmed;
+  return null;
+}
+function validateRunContext(ctx, recId) {
+  if (!ctx || typeof ctx !== "object" ||
+      Array.isArray(ctx))
+    return "the saved run context is missing or "
+      + "unreadable";
+  if (ctx.ended)
+    return "that run already ended (" +
+      (ctx.outcome || "unknown") + "), so there is "
+      + "nothing to resume";
+  if (ctx.tooLarge)
+    return "the saved run context was too large to "
+      + "store, so this run cannot be resumed";
+  if (ctx.kind !== RUN_CONTEXT_KIND)
+    return "the saved run context is damaged (it is "
+      + "not a run context)";
+  if (ctx.version !== RUN_CONTEXT_VERSION)
+    return "the saved run context is damaged "
+      + "(context version " + ctx.version + ")";
+  if (ctx.taskId !== recId)
+    return "the saved run context belongs to a "
+      + "different task record";
+  if (!ctx.staged || typeof ctx.staged !== "object" ||
+      Array.isArray(ctx.staged))
+    return "the saved run context is damaged "
+      + "(staged changes)";
+  if (!Array.isArray(ctx.deletions) ||
+      !Array.isArray(ctx.todos) ||
+      !Array.isArray(ctx.trail))
+    return "the saved run context is damaged "
+      + "(run state)";
+  return null;
+}
+function buildResumeBriefing(rec, ctx) {
+  /* The continuation briefing: a summary of the
+     record, not a replay. The prior conversation is
+     deliberately NOT in it; the model re-reads what
+     it needs from the workspace and the staged set. */
+  const b = resumeBudget(rec);
+  const lines = [];
+  lines.push("CONTINUATION: this run continues an "
+    + "earlier run of the same task that was "
+    + "interrupted (the app closed or Android stopped "
+    + "it) after " + b.used + " step(s). It is a new "
+    + "segment of the same task, not a fresh start.");
+  lines.push("The task step budget is " + b.cap +
+    " steps across all segments: " + b.used +
+    " are used and you have " + b.remaining + " left.");
+  const trail = (ctx && ctx.trail) || [];
+  if (trail.length) {
+    lines.push("Steps already taken (most recent "
+      + "last):");
+    for (const t of trail.slice(-10))
+      lines.push("- step " + t.step + ": " + t.type +
+        (t.target ? " " + t.target : ""));
+    if (rec.steps && rec.steps.lastLabel)
+      lines.push("Last step: " + rec.steps.lastLabel);
+  }
+  const stagedPaths = Object.keys(
+    (ctx && ctx.staged) || {});
+  if (stagedPaths.length)
+    lines.push("These files were already changed and "
+      + "are STILL STAGED (not saved to disk): " +
+      stagedPaths.join(", ") + ". Their staged "
+      + "contents are your current drafts; build on "
+      + "them, do not redo them from scratch.");
+  const dels = (ctx && ctx.deletions) || [];
+  if (dels.length)
+    lines.push("Deletions already staged: " +
+      dels.join(", ") + ".");
+  const open = ((ctx && ctx.todos) || [])
+    .filter((t) => t && !t.done);
+  if (open.length)
+    lines.push("Plan items still open: " +
+      open.map((t) => t.text).join(" | "));
+  lines.push("Continue the task from this state. Do "
+    + "not repeat work that is already done or "
+    + "staged.");
+  return lines.join("\n");
+}
+function approvalNotifyDecision(s) {
+  /* The bundle's half of the notification decision:
+     a notification earns its interruption only when
+     an approval is waiting, the page is not on
+     screen, and the system will show it. The native
+     side decides again with the activity's own
+     foreground state before anything posts. */
+  if (!s || !s.waiting) return "idle";
+  if (!s.pageHidden) return "foreground";
+  if (!s.granted) return "denied";
+  return "notify";
+}
+function taskRecordCreate(rec) {
+  return postJson("/api/tasks", rec).catch(() => null);
+}
+function taskRecordUpdate(rec) {
+  return postJson("/api/tasks/update", rec)
+    .catch(() => null);
+}
+async function supWriteContext(path, ctx) {
+  const d = await postJson("/api/file",
+    { path, content: JSON.stringify(ctx) })
+    .catch(() => null);
+  return !!(d && !d.error);
+}
+async function supDeleteContext(path) {
+  await postJson("/api/file/delete", { path })
+    .catch(() => {});
+}
+/*@@SUPERVISION-END@@*/
+try {
+  window.__ghostSupervision = { supNewRecord,
+    supSetStatus, supApplyStep, taskDisplayState,
+    resumeBudget, buildRunContext, fitRunContext,
+    validateRunContext, buildResumeBriefing,
+    approvalNotifyDecision, supContextPath,
+    supSetLiveTask, supLiveTask,
+    RUN_CONTEXT_MAX_CHARS };
+} catch (e) {}
+
+/* M2: an approval notification tap lands here. The
+   native side flags the tap; the page polls the flag
+   when it boots and whenever it becomes visible
+   again, and focuses the waiting approval: the chat
+   view, scrolled to the approval's own message. The
+   approval itself is decided by the same buttons as
+   always; this only brings the user to them. */
+let agentApprovalEl = null;
+function focusPendingApproval() {
+  if (!agentApprovalEl) return;
+  const vc = $("viewChat");
+  if (vc) vc.click();
+  try {
+    agentApprovalEl.scrollIntoView(
+      { block: "center" });
+  } catch (e) {}
+}
+function pollApprovalOpen() {
+  try {
+    if (window.GhostNative &&
+        window.GhostNative.takeApprovalOpen &&
+        window.GhostNative.takeApprovalOpen())
+      focusPendingApproval();
+  } catch (e) {}
+}
+window.__ghostApprovalFocus = focusPendingApproval;
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) pollApprovalOpen();
+});
+setTimeout(pollApprovalOpen, 1500);
 
 /* S1: the Tasks panel. Lists the workspace's task
    records, shows one read-only, exports it as a single
@@ -14161,7 +14488,10 @@ async function refreshTasksList() {
       t.kind === "note" ? "🗒 " : "🤖 ") + t.title;
     const meta = document.createElement("div");
     meta.className = "taskRowMeta";
-    meta.textContent = t.status + " · from " +
+    /* M2: a record left in a live status with no live
+       run behind it reads as what it is. */
+    const disp = taskDisplayState(t, supLiveTask());
+    meta.textContent = disp.word + " · from " +
       taskOriginWord(t) + " · " + (t.updatedAt || "") +
       " · " + t.steps + " step(s)";
     row.appendChild(title);
@@ -14215,13 +14545,14 @@ async function showTaskDetail(id) {
     return;
   }
   const rec = d.record;
+  const disp = taskDisplayState(rec, supLiveTask());
   const title = document.createElement("div");
   title.className = "taskRowTitle";
   title.textContent = rec.title;
   detail.appendChild(title);
   const meta = document.createElement("div");
   meta.className = "taskRowMeta";
-  meta.textContent = rec.kind + " · " + rec.status +
+  meta.textContent = rec.kind + " · " + disp.word +
     " · created on " + taskOriginWord(rec);
   detail.appendChild(meta);
   if (rec.goal) {
@@ -14251,12 +14582,56 @@ async function showTaskDetail(id) {
       "a " + (prov.platform === "android" ? "Android"
         : "Desktop") + " record (" + prov.id + ") on " +
         prov.at);
-  const note = document.createElement("div");
-  note.className = "taskRecordOnly";
-  note.textContent = "Record only. Resuming a run from "
-    + "a record arrives with supervision (M2).";
-  detail.appendChild(note);
+  const arc = rec.payload && rec.payload.arc;
+  if (Array.isArray(arc) && arc.length > 1)
+    taskDetailLine(detail, "History",
+      arc.map((e) => e.status).join(" → "));
   const btns = document.createElement("div");
+  if (disp.interrupted) {
+    /* M2: the interruption truth, in plain words,
+       with the resume offer when the run left a
+       context to resume from. */
+    const note = document.createElement("div");
+    note.className = "taskRecordOnly";
+    note.textContent = "Interrupted. This run was "
+      + "marked " + (disp.wasWaiting
+        ? "waiting for an approval" : "running")
+      + " when the app last saved it, but no run is "
+      + "live now: the app was closed or Android "
+      + "stopped it. Last updated " + rec.updatedAt
+      + ".";
+    detail.appendChild(note);
+    const life = document.createElement("div");
+    life.className = "taskRecordOnly";
+    life.textContent = "If Android closes the app, a "
+      + "run stops safely at its last saved step and "
+      + "can be resumed from there.";
+    detail.appendChild(life);
+    if (rec.payload && rec.payload.contextPath) {
+      const rb = document.createElement("button");
+      rb.id = "taskResumeBtn";
+      rb.textContent = "▶ Resume this task";
+      rb.onclick = () => resumeTaskFromRecord(rec);
+      btns.appendChild(rb);
+    } else {
+      const no = document.createElement("div");
+      no.className = "taskRecordOnly";
+      no.textContent = "Resume is not available for "
+        + "this record: no run context was saved "
+        + "for it.";
+      detail.appendChild(no);
+    }
+  } else {
+    const note = document.createElement("div");
+    note.className = "taskRecordOnly";
+    note.textContent = supLiveTask() &&
+        rec.id === supLiveTask()
+      ? "This run is live now. Its record is being "
+        + "written as it goes."
+      : "Record only. This run has ended, and the "
+        + "record is its history.";
+    detail.appendChild(note);
+  }
   const exp = document.createElement("button");
   exp.textContent = "⬇ Export this record";
   exp.onclick = () => exportTaskRecord(rec);
@@ -14269,6 +14644,51 @@ async function showTaskDetail(id) {
   btns.appendChild(exp);
   btns.appendChild(back);
   detail.appendChild(btns);
+}
+async function resumeTaskFromRecord(rec) {
+  /* M2: Resume is always a user tap, and every
+     refusal is named. The checks run in the order a
+     user would ask them: is something already
+     running, is there a context, is it this task's,
+     is there budget left. */
+  const msg = $("tasksMsg");
+  if (agentRunning) {
+    msg.textContent = "An agent task is already "
+      + "running. Finish or stop it before resuming "
+      + "this one.";
+    return;
+  }
+  let ctx = null;
+  try {
+    const r = await fetch("/api/file?path=" +
+      encodeURIComponent(rec.payload.contextPath));
+    const d = await r.json();
+    if (!d.error && d.content)
+      ctx = JSON.parse(d.content);
+  } catch (e) { /* named by validateRunContext */ }
+  const err = validateRunContext(ctx, rec.id);
+  if (err) {
+    msg.textContent = "Cannot resume: " + err + ".";
+    return;
+  }
+  const b = resumeBudget(rec);
+  if (b.remaining <= 0) {
+    msg.textContent = "Cannot resume: the step "
+      + "budget for this task is used up (" + b.used
+      + " of " + b.cap + " steps). Start a new task "
+      + "to continue the work.";
+    return;
+  }
+  $("tasksPanel").classList.add("hidden");
+  addMsg("SYSTEM", "▶ Resuming the interrupted task: "
+    + rec.title + " (" + b.used + " step(s) already "
+    + "taken, " + b.remaining + " left in its "
+    + "budget). The agent is briefed with a summary "
+    + "of the earlier segment, not a replay.");
+  runAgent(rec.goal, { plan: ctx.plan || "",
+    todos: ctx.todos || [], staged: ctx.staged || {},
+    deletions: ctx.deletions || [],
+    resumeOf: { rec, context: ctx } });
 }
 function exportTaskRecord(rec) {
   /* The export is the record itself: one JSON file,
@@ -14704,12 +15124,19 @@ function agentApproveRunUi(command) {
     const body = addMsg("SYSTEM",
       "🤖 Agent wants to run:\n" + command +
       "\nApprove this command?");
+    /* M2: the waiting approval is findable again
+       when the user returns from a notification. */
+    agentApprovalEl = body;
     const row = document.createElement("div");
     row.className = "optRow";
     const mk = (label, val) => {
       const b = document.createElement("button");
       b.textContent = label;
-      b.onclick = () => { row.remove(); resolve(val); };
+      b.onclick = () => {
+        if (agentApprovalEl === body)
+          agentApprovalEl = null;
+        row.remove(); resolve(val);
+      };
       row.appendChild(b);
     };
     mk("✓ Run it", "once");
@@ -14765,6 +15192,20 @@ async function runAgent(task, opts) {
   const runOriginals = {};
   const runSkipped = [];
   const runApprovals = [];
+  /* Mobile Cycle 3, M2: a resumed run is a new segment
+     of an existing task. Its trail and approvals are
+     seeded from the saved run context, so the run's
+     accounting (and the task record built from it at
+     the end) is cumulative across segments, and the
+     step loop below counts against the task's own
+     budget, not a fresh one. */
+  const resumeOf = opts.resumeOf || null;
+  if (resumeOf) {
+    for (const t of resumeOf.context.trail || [])
+      trail.push(t);
+    for (const a of resumeOf.context.approvals || [])
+      runApprovals.push(a);
+  }
   let runCkptPath = "";
   async function persistRunCheckpoint() {
     if (!Object.keys(runOriginals).length &&
@@ -14807,6 +15248,16 @@ async function runAgent(task, opts) {
       runOriginals[path] = content;
     }
     await persistRunCheckpoint();
+  }
+  if (resumeOf) {
+    /* The staged set arrived from the saved context;
+       its files' pre-task originals are still on disk
+       (staged changes are never written before the
+       review), so capture them now: the end-of-run
+       checkpoint and review then cover the whole
+       task, not just this segment. */
+    for (const p of [...staged.keys(), ...deletions])
+      await captureRunOriginal(p);
   }
   /* Seatbelt-style RUN policy pack (v2.43): "each" prompts
      per command (the v2 behavior), "plan" auto-approves when
@@ -15190,8 +15641,15 @@ async function runAgent(task, opts) {
       "(GhostRecall + error memory).");
   /* Mobile Cycle 2, M6: the run's step budget is
      computed once, here, so the briefing and the loop
-     can never disagree about it. */
-  const stepCap = agentStepCap();
+     can never disagree about it. Mobile Cycle 3, M2:
+     a resumed run inherits the task record's own cap,
+     so the budget is per task across its segments,
+     and the loop starts counting where the task left
+     off. */
+  const stepCap = resumeOf
+    ? resumeOf.rec.budget.stepCap : agentStepCap();
+  const stepOffset = resumeOf
+    ? (resumeOf.rec.steps.count | 0) : 0;
   const messages = [
     { role: "system", content: BEHAVIOR.systemPrompt + "\n\n" +
       AGENT_RULES + (mapText ? "\n\n" + mapText : "") +
@@ -15212,6 +15670,19 @@ async function runAgent(task, opts) {
       (todos.length ? "\nPlan items: " + todos.map((t, i) =>
         (i + 1) + ". " + t.text).join(" | ") : "") },
   ];
+  if (resumeOf) {
+    /* M2: the continuation is briefed as a summary of
+       the record, never a replay of the old
+       conversation. */
+    messages[0].content += "\n\n" +
+      buildResumeBriefing(resumeOf.rec,
+        resumeOf.context);
+    messages[1].content += "\n\nThis continues the "
+      + "interrupted run of this task (see the "
+      + "continuation briefing). " +
+      resumeBudget(resumeOf.rec).remaining +
+      " step(s) remain in the task budget.";
+  }
   snapshot("task start", 0);
   let outcome = "cap";
   let summary = "";
@@ -15246,12 +15717,135 @@ async function runAgent(task, opts) {
       "then finish with DONE again." });
     return false;
   }
+  /* Mobile Cycle 3, M2: supervision (phone only).
+     The task record is created now, updated at step
+     boundaries and approval waits through supSync,
+     and finished by postRunRecord at the end of the
+     run. Every write is serialized on sup.chain and
+     fire-and-forget: supervision never blocks the
+     run and never breaks it. */
+  let sup = null;
+  if (phoneGuardOnAndroid()) {
+    sup = { rec: null, chain: Promise.resolve(),
+      granted: true };
+    try {
+      sup.granted =
+        !window.GhostNative ||
+        !window.GhostNative.notificationsGranted ||
+        !!window.GhostNative.notificationsGranted();
+    } catch (e) { sup.granted = true; }
+    if (resumeOf) {
+      /* The arc records the interruption the panel
+         derived, at the moment the record last moved,
+         before this segment's own running entry. */
+      sup.rec = supSetStatus(resumeOf.rec,
+        "interrupted", resumeOf.rec.updatedAt);
+      sup.rec = supSetStatus(sup.rec, "running",
+        new Date().toISOString());
+      sup.rec.payload.segments =
+        (sup.rec.payload.segments | 0) + 1;
+      sup.rec.payload.runId = runId;
+      sup.chain = sup.chain.then(() =>
+        taskRecordUpdate(sup.rec));
+    } else {
+      sup.rec = supNewRecord({
+        id: makeTaskId(new Date(),
+          Math.random().toString(36).slice(2, 8)),
+        task, stepCap,
+        workspace: historyScope || "on-device",
+        platform: "android",
+        planPath: opts.planPath || null,
+        runId, at: new Date().toISOString() });
+      sup.chain = sup.chain.then(() =>
+        taskRecordCreate(sup.rec));
+    }
+    supSetLiveTask(sup.rec.id);
+    try {
+      if (window.GhostNative &&
+          window.GhostNative.runStarted)
+        window.GhostNative.runStarted(sup.rec.title);
+    } catch (e) {}
+    addMsg("SYSTEM", "🛡 Supervised run: progress is "
+      + "saved to the task record as it goes. If "
+      + "Android closes the app, the run stops safely "
+      + "and can be resumed from the last saved step "
+      + "in the Tasks panel.");
+    if (!sup.granted)
+      addMsg("SYSTEM", "Note: notifications are off "
+        + "for GhostIDE, so if an approval is needed "
+        + "while you are in another app, the run will "
+        + "wait without notifying you.");
+  }
+  function supSync(status) {
+    if (!sup) return;
+    sup.chain = sup.chain.then(async () => {
+      try {
+        const lastT = trail.length
+          ? trail[trail.length - 1] : null;
+        let rec = supApplyStep(sup.rec, {
+          count: trail.filter((t) => t.step > 0).length,
+          lastLabel: lastT
+            ? (String(lastT.type || "") + " " +
+               String(lastT.target || "")).trim()
+            : "",
+          approvals: taskApprovalsSummary(runApprovals),
+          checkpoint: runCkptPath || null,
+          at: new Date().toISOString() });
+        if (status)
+          rec = supSetStatus(rec, status,
+            new Date().toISOString());
+        sup.rec = rec;
+        await taskRecordUpdate(rec);
+        const ctx = fitRunContext(buildRunContext({
+          taskId: rec.id, runId,
+          task, plan: opts.plan || "",
+          todos,
+          staged: Object.fromEntries(staged),
+          deletions: [...deletions],
+          trail, approvals: runApprovals,
+          stepCount: rec.steps.count,
+          at: new Date().toISOString() }));
+        if (ctx)
+          await supWriteContext(
+            rec.payload.contextPath, ctx);
+        else
+          await supWriteContext(
+            rec.payload.contextPath,
+            { kind: RUN_CONTEXT_KIND,
+              version: RUN_CONTEXT_VERSION,
+              taskId: rec.id, tooLarge: true,
+              savedAt: new Date().toISOString() });
+      } catch (e) { /* supervision never breaks a run */ }
+    });
+  }
+  async function supApprovalBegin() {
+    if (!sup) return;
+    supSync("waiting-approval");
+    await sup.chain;
+    try {
+      const decision = approvalNotifyDecision({
+        waiting: true,
+        pageHidden: document.hidden,
+        granted: sup.granted });
+      if (decision === "notify" && window.GhostNative &&
+          window.GhostNative.approvalNeeded)
+        window.GhostNative.approvalNeeded(sup.rec.title);
+    } catch (e) {}
+  }
+  function supApprovalEnd() {
+    if (!sup) return;
+    supSync("running");
+  }
   /* The step budget itself was computed at briefing
      time (stepCap, above) so the two can never drift:
      the user's chosen budget when they picked one,
      else the platform default (25 on the phone, 50 on
      the desktop), clamped to the historical 10..120. */
-  for (let step = 1; step <= stepCap; step++) {
+  for (let step = stepOffset + 1; step <= stepCap;
+       step++) {
+    /* M2: the state through the previous step is the
+       resume point if the app dies during this one. */
+    if (sup) supSync();
     if (thermalWatchdog() === "stop") {
       addMsg("SYSTEM", "🌡 Agent stopped: the device " +
         "reached severe heat. (Thermal guard.)");
@@ -15415,8 +16009,15 @@ async function runAgent(task, opts) {
         continue;
       }
       const wasAuto = runAllowAll;
-      let verdict = runAllowAll ? "all"
-        : await agentApproveRunUi(act.command);
+      let verdict = "all";
+      if (!runAllowAll) {
+        /* M2: the waiting state is saved (and the
+           user notified, if away) before the loop
+           parks on the approval. */
+        if (sup) await supApprovalBegin();
+        verdict = await agentApproveRunUi(act.command);
+        if (sup) supApprovalEnd();
+      }
       if (verdict === "all") runAllowAll = true;
       if (agentStop) { outcome = "stopped"; break; }
       runApprovals.push({ kind: "run", target: act.command,
@@ -15551,9 +16152,11 @@ async function runAgent(task, opts) {
             "or finish with DONE." });
         }
       } else if (!runAllowAll) {
+        if (sup) await supApprovalBegin();
         const verdict = await agentApproveRunUi("MCP " +
           act.server + "." + act.tool + " " +
           JSON.stringify(act.args || {}).slice(0, 300));
+        if (sup) supApprovalEnd();
         if (verdict === "all") runAllowAll = true;
         if (agentStop) { outcome = "stopped"; break; }
         runApprovals.push({ kind: "mcp",
@@ -15659,6 +16262,16 @@ async function runAgent(task, opts) {
   for (const p of deletions)
     if (!staged.has(p))
       runFilesChanged.push({ path: p, kind: "deleted" });
+  if (sup) {
+    /* Drain the supervision writes first, so no
+       in-flight progress update can land after the
+       final record and resurrect a finished run as
+       "running". */
+    await sup.chain;
+    sup.rec = supSetStatus(sup.rec,
+      taskStatusFromOutcome(outcome),
+      new Date().toISOString());
+  }
   postRunRecord({ id: runId, mode: "act", task,
     planPath: opts.planPath || null,
     startedAt: runStartedAt,
@@ -15668,7 +16281,34 @@ async function runAgent(task, opts) {
     approvals: runApprovals,
     filesChanged: runFilesChanged,
     checkpoint: runCkptPath || null,
-    skipped: runSkipped });
+    skipped: runSkipped,
+    /* M2: a supervised run finishes the record it
+       started, under its own id, createdAt and cap,
+       with the arc complete and the context closed. */
+    taskId: sup ? sup.rec.id : undefined,
+    taskCreatedAt: sup ? sup.rec.createdAt : undefined,
+    taskStepCap: sup ? stepCap : undefined,
+    taskPayloadExtra: sup ? {
+      segments: sup.rec.payload.segments,
+      arc: sup.rec.payload.arc,
+      contextPath: null } : undefined });
+  if (sup) {
+    /* The run ended here in the app, so it is not an
+       interruption: the saved context has no resume
+       left to offer, the approval notification (if
+       any is still up) comes down, and the foreground
+       service stands down. */
+    const doneContextPath = sup.rec.payload.contextPath;
+    sup.chain = sup.chain.then(async () => {
+      await supDeleteContext(doneContextPath);
+      try {
+        if (window.GhostNative &&
+            window.GhostNative.runEnded)
+          window.GhostNative.runEnded();
+      } catch (e) {}
+      supSetLiveTask(null);
+    });
+  }
   sendBtn.textContent = "Send";
   sendBtn.onclick = oldSend;
   agentRunning = false;

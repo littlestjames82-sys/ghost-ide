@@ -78,7 +78,14 @@ ck("M1 live: a Playwright Python is available (" + python + ")",
 if (probe.status === 0) {
   const run = spawnSync(python,
     [root + "tools/viewport_gate.py"],
-    { encoding: "utf8", timeout: 112000 });
+    /* M2 (3.25.0): the gate grew by 12 states (the
+       interrupted and waiting-approval details at
+       every phone width), and the full matrix now
+       measures ~115s standalone, past the old 112s
+       budget, so the harness killed a green gate at
+       the timeout. Budget follows the measured
+       truth, move recorded here. */
+    { encoding: "utf8", timeout: 240000 });
   const out = (run.stdout || "") + (run.stderr || "");
   const finalLine = out.trim().split("\n")
     .filter((l) => l.startsWith("VIEWPORT GATE:")).pop() || "";

@@ -23,8 +23,16 @@ for (const f of files) {
   if (f === "ghconnect_harness.mjs")
     args.push(root + "/web/src/main.js",
               root + "/web/index.html");
+  /* M2 (3.25.0): the viewport-matrix harness runs
+     the full gate in a real Firefox; the gate's 12
+     new supervision states pushed it past the flat
+     120s budget (measured ~145s for the harness),
+     so that one file gets a larger budget, recorded
+     here. Every other harness keeps 120s. */
+  const budget = f === "viewport-matrix-harness.mjs"
+    ? 300000 : 120000;
   const r = spawnSync(process.execPath, args,
-    { encoding: "utf8", timeout: 120000 });
+    { encoding: "utf8", timeout: budget });
   const out = (r.stdout || "") + (r.stderr || "");
   const last = out.trim().split("\n").pop() || "";
   if (last.includes(" 0 failed") || last.includes("ALL PASS"))

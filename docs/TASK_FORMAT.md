@@ -11,9 +11,12 @@ mirror it, and a shared fixture
 
 A task record is DATA. It is shape-checked and stored
 verbatim, never executed and never interpreted beyond the
-summary fields the list view reads. It describes work; it
-does not resume work. Resuming a live run from a record is
-M2's job, and the UI says so wherever a record is shown.
+summary fields the list view reads. It describes work.
+Since M2 (on-device supervision), a phone run also writes
+its record as it goes and can be resumed from it after an
+interruption; the record itself is still only ever data,
+and the resumption machinery lives in the bundle, not in
+the format.
 
 ## Where records live
 
@@ -182,13 +185,70 @@ validates the fixture, and its canonical form of the
 fixture, and of the fixture after a store-and-read
 round-trip, must equal the expected string byte for byte.
 
+## Supervision (M2): the live record and its context
+
+M2 builds on this format without changing it: every
+field below rides in `payload`, which version 1
+already allows, and both servers store it verbatim
+under the same validation.
+
+A supervised phone run creates its record when it
+starts (status `running`) and updates it at step
+boundaries and at approval waits (`running` to
+`waiting-approval` and back), so `steps`,
+`approvals`, `checkpoint` and `updatedAt` are live
+values during the run, not just an end-of-run
+summary. Three payload keys carry the supervision
+state:
+
+- `payload.arc`: the record's status history, one
+  `{ status, at }` entry per transition, consecutive
+  duplicates collapsed, capped at 40 entries. A
+  resumed task reads `running, interrupted, running,
+  done`: the interruption entry is stamped with the
+  record's last `updatedAt` before the interruption,
+  because that is when it honestly happened.
+- `payload.segments`: how many run segments the task
+  has had. The step budget is per task: `steps.count`
+  is cumulative across segments and the loop of a new
+  segment counts against the same `budget.stepCap`.
+- `payload.contextPath`: where the run context lives
+  while the task is resumable, and `null` once the
+  run has ended in the app (an ended run has nothing
+  to resume).
+
+The run context is a separate file, on the D2
+checkpoint rails: `.ghostide/checkpoints/runctx-<task
+id>.json`, written through `/api/file`. Its shape is
+`{ kind: "ghostide-run-context", version: 1, taskId,
+runId, task, plan, todos, staged, deletions, trail,
+approvals, stepCount, savedAt }`: the goal, the
+staged change set and the trail a new segment needs
+to continue honestly. It is capped (1,200,000
+characters serialized; the trail sheds its oldest
+entries first). When even the staged set cannot fit,
+the writer stores a tombstone carrying `tooLarge:
+true` instead, and resume refuses by that name. A
+context may also carry `ended: true` with an
+`outcome`; resume refuses it too. Resume validates
+the context before anything starts (kind, version,
+task id match, field shapes) and refuses by name;
+the record stays viewable either way.
+
+A record whose stored status is `running` or
+`waiting-approval` but which has no live run behind
+it is INTERRUPTED: a derived display state, never a
+stored one. The stored status stays what the run
+last wrote; the panel shows the derived word, the
+last `updatedAt`, and (when a context exists) the
+Resume offer.
+
 ## What S1 is not
 
-- Not supervision (M2): no background running, no
-  notifications, no resuming. A stored `running` status is
-  a snapshot word, not a live run.
 - Not pairing (M10): no transport. Export and import move
-  one file by hand; nothing syncs.
+  one file by hand; nothing syncs. Supervision (M2)
+  is on-device only: it supervises runs on the phone
+  itself, never a desktop's runs.
 - Not a session format: chat history, open tabs and drafts
   stay where they already live (device-local storage on
   both platforms, restored on launch). The task record is

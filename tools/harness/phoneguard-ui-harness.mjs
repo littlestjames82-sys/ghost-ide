@@ -110,7 +110,16 @@ ck("M6 bundle: block markers, the phone store note, " +
    app.includes("__ghostPhoneGuard"));
 ck("M6 bundle: one budget source for the briefing, " +
    "the loop and the select; choosing marks the flag",
-   src.includes("const stepCap = agentStepCap();") &&
+   /* M2 (3.25.0) extended the line this pin was
+      written against: a resumed run takes its cap
+      from its task record (the budget is per task,
+      and a resume must not launder a fresh cap),
+      while a fresh run still takes agentStepCap()
+      in the same expression. Pin follows the
+      measured truth, move recorded here. */
+   src.includes("const stepCap = resumeOf") &&
+   src.includes("resumeOf.rec.budget.stepCap"
+     + " : agentStepCap();") &&
    src.includes(
      "agentStepsSel.value = String(agentStepCap());") &&
    src.includes("settings.agentStepsChosen = true;") &&

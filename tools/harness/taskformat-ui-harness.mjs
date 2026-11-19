@@ -80,9 +80,15 @@ ck("S1 panel: the Tasks panel, its parts and the " +
    css.includes("#tasksPanel"));
 ck("S1 honesty: the record-only label is written out, "
    + "and no S1 copy uses an em dash",
-   src.includes("Record only. Resuming a run from ") &&
-   src.includes("a record arrives with supervision "
-     + "(M2).") &&
+   /* M2 (3.25.0) kept the promise this label made:
+      resuming arrived with supervision, so the label
+      now reads as the ended-run truth ("Record only.
+      This run has ended...") and interrupted records
+      carry the M2 copy instead. Pin follows the
+      measured truth, move recorded here. */
+   src.includes("Record only. This run has ended, "
+     + "and the") &&
+   src.includes("Interrupted. This run was ") &&
    !block.includes("—") &&
    !html.split('id="tasksPanel"')[1]
      .split("</div>\n\n<div")[0].includes("—") &&

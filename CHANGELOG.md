@@ -4,6 +4,29 @@ GhostIDE desktop and Android ship on one version train. The
 in-app changelog (Settings, then About) carries the full
 191-entry history; this file covers the current run.
 
+## 3.25.0 — Nov 18, 2026 — On-device supervision
+
+- Agent runs on the phone are now supervised: the run
+  writes its task record as it goes (created at start,
+  updated at step boundaries and approval waits) and
+  saves a resumable context beside it on the checkpoint
+  rails.
+- A run the app loses (closed, or Android stops it) is
+  shown in the Tasks panel as Interrupted with its last
+  update time, and offers Resume: a new segment briefed
+  from the record's summary, never a replay, counting
+  against the same per-task step budget. A missing or
+  damaged context is refused by name.
+- When a run waits for an approval while the app is in
+  the background, a notification names the task and the
+  waiting approval (no commands, no file contents);
+  tapping it opens the app at the pending approval,
+  decided by the same in-app buttons as always.
+- A foreground service runs while a run is active, and
+  the copy says plainly that no run is promised to
+  survive the app being killed: resume is the answer.
+  Desktop runs are unchanged.
+
 ## 3.24.0 — Nov 18, 2026 — Portable task format
 
 - One record format for agent work on both platforms:
