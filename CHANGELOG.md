@@ -2,7 +2,32 @@
 
 GhostIDE desktop and Android ship on one version train. The
 in-app changelog (Settings, then About) carries the full
-191-entry history; this file covers the current run.
+193-entry history; this file covers the current run.
+
+## 3.26.0 — Nov 18, 2026 — Desktop pairing
+
+- A phone can now pair with a desktop as its supervisor:
+  the desktop's Pair panel gains an "Allow phone pairing"
+  switch (off by default) and shows a one-time pairing
+  code; the phone enters the code once and holds a
+  pairing token in its secure store. The desktop stores
+  only the token's hash.
+- In pair mode, Tools then Desktop supervision lists the
+  desktop's tasks with their live state, a task detail
+  with the changes a run made (with diffs), and the
+  approvals waiting on the desktop. Approving there
+  records the decision on the desktop, and the desktop
+  does the work; the phone never runs anything itself.
+- Follow-ups: the phone can leave a note on a task. It
+  lands on the task record, shows in the desktop's Tasks
+  panel, and if that task's run is live, the run reads
+  it at its next step.
+- The pairing screens say plainly what protects the
+  connection in each case (the desktop's HTTPS
+  certificate, a Tailscale address, or a trusted home
+  network). Nothing leaves the two devices: no account,
+  no cloud relay. Unpairing on either side revokes at
+  once.
 
 ## 3.25.0 — Nov 18, 2026 — On-device supervision
 

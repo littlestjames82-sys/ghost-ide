@@ -18,8 +18,8 @@ ck("A11 signer is the build.sh keystore constant",
 /* Census moved by design: 139/129 after Cycle 7
    batch 1 (branches), 141/131 after batch 2 (stash),
    144/134 after Cycle 8 batch 3 (tags + amend). */
-ck("A12 census re-derived: 183 desktop / 136 Java (Desktop Cycle 2: +12 LSP routes, +2 run-record routes in D2, +10 MCP routes in D8) (Desktop Cycle 3 D5: +5 embed routes) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes, census 197 / 138)",
-   (py.match(/parsed\.path ==/g) || []).length === 197 &&
+ck("A12 census re-derived: 183 desktop / 136 Java (Desktop Cycle 2: +12 LSP routes, +2 run-record routes in D2, +10 MCP routes in D8) (Desktop Cycle 3 D5: +5 embed routes) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes, census 197 / 138) (Mobile Cycle 3 M10: +7 desktop supervision routes, census 204 / 138)",
+   (py.match(/parsed\.path ==/g) || []).length === 204 &&
    (java.match(/path\.equals\("\/api/g) || []).length === 138);
 ck("A13 datapack name pins unchanged",
    py.includes('r"data-pack-[A-Za-z0-9_.-]+"') &&

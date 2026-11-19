@@ -31,8 +31,8 @@ ck("D2 version: desktop train moved past 3.13.0, phone train re-synced at M1",
    vjson.version === vjson.desktop.version &&
    vjson.latest === vjson.desktop.version &&
    vjson.android && vjson.android.version === vjson.desktop.version);
-ck("D2 route census re-derived (166 + 2 run-record routes in D2, +10 MCP in D8, +12 LSP in D4, +5 embed in D5 = 183) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes)",
-   (py.match(/parsed\.path ==/g) || []).length === 197);
+ck("D2 route census re-derived (166 + 2 run-record routes in D2, +10 MCP in D8, +12 LSP in D4, +5 embed in D5 = 183) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes) (Mobile Cycle 3 M10: +7 desktop supervision routes)",
+   (py.match(/parsed\.path ==/g) || []).length === 204);
 ck("D2 server: run records validated, capped, stored as data",
    py.includes('"/api/agent-runs"') &&
    py.includes("AGENT_RUN_MAX_BYTES = 256 * 1024") &&

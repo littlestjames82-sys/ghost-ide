@@ -26,9 +26,15 @@ ck("A11 signer is the build.sh keystore constant",
    (S1): desktop 194 -> 197 (GET /api/tasks, POST
    /api/tasks, POST /api/tasks/update) and Java
    136 -> 138 (the same task routes, one path.equals
-   per route with the method dispatch inside). */
-ck("A12 census at the Desktop Cycle 2 level: 183 desktop / 136 Java (Desktop Cycle 3 D5: +5 embed routes) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes, census 197 / 138)",
-   (py.match(/parsed\.path ==/g) || []).length === 197 &&
+   per route with the method dispatch inside).
+   Census moved again by design in Mobile Cycle 3
+   (M10): desktop 197 -> 204 (the seven supervision
+   routes: status, enable, code, join, unpair,
+   followup, review); Java unchanged at 138 (the
+   phone is a client in M10; IdeServer gained no
+   routes). */
+ck("A12 census at the Desktop Cycle 2 level: 183 desktop / 136 Java (Desktop Cycle 3 D5: +5 embed routes) (Mobile Cycle 3 S1: +3 desktop / +2 Java task-record routes, census 197 / 138) (Mobile Cycle 3 M10: +7 desktop supervision routes, census 204 / 138)",
+   (py.match(/parsed\.path ==/g) || []).length === 204 &&
    (java.match(/path\.equals\("\/api/g) || []).length === 138);
 ck("A13 datapack name pins unchanged",
    py.includes('r"data-pack-[A-Za-z0-9_.-]+"') &&

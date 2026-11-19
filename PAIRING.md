@@ -94,3 +94,36 @@ if the file changed on the host since you opened it, your save is
 diverted to `<file>.conflict-<device>` and the pair panel offers
 the resolution; a save never silently overwrites the other
 device's work.
+
+## Phone supervision pairing (M10)
+
+Separate from everything above, and off by default: the Pair
+panel's "Allow phone pairing" switch lets a phone pair as a
+SUPERVISOR of this desktop. The differences from a guest token
+are the point:
+
+- The desktop shows a one-time code (single-use, five minutes,
+  five wrong tries ends it). The phone trades it for a
+  long-lived supervision token; the desktop stores only the
+  token's SHA-256, in an app-data file at mode 0600, and the
+  phone keeps the token in its Keystore store. No code or
+  token is ever logged, put in a URL, or written into a task
+  record.
+- A supervision token opens ONLY the supervision surface: the
+  task list and one task, the run records, the server-built
+  run review, the approval list and decide, the follow-up
+  append, and unpairing itself. It is not an IDE pass: file
+  reads, the terminal, settings and everything else refuse
+  it flat.
+- The phone decides approvals; the desktop records the
+  decision against the record's exact hash and does the work
+  itself (the E10 design). The phone executes nothing.
+- Unpairing on either side revokes at once; turning the
+  switch off stops every supervision token while remembering
+  the pairings.
+- Transport is whatever the pair above provides: HTTPS with
+  the host certificate when LAN TLS is on, a Tailscale
+  address (which encrypts the path itself), or plain HTTP on
+  a trusted LAN, where the token is the only protection. The
+  pairing screens say which one is in use, in plain words.
+  Nothing leaves the two devices: no account, no relay.

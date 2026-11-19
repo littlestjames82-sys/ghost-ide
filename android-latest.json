@@ -1,9 +1,10 @@
 {
- "apkUrl": "https://downloads.ghostdeveloperstudio.com/ghostide/ghostide-v3.25.0.apk",
- "notes": "Mobile Cycle 3 (M2): on-device supervision. An agent run on the phone writes its task record as it goes and saves a resumable context beside it; a run the app loses shows as Interrupted in the Tasks panel and offers Resume, a new segment briefed from the record, counting against the same per-task step budget. Approval waits in the background raise a notification naming only the task; tapping it opens the app at the pending approval.",
- "publishedAt": "2026-11-19T00:06:49Z",
- "sha256": "6b13b7b81d83a7631debbe6ed986a175c04934d70eb8bd1926b68c0a033cd701",
- "sizeBytes": 20521577,
- "version": "3.25.0",
- "versionCode": 224
+ "apkUrl": "https://downloads.ghostdeveloperstudio.com/ghostide/ghostide-v3.26.0.apk",
+ "notes": "Mobile Cycle 3 (M10): desktop pairing. A phone pairs with a desktop through a one-time code and supervises its task records, run changes, and waiting approvals from the Desktop supervision panel; follow-ups land on the task record and, for a live run, in the run at its next step. The desktop executes everything; the phone only watches and decides.",
+ "notesUrl": "https://ghostdeveloperstudio.com/ghost-ide/",
+ "publishedAt": "2026-11-19T01:14:42Z",
+ "sha256": "af51b1a8fa713f0c5b19a7a8987cdd81360c7708d56aebcd9f98d0be70e73dd9",
+ "sizeBytes": 20529769,
+ "version": "3.26.0",
+ "versionCode": 225
 }

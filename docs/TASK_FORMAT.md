@@ -243,12 +243,48 @@ last wrote; the panel shows the derived word, the
 last `updatedAt`, and (when a context exists) the
 Resume offer.
 
+## Pairing (M10): follow-ups and the remote record
+
+M10 pairs a phone with a desktop so the phone can
+supervise the DESKTOP's records over this same
+format. The pairing credential is separate from
+everything else in the IDE (see the server's M10
+section and PAIRING.md's supervision note): a
+one-time code mints a per-device token, the desktop
+stores only its hash, and the token opens only the
+supervision surface. One payload key is added by
+convention:
+
+- `payload.followups`: a list of
+  `{ at, from, text }` entries a paired phone left
+  on the record through the desktop's follow-up
+  route, which appends server-side (a supervision
+  token cannot rewrite a record any other way).
+  `at` is a UTC ISO stamp, `from` the paired
+  device's name, `text` the note (2,000 characters
+  at most; at most 50 entries, and the route refuses
+  beyond that rather than dropping any). A desktop
+  run whose server has pairing on keeps a live
+  record in this format too (created at start,
+  synced at step boundaries, like M2 but with no
+  run context: resume stays a phone feature), and
+  surfaces each new follow-up to the run as a user
+  note at the next step boundary.
+
+From the phone, INTERRUPTED is derived differently,
+because the run is live on the desktop, not in the
+phone's page: a record still marked `running` or
+`waiting-approval` whose `updatedAt` is fresh
+(under two minutes) reads as live; one that has
+stopped moving reads as interrupted, with the last
+update time shown.
+
 ## What S1 is not
 
-- Not pairing (M10): no transport. Export and import move
-  one file by hand; nothing syncs. Supervision (M2)
-  is on-device only: it supervises runs on the phone
-  itself, never a desktop's runs.
+- Not a sync format: export and import move one
+  file by hand. Pairing (M10) lets a phone read and
+  annotate a desktop's records live, but records
+  are never synced or merged between devices.
 - Not a session format: chat history, open tabs and drafts
   stay where they already live (device-local storage on
   both platforms, restored on launch). The task record is

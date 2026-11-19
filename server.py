@@ -28,7 +28,7 @@ WORKSPACE = Path(os.environ.get(
     "GHOST_IDE_WORKSPACE", ROOT / "playground")).resolve()
 PORT = int(os.environ.get("GHOST_IDE_PORT", "5173"))
 HOST = os.environ.get("GHOST_IDE_HOST", "127.0.0.1")
-APP_VERSION = "3.25.0"
+APP_VERSION = "3.26.0"
 FROZEN = getattr(sys, "frozen", False)
 
 # Desktop Cycle 1 (v3.11.0): portable mode, the desktop
@@ -572,6 +572,205 @@ def pair_token_valid(tok, now):
         PAIR_TOKENS.pop(tok, None)
         return False
     return True
+
+
+# Mobile Cycle 3, M10: phone supervision pairing.
+#
+# A second, deliberately narrower credential beside
+# the G16 guest tokens above. A G16 editor token is
+# full API access; a supervision token unlocks ONLY
+# the supervision route set (the task list and one
+# task, the run records, the approval list and
+# decide, the follow-up append, and the server-built
+# review), and only while the host has turned "Allow
+# phone pairing" on. It is off by default, and with
+# it off nothing about the server's posture changes:
+# the gate below simply never honors the header.
+#
+# Pairing: the host mints a one-time 6-digit code
+# (single-use, five minutes, five wrong attempts and
+# it dies; only its SHA-256 is kept, and only in
+# memory). The phone exchanges it at
+# /api/supervision/join for a long-lived token. The
+# desktop stores only the token's SHA-256, in an
+# app-data file written at mode 0600 in the D8
+# posture (mcp-secrets.json's sibling); the phone
+# keeps the token itself in its Keystore store. No
+# route returns a token or a hash; neither the code
+# nor the token is ever logged, put in a URL, or
+# written into a task record. Unpairing on either
+# side deletes the device entry and the token stops
+# working at once; turning the setting off stops
+# every supervision token without forgetting the
+# pairings.
+import threading as _sup_threading
+SUP_STATE_FILE = "supervision-pairing.json"
+SUP_CODE_TTL = 300
+SUP_CODE_MAX_ATTEMPTS = 5
+SUP_FOLLOWUP_MAX = 50
+SUP_FOLLOWUP_CHARS = 2000
+SUP_TOKEN_HEADER = "X-Supervision-Token"
+# The whole paired surface: reads of the records a
+# supervisor needs, the approval decide (the desktop
+# records and executes, per the E10 design), the
+# follow-up append, and the server-built review.
+SUPERVISION_ROUTES = {
+    ("GET", "/api/tasks"),
+    ("GET", "/api/agent-runs"),
+    ("GET", "/api/approve/list"),
+    ("GET", "/api/supervision/status"),
+    ("GET", "/api/supervision/review"),
+    ("POST", "/api/approve/decide"),
+    ("POST", "/api/supervision/followup"),
+    ("POST", "/api/supervision/unpair"),
+}
+_sup_lock = _sup_threading.Lock()
+_sup_state = None
+_sup_code = None
+
+
+def _sup_now():
+    # UTC with the Z suffix, the same shape the bundle
+    # stamps records with (toISOString), so a reader
+    # on either device parses the same instant.
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                         time.gmtime())
+
+
+def _sup_state_path():
+    return DATA_DIR / SUP_STATE_FILE
+
+
+def _sup_load():
+    global _sup_state
+    if _sup_state is None:
+        st = _mcp_read_json(_sup_state_path(), None)
+        if not isinstance(st, dict) or \
+                not isinstance(st.get("devices"), list):
+            st = {"enabled": False, "devices": []}
+        st["enabled"] = bool(st.get("enabled"))
+        _sup_state = st
+    return _sup_state
+
+
+def _sup_save():
+    _mcp_write_json(_sup_state_path(), _sup_load(),
+                    secret=True)
+
+
+def _sup_token_hash(tok):
+    return _hashlib.sha256(
+        str(tok).encode("utf-8")).hexdigest()
+
+
+def _sup_device_for(tok):
+    """The paired device a supervision token names,
+    or None. Honors the token only while pairing is
+    enabled; a stored pairing alone is not enough."""
+    if not tok:
+        return None
+    with _sup_lock:
+        st = _sup_load()
+        if not st["enabled"]:
+            return None
+        want = _sup_token_hash(tok)
+        for dev in st["devices"]:
+            if _secrets.compare_digest(
+                    str(dev.get("tokenHash", "")), want):
+                return dev
+    return None
+
+
+def _sup_public_status(dev=None):
+    st = _sup_load()
+    out = {"enabled": bool(st["enabled"]),
+           "tls": bool(TLS_STATE.get("active")),
+           "fingerprint": TLS_STATE.get("fingerprint")}
+    if dev is not None:
+        out["paired"] = True
+        out["device"] = {"id": dev.get("id"),
+                         "name": dev.get("name")}
+        return out
+    out["devices"] = [
+        {"id": d.get("id"), "name": d.get("name"),
+         "pairedAt": d.get("pairedAt"),
+         "lastSeen": d.get("lastSeen")}
+        for d in st["devices"]]
+    out["codeActive"] = bool(
+        _sup_code and _sup_code["expires"] > time.time())
+    out["codeExpiresIn"] = max(
+        0, int(_sup_code["expires"] - time.time())) \
+        if _sup_code else 0
+    return out
+
+
+def _sup_mint_code():
+    global _sup_code
+    code = "%06d" % _secrets.randbelow(1000000)
+    with _sup_lock:
+        _sup_code = {"hash": _sup_token_hash(code),
+                     "expires": time.time() + SUP_CODE_TTL,
+                     "attempts": 0}
+    return code
+
+
+def _sup_join(code, name):
+    """Exchange a one-time code for a device token.
+    Returns (token, device) or raises ValueError with
+    the refusal the phone may show its user."""
+    global _sup_code
+    with _sup_lock:
+        st = _sup_load()
+        if not st["enabled"]:
+            raise ValueError(
+                "phone pairing is off on this desktop; "
+                "turn on Allow phone pairing there first")
+        if not _sup_code or \
+                _sup_code["expires"] <= time.time():
+            _sup_code = None
+            raise ValueError(
+                "that pairing code has expired; ask the "
+                "desktop to show a new one")
+        if not _secrets.compare_digest(
+                _sup_token_hash(code or ""),
+                _sup_code["hash"]):
+            _sup_code["attempts"] += 1
+            if _sup_code["attempts"] >= \
+                    SUP_CODE_MAX_ATTEMPTS:
+                _sup_code = None
+                raise ValueError(
+                    "wrong pairing code, and too many "
+                    "tries: the code is gone. Ask the "
+                    "desktop to show a new one")
+            raise ValueError("wrong pairing code")
+        _sup_code = None
+        name = str(name or "").strip()[:60] or "Phone"
+        slug = _re_mod.sub(r"[^a-z0-9]+", "-",
+                           name.lower()).strip("-")[:24] \
+            or "phone"
+        dev = {"id": slug + "-" +
+               _secrets.token_hex(3),
+               "name": name,
+               "tokenHash": "",
+               "pairedAt": _sup_now(),
+               "lastSeen": _sup_now()}
+        token = _secrets.token_urlsafe(32)
+        dev["tokenHash"] = _sup_token_hash(token)
+        st["devices"].append(dev)
+        _sup_save()
+        return token, dev
+
+
+def _sup_unpair(device_id):
+    with _sup_lock:
+        st = _sup_load()
+        before = len(st["devices"])
+        st["devices"] = [d for d in st["devices"]
+                         if d.get("id") != device_id]
+        if len(st["devices"]) != before:
+            _sup_save()
+            return True
+    return False
 
 
 # LAN TLS (v2.38, design draft Oct 22, 2026; Ryan's six
@@ -7536,6 +7735,19 @@ class Handler(SimpleHTTPRequestHandler):
             return True
         if self.client_address[0] in ("127.0.0.1", "::1"):
             return True
+        # M10: the supervision join validates its own
+        # one-time code, like the G16 join above.
+        if path == "/api/supervision/join":
+            return True
+        # M10: a supervision token opens ONLY the
+        # supervision route set, and only while the
+        # host has phone pairing on (_sup_device_for
+        # checks the switch). It never substitutes
+        # for a G16 token anywhere else.
+        if (self.command, path) in SUPERVISION_ROUTES \
+                and _sup_device_for(self.headers.get(
+                    SUP_TOKEN_HEADER)) is not None:
+            return True
         import time as _time
         tok = self.headers.get("X-Pair-Token") or ""
         return pair_token_valid(tok, _time.time())
@@ -7602,6 +7814,255 @@ class Handler(SimpleHTTPRequestHandler):
             {"tls": bool(TLS_STATE["active"]),
              "fingerprint": TLS_STATE["fingerprint"]})
 
+    # ----- M10: phone supervision pairing -----
+    def _sup_caller(self):
+        return _sup_device_for(self.headers.get(
+            SUP_TOKEN_HEADER))
+
+    def _sup_host_only(self):
+        if self.client_address[0] in ("127.0.0.1",
+                                      "::1"):
+            return True
+        self.send_json(
+            {"error": "phone pairing is set up on the "
+                      "desktop itself"}, status=403)
+        return False
+
+    def _sup_status(self):
+        # The host reads the full picture (switch,
+        # devices, live code) on loopback. A paired
+        # phone learns only that it is paired, and as
+        # whom. Everyone else is refused flat.
+        if self.client_address[0] in ("127.0.0.1",
+                                      "::1"):
+            return self.send_json(_sup_public_status())
+        dev = self._sup_caller()
+        if dev is not None:
+            return self.send_json(_sup_public_status(dev))
+        return self.send_json(
+            {"error": "not paired"}, status=403)
+
+    def _sup_enable(self, body):
+        if not self._sup_host_only():
+            return
+        with _sup_lock:
+            st = _sup_load()
+            st["enabled"] = bool(body.get("enabled"))
+            _sup_save()
+        return self.send_json(_sup_public_status())
+
+    def _sup_code(self):
+        if not self._sup_host_only():
+            return
+        if not _sup_load()["enabled"]:
+            return self.send_json(
+                {"error": "turn on Allow phone pairing "
+                          "first"}, status=400)
+        code = _sup_mint_code()
+        return self.send_json(
+            {"code": code, "expiresIn": SUP_CODE_TTL})
+
+    def _sup_join(self, body):
+        try:
+            token, dev = _sup_join(
+                str(body.get("code") or ""),
+                body.get("name"))
+        except ValueError as e:
+            return self.send_json({"error": str(e)},
+                                  status=401)
+        return self.send_json(
+            {"ok": True, "token": token,
+             "device": {"id": dev["id"],
+                        "name": dev["name"]}})
+
+    def _sup_unpair(self, body):
+        dev = self._sup_caller()
+        if dev is not None:
+            _sup_unpair(dev["id"])
+            return self.send_json({"ok": True})
+        if self.client_address[0] in ("127.0.0.1",
+                                      "::1"):
+            if body.get("all"):
+                with _sup_lock:
+                    st = _sup_load()
+                    st["devices"] = []
+                    _sup_save()
+                return self.send_json({"ok": True})
+            if _sup_unpair(str(body.get("deviceId")
+                               or "")):
+                return self.send_json({"ok": True})
+            return self.send_json(
+                {"error": "no such paired device"},
+                status=404)
+        return self.send_json(
+            {"error": "not paired"}, status=403)
+
+    def _sup_followup(self, body):
+        # The S1 update path, narrowed: a paired phone
+        # may append a follow-up entry to a record's
+        # payload, and nothing else about the record.
+        # The desktop writes go through the same store
+        # (_validate_task/_save_task), so a follow-up
+        # can never smuggle a malformed record in.
+        dev = self._sup_caller()
+        if dev is None and self.client_address[0] \
+                not in ("127.0.0.1", "::1"):
+            return self.send_json(
+                {"error": "not paired"}, status=403)
+        task_id = str(body.get("taskId") or "")
+        text = str(body.get("text") or "").strip()
+        if not text:
+            return self.send_json(
+                {"error": "the follow-up is empty"},
+                status=400)
+        if len(text) > SUP_FOLLOWUP_CHARS:
+            return self.send_json(
+                {"error": "the follow-up is too long "
+                          "(%d characters at most)"
+                          % SUP_FOLLOWUP_CHARS},
+                status=400)
+        try:
+            path = _task_path(task_id)
+            with open(path, "rb") as f:
+                raw = f.read()
+            rec = _validate_task(
+                json.loads(raw.decode("utf-8")),
+                len(raw))
+        except FileNotFoundError:
+            return self.send_json(
+                {"error": "no such task record"},
+                status=404)
+        except ValueError as e:
+            return self.send_json({"error": str(e)},
+                                  status=400)
+        payload = rec.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+            rec["payload"] = payload
+        followups = payload.get("followups")
+        if not isinstance(followups, list):
+            followups = []
+        if len(followups) >= SUP_FOLLOWUP_MAX:
+            return self.send_json(
+                {"error": "this task already has %d "
+                          "follow-ups; no more fit"
+                          % SUP_FOLLOWUP_MAX},
+                status=400)
+        followups.append(
+            {"at": _sup_now(),
+             "from": dev["name"] if dev
+             else "This desktop",
+             "text": text})
+        payload["followups"] = followups
+        rec["updatedAt"] = _sup_now()
+        try:
+            _save_task(rec, len(json.dumps(rec)
+                                .encode("utf-8")),
+                       must_exist=True)
+        except ValueError as e:
+            return self.send_json({"error": str(e)},
+                                  status=400)
+        return self.send_json(
+            {"ok": True, "followups": len(followups)})
+
+    def _sup_review(self, parsed):
+        # The D2 review data for one task, computed on
+        # the desktop: the run record names the
+        # checkpoint; the checkpoint holds each changed
+        # file's original; the diff is built here so a
+        # supervision token never becomes a file read.
+        dev = self._sup_caller()
+        if dev is None and self.client_address[0] \
+                not in ("127.0.0.1", "::1"):
+            return self.send_json(
+                {"error": "not paired"}, status=403)
+        qs = urllib.parse.parse_qs(parsed.query)
+        task_id = (qs.get("taskId") or [""])[0]
+        try:
+            path = _task_path(task_id)
+            with open(path, "rb") as f:
+                raw = f.read()
+            rec = _validate_task(
+                json.loads(raw.decode("utf-8")),
+                len(raw))
+        except FileNotFoundError:
+            return self.send_json(
+                {"error": "no such task record"},
+                status=404)
+        except ValueError as e:
+            return self.send_json({"error": str(e)},
+                                  status=400)
+        payload = rec.get("payload") \
+            if isinstance(rec.get("payload"), dict) \
+            else {}
+        run_id = payload.get("runId")
+        run = None
+        if run_id:
+            try:
+                rp = _agent_run_path(str(run_id))
+                if rp.is_file():
+                    run = json.loads(
+                        rp.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                run = None
+        files = []
+        if run is not None:
+            originals = {}
+            ckpt = run.get("checkpoint")
+            if ckpt:
+                try:
+                    with open(safe_path(ckpt),
+                              encoding="utf-8") as f:
+                        saved = json.load(f)
+                    if isinstance(saved, dict):
+                        originals = saved.get(
+                            "originals") or {}
+                except (OSError, ValueError):
+                    originals = {}
+            for ch in run.get("filesChanged") or []:
+                entry = {"path": ch.get("path"),
+                         "kind": ch.get("kind"),
+                         "diff": None}
+                p = ch.get("path")
+                if p in originals:
+                    before = originals[p]
+                    if before is None:
+                        before = ""
+                    try:
+                        with open(safe_path(p),
+                                  encoding="utf-8",
+                                  errors="replace") as f:
+                            after = f.read()
+                    except OSError:
+                        after = ""
+                    diff = "\n".join(_difflib
+                        .unified_diff(
+                            str(before).splitlines(),
+                            after.splitlines(),
+                            fromfile="before",
+                            tofile="after",
+                            lineterm=""))
+                    if len(diff) > 20000:
+                        diff = diff[:20000] + \
+                            "\n(diff cut off at 20,000 " \
+                            "characters)"
+                    entry["diff"] = diff
+                files.append(entry)
+                if len(files) >= 20:
+                    break
+        return self.send_json(
+            {"task": {"id": rec["id"],
+                      "title": rec["title"],
+                      "status": rec["status"]},
+             "run": ({"id": run.get("id"),
+                      "outcome": run.get("outcome"),
+                      "summary": run.get("summary"),
+                      "steps": run.get("steps"),
+                      "approvals": run.get(
+                          "approvals")}
+                     if run is not None else None),
+             "files": files})
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         try:
@@ -7613,6 +8074,10 @@ class Handler(SimpleHTTPRequestHandler):
                 return _trust_denied(self)
             if parsed.path == "/api/pair/code":
                 return self._pair_code()
+            if parsed.path == "/api/supervision/status":
+                return self._sup_status()
+            if parsed.path == "/api/supervision/review":
+                return self._sup_review(parsed)
             if parsed.path == "/api/pair/certfp":
                 return self._pair_certfp()
             if parsed.path == "/api/pair/policy":
@@ -8395,6 +8860,16 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._pair_policy("POST")
             if parsed.path == "/api/pair/revoke":
                 return self._pair_revoke()
+            if parsed.path == "/api/supervision/enable":
+                return self._sup_enable(self.read_json())
+            if parsed.path == "/api/supervision/code":
+                return self._sup_code()
+            if parsed.path == "/api/supervision/join":
+                return self._sup_join(self.read_json())
+            if parsed.path == "/api/supervision/unpair":
+                return self._sup_unpair(self.read_json())
+            if parsed.path == "/api/supervision/followup":
+                return self._sup_followup(self.read_json())
             if parsed.path == "/api/pair/join":
                 import time as _time
                 ip = self.client_address[0]

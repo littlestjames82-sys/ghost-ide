@@ -68,14 +68,16 @@ ck("S1 writer: postRunRecord is the one writer of " +
    src.includes("the ONE writer of run-derived task "
      + "records"));
 ck("S1 panel: the Tasks panel, its parts and the " +
-   "tools entry are in the page",
+   "tools entry are in the page (M10: the overlay " +
+   "list no longer ends at tasksPanel; " +
+   "supervisionPanel follows it)",
    html.includes('id="tasksPanel"') &&
    html.includes('id="tasksList"') &&
    html.includes('id="taskDetail"') &&
    html.includes('id="taskImportBtn"') &&
    html.includes('id="taskImportFile"') &&
    html.includes('id="toolTasks"') &&
-   src.includes('"tasksPanel"]') &&
+   src.includes('"tasksPanel",') &&
    src.includes('$("toolTasks")') &&
    css.includes("#tasksPanel"));
 ck("S1 honesty: the record-only label is written out, "

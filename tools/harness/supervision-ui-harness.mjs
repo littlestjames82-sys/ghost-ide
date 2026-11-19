@@ -69,11 +69,15 @@ ck("M2 bundle: block markers, hook, and the census " +
    app.includes("__ghostSupervision"));
 ck("M2 wiring: the record is created at run start, "
    + "synced at step boundaries, and finished by "
-   + "updating the same record",
+   + "updating the same record (M10: the final "
+   + "write's task fields now read through liveRec, "
+   + "which is sup.rec on the phone exactly as "
+   + "before, or the desktop's pairing record)",
    src.includes("taskRecordCreate(sup.rec)") &&
    src.includes("if (sup) supSync();") &&
    src.includes('postJson("/api/tasks/update", task)') &&
-   src.includes("taskId: sup ? sup.rec.id : undefined") &&
+   src.includes("const liveRec = sup ? sup.rec") &&
+   src.includes("taskId: liveRec ? liveRec.id : undefined") &&
    src.includes("await sup.chain"));
 ck("M2 wiring: approvals save the waiting state "
    + "before the loop parks, on both approval paths",
