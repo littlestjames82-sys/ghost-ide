@@ -4,6 +4,27 @@ GhostIDE desktop and Android ship on one version train. The
 in-app changelog (Settings, then About) carries the full
 193-entry history; this file covers the current run.
 
+## 3.27.0 — Nov 23, 2026 — In-app update check (Android)
+
+- The Android app now checks for its own updates. A
+  sideloaded app gets no store updates, so once a day,
+  and whenever you press the check button in Settings,
+  it reads the small android-latest.json manifest on
+  the downloads host and compares version codes with
+  the installed build.
+- A newer build raises a banner in the app: Download
+  opens the new APK in your browser (install it over
+  this build to update), Later snoozes that one
+  version, Dismiss closes the banner. The app itself
+  never downloads or installs anything.
+- Every failure is silent on the automatic check and
+  plainly spoken on a manual one ("You are up to
+  date", "Update available", or "Could not reach the
+  update server"). The desktop train is unchanged: it
+  keeps its own update check and never shows APK
+  notices. This release closes Mobile Cycle 1 (M1
+  viewport gate, M3 symbol row, M5 update check).
+
 ## 3.26.0 — Nov 18, 2026 — Desktop pairing
 
 - A phone can now pair with a desktop as its supervisor:

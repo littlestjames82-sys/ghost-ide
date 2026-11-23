@@ -1,10 +1,10 @@
 {
- "apkUrl": "https://downloads.ghostdeveloperstudio.com/ghostide/ghostide-v3.26.0.apk",
- "notes": "Mobile Cycle 3 (M10): desktop pairing. A phone pairs with a desktop through a one-time code and supervises its task records, run changes, and waiting approvals from the Desktop supervision panel; follow-ups land on the task record and, for a live run, in the run at its next step. The desktop executes everything; the phone only watches and decides.",
+ "apkUrl": "https://downloads.ghostdeveloperstudio.com/ghostide/ghostide-v3.27.0.apk",
+ "notes": "Mobile Cycle 1 (M5): the in-app update check, closing Mobile Cycle 1. The app now checks this manifest once a day and from Settings; a newer build raises a banner with Download (opens the APK in your browser), Later (snoozes that version) and Dismiss. Nothing downloads or installs itself.",
  "notesUrl": "https://ghostdeveloperstudio.com/ghost-ide/",
- "publishedAt": "2026-11-19T01:14:42Z",
- "sha256": "af51b1a8fa713f0c5b19a7a8987cdd81360c7708d56aebcd9f98d0be70e73dd9",
- "sizeBytes": 20529769,
- "version": "3.26.0",
- "versionCode": 225
+ "publishedAt": "2026-11-23T19:37:52Z",
+ "sha256": "63026729e075b33ec51b5e0e59df19818f885396845d4ae53f04df31b705f85b",
+ "sizeBytes": 20529843,
+ "version": "3.27.0",
+ "versionCode": 226
 }

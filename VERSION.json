@@ -1,14 +1,1 @@
-{
-  "android": {
-    "version": "3.26.0",
-    "versionCode": 225
-  },
-  "desktop": {
-    "manifest": "https://downloads.ghostdeveloperstudio.com/latest.json",
-    "version": "3.26.0"
-  },
-  "latest": "3.26.0",
-  "notes": "3.26.0: Mobile Cycle 3 (M10) - desktop pairing and the supervision client. A phone pairs with a desktop through a one-time code and supervises its task records, run changes, and waiting approvals; follow-ups land on the record and in a live run at its next step.",
-  "url": "https://github.com/littlestjames82-sys/ghost-ide/releases",
-  "version": "3.26.0"
-}
+{"android":{"version":"3.27.0","versionCode":226},"desktop":{"manifest":"https://downloads.ghostdeveloperstudio.com/latest.json","version":"3.27.0"},"latest":"3.27.0","notes":"3.27.0: Mobile Cycle 1 (M5) - the in-app update check, closing Mobile Cycle 1. On Android the app checks the downloads manifest once a day and whenever you ask in Settings; a newer build raises a banner in the app chrome: Download opens the APK link in your browser, Later snoozes that one version, Dismiss closes it. Nothing downloads or installs itself, and the desktop train stays silent (it has its own updater).","url":"https://github.com/littlestjames82-sys/ghost-ide/releases","version":"3.27.0"}

@@ -154,91 +154,91 @@ ck("M5 url: loopback override honoured, junk " +
    overrideUrl === "http://127.0.0.1:9999/fixture.json" &&
    junkUrl === api.APK_UPDATE_MANIFEST_URL);
 
-const CUR = 224;
+const CUR = 225;
 const manifest = (code, extra) => JSON.stringify(
-  Object.assign({ version: "3.26.0", versionCode: code,
-    apkUrl: "https://downloads.ghostdeveloperstudio.com/ghostide/ghostide-v3.26.0.apk",
+  Object.assign({ version: "3.27.0", versionCode: code,
+    apkUrl: "https://downloads.ghostdeveloperstudio.com/ghostide/ghostide-v3.27.0.apk",
     sizeBytes: 20513387, sha256: "a".repeat(64),
     publishedAt: "2026-11-18T00:00:00Z" }, extra || {}));
 ck("M5 evaluate: a higher code is a notice with " +
    "the manifest's version and URL",
    (() => { const n = apkUpdateEvaluate(
-     JSON.parse(manifest(225)), CUR);
-     return !!n && n.version === "3.26.0" &&
-       n.versionCode === 225 &&
-       n.apkUrl.endsWith("ghostide-v3.26.0.apk"); })());
+     JSON.parse(manifest(226)), CUR);
+     return !!n && n.version === "3.27.0" &&
+       n.versionCode === 226 &&
+       n.apkUrl.endsWith("ghostide-v3.27.0.apk"); })());
 ck("M5 evaluate: equal and lower codes are silent",
-   apkUpdateEvaluate(JSON.parse(manifest(224)), CUR) === null &&
+   apkUpdateEvaluate(JSON.parse(manifest(225)), CUR) === null &&
    apkUpdateEvaluate(JSON.parse(manifest(200)), CUR) === null);
 ck("M5 evaluate: malformed manifests are silent",
    apkUpdateEvaluate(null, CUR) === null &&
    apkUpdateEvaluate({}, CUR) === null &&
-   apkUpdateEvaluate(JSON.parse(manifest("224")), CUR) === null &&
-   apkUpdateEvaluate(JSON.parse(manifest(221,
+   apkUpdateEvaluate(JSON.parse(manifest("225")), CUR) === null &&
+   apkUpdateEvaluate(JSON.parse(manifest(222,
      { apkUrl: "http://example.com/x.apk" })), CUR) === null &&
-   apkUpdateEvaluate(JSON.parse(manifest(226)), 0) === null);
+   apkUpdateEvaluate(JSON.parse(manifest(227)), 0) === null);
 
 let fetches = 0;
 const fx = (resp) => async () => { fetches++; return resp; };
 const T0 = 1763424000000;
 store.clear();
 let r = await apkUpdateRun({ manual: false, now: T0,
-  currentCode: CUR, currentVersion: "3.25.0",
-  fetchText: fx({ status: 200, text: manifest(225) }) });
+  currentCode: CUR, currentVersion: "3.26.0",
+  fetchText: fx({ status: 200, text: manifest(226) }) });
 ck("M5 run: higher fixture notifies and stamps " +
    "the check time",
-   !!r.notice && r.notice.versionCode === 225 &&
+   !!r.notice && r.notice.versionCode === 226 &&
    fetches === 1 && apkUpdateState().lastCheck === T0);
 r = await apkUpdateRun({ manual: false, now: T0 + 3600000,
-  currentCode: CUR, currentVersion: "3.25.0",
-  fetchText: fx({ status: 200, text: manifest(226) }) });
+  currentCode: CUR, currentVersion: "3.26.0",
+  fetchText: fx({ status: 200, text: manifest(227) }) });
 ck("M5 run: an automatic check inside a day is " +
    "skipped without fetching",
    r.skipped === true && fetches === 1);
 r = await apkUpdateRun({ manual: true, now: T0 + 3600000,
-  currentCode: CUR, currentVersion: "3.25.0",
-  fetchText: fx({ status: 200, text: manifest(224) }) });
+  currentCode: CUR, currentVersion: "3.26.0",
+  fetchText: fx({ status: 200, text: manifest(225) }) });
 ck("M5 run: a manual check bypasses the throttle; " +
    "equal is up to date",
    !r.skipped && !r.notice && !r.error && fetches === 2 &&
-   apkUpdateManualMessage(r, "3.25.0") ===
-     "You are up to date (3.25.0).");
+   apkUpdateManualMessage(r, "3.26.0") ===
+     "You are up to date (3.26.0).");
 r = await apkUpdateRun({ manual: true, now: T0 + 7200000,
-  currentCode: CUR, currentVersion: "3.25.0",
+  currentCode: CUR, currentVersion: "3.26.0",
   fetchText: fx({ status: 404, text: "not found" }) });
 ck("M5 run: 404 is an error with no notice (silent " +
    "automatically, plain when manual)",
    !!r.error && !r.notice &&
-   apkUpdateManualMessage(r, "3.25.0").startsWith(
+   apkUpdateManualMessage(r, "3.26.0").startsWith(
      "Could not reach the update server."));
 r = await apkUpdateRun({ manual: true, now: T0 + 10800000,
-  currentCode: CUR, currentVersion: "3.25.0",
+  currentCode: CUR, currentVersion: "3.26.0",
   fetchText: fx({ status: 200, text: "{not json" }) });
 ck("M5 run: malformed JSON is an error, no notice",
    !!r.error && !r.notice);
 r = await apkUpdateRun({ manual: true, now: T0 + 14400000,
-  currentCode: CUR, currentVersion: "3.25.0",
+  currentCode: CUR, currentVersion: "3.26.0",
   fetchText: async () => { throw new Error("offline"); } });
 ck("M5 run: a thrown fetch is an error, no notice",
    !!r.error && !r.notice);
 const st = apkUpdateState();
-st.snoozedCode = 225;
+st.snoozedCode = 226;
 saveApkUpdateState(st);
 r = await apkUpdateRun({ manual: true, now: T0 + 18000000,
-  currentCode: CUR, currentVersion: "3.25.0",
-  fetchText: fx({ status: 200, text: manifest(225) }) });
+  currentCode: CUR, currentVersion: "3.26.0",
+  fetchText: fx({ status: 200, text: manifest(226) }) });
 const snoozedSilent = !r.notice && !r.error;
 r = await apkUpdateRun({ manual: true, now: T0 + 21600000,
-  currentCode: CUR, currentVersion: "3.25.0",
-  fetchText: fx({ status: 200, text: manifest(226) }) });
+  currentCode: CUR, currentVersion: "3.26.0",
+  fetchText: fx({ status: 200, text: manifest(227) }) });
 ck("M5 run: the snoozed version stays silent, " +
    "the next one notifies",
    snoozedSilent && !!r.notice &&
-   r.notice.versionCode === 226);
+   r.notice.versionCode === 227);
 ck("M5 message: a notice reads as an update with " +
    "its version",
-   apkUpdateManualMessage(r, "3.25.0") ===
-     "Update available: GhostIDE v3.26.0 is ready to download.");
+   apkUpdateManualMessage(r, "3.26.0") ===
+     "Update available: GhostIDE v3.27.0 is ready to download.");
 
 console.log("APKUPDATE (M5): " + passed +
   " passed, " + failed + " failed");
