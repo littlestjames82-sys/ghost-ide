@@ -33,6 +33,11 @@ class FakeHeaders:
 
 def fake_handler(ip, token=None):
     h = mod.Handler.__new__(mod.Handler)
+    # A real Handler always carries the request method
+    # by the time the gate runs (the M10 supervision
+    # check in _pair_gate is method-aware); the fake
+    # must declare one or the gate crashes on it.
+    h.command = "GET"
     h.client_address = (ip, 50000)
     h.headers = FakeHeaders(token)
     sent = {}
